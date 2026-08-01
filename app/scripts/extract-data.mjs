@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 /**
- * One-shot recovery tool: lifts the course content out of the shipped single-file
- * bundle (`src/course.html`) and writes it back as readable TypeScript modules,
- * one per phase.
+ * One-shot recovery tool: lifts the course content out of a shipped single-file
+ * bundle and writes it back as readable TypeScript modules, one per phase.
  *
  * The bundle's minified JS keeps the course data as plain object literals, so it
  * can be evaluated in a sandbox and re-serialised. Kept in the repo as the audit
  * trail for how `app/src/data/` was produced; it is not part of the build.
  *
- *   node scripts/extract-data.mjs [--bundle ../src/course.html] [--out src/data]
+ *   node scripts/extract-data.mjs --bundle path/to/course.html [--out src/data]
+ *
+ * `--bundle` is required: the repo keeps no reference bundle, since course.html is
+ * a build output and `lib/bundle-data.mjs` reads only the original minified format.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -25,7 +27,13 @@ const argOf = (flag, fallback) => {
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
 
-const bundlePath = path.resolve(appRoot, argOf("--bundle", "../src/course.html"));
+const bundleArg = argOf("--bundle", null);
+if (!bundleArg) {
+  console.error("usage: node scripts/extract-data.mjs --bundle path/to/course.html");
+  console.error("       needs an original minified bundle; a current build will not parse.");
+  process.exit(2);
+}
+const bundlePath = path.resolve(appRoot, bundleArg);
 const outDir = path.resolve(appRoot, argOf("--out", "src/data"));
 
 /** Phase id in the bundle -> slug used for the generated file name. */

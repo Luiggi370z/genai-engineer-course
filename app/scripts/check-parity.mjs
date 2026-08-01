@@ -4,10 +4,10 @@
  * bundle: bundles `src/data/` with esbuild, imports it, and deep-compares every
  * phase against the data recovered from the reference HTML.
  *
- * Run this *before* replacing `src/course.html` with a fresh build — once the
- * old bundle is gone there is nothing left to compare against.
+ *   node scripts/check-parity.mjs --bundle path/to/course.html
  *
- *   node scripts/check-parity.mjs [--bundle ../src/course.html]
+ * `--bundle` is required and has no default: the repo keeps no reference bundle,
+ * since course.html is a build output. Point it at an archived original.
  *
  * Phases added after the reconstruction are reported as new, not as failures;
  * only the seven original phases must match byte for byte.
@@ -31,7 +31,13 @@ const argOf = (flag, fallback) => {
   const i = args.indexOf(flag);
   return i >= 0 && args[i + 1] ? args[i + 1] : fallback;
 };
-const bundlePath = path.resolve(appRoot, argOf("--bundle", "../src/course.html"));
+const bundleArg = argOf("--bundle", null);
+if (!bundleArg) {
+  console.error("usage: node scripts/check-parity.mjs --bundle path/to/course.html");
+  console.error("       needs an original minified bundle; a current build will not parse.");
+  process.exit(2);
+}
+const bundlePath = path.resolve(appRoot, bundleArg);
 
 const problems = [];
 const notes = [];

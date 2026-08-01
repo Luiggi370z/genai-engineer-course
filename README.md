@@ -49,8 +49,9 @@ optional everywhere, for when you want to see the difference.
 ## Start here
 
 ```bash
-# 1. Open the course. It is one self-contained file — no server, no build, no network.
-open src/course.html
+# 1. Open the workbook — the course.html that came with the release. It is one
+#    self-contained file: no server, no build, no network.
+open course.html
 
 # 2. Install the toolchain and pull the models the course uses.
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -66,6 +67,10 @@ make check                    # green: lint, types and tests
 
 Two more models (`qwen3-coder:30b` for the Phase 3 judge, `llama-guard3:8b` for the
 Phase 6 guardrails) are worth pulling when you reach those phases rather than now.
+
+The workbook is a build output, not a file in this repo. If you cloned instead of
+downloading the release, build it yourself — that needs Node, which nothing else in
+the course does: `cd app && pnpm install && pnpm ship` writes `dist/course.html`.
 
 Your progress in `course.html` is saved in the browser's `localStorage`, so tick things
 off as you go — but keep in mind it lives in that one browser on that one machine.
@@ -150,12 +155,12 @@ fortnight. Those are very different numbers and the course is careful never to b
 
 ## What is in this repo
 
-- **[`src/`](src/README.md)** — the companion code: every `before/`+`after/` lesson pair,
-  the nine workshop briefs, and `course.html` itself. This is the part you work in.
+- **[`src/`](src/README.md)** — the companion code: every `before/`+`after/` lesson pair
+  and the nine workshop briefs. This is the part you work in.
 - **[`app/`](app/README.md)** — the source of the course app. Only interesting if you
   want to change the course; students never need it. React and TypeScript, building to
-  that single HTML file, with three gates (alignment, integrity, density) that content
-  has to pass before it can ship.
+  the single `course.html`, with three gates (alignment, integrity, density) that
+  content has to pass before it can ship.
 
 ## License
 

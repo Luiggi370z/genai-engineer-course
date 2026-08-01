@@ -10,7 +10,7 @@ open straight from disk: no server, no network (fonts aside), progress in
 pnpm install
 pnpm dev            # dev server with HMR
 pnpm build          # -> dist/course.html (single file, JS + CSS inlined)
-pnpm ship           # build, then copy over ../src/course.html
+pnpm ship           # build, then copy to ../dist/course.html (the deliverable)
 pnpm lint           # biome (lint + format check)
 pnpm format         # biome --write
 pnpm typecheck      # tsc --noEmit
@@ -18,7 +18,7 @@ pnpm test           # node --test: every gate rule, each proved to fire
 pnpm check-alignment          # does the phase teach what it tests
 pnpm check-integrity          # is the data well-formed
 pnpm check-density            # can a human read it
-pnpm check-parity   # content in src/data == content in a reference bundle
+pnpm check-parity --bundle path/to/course.html   # src/data == a reference bundle
 node scripts/screenshot.mjs   # every block kind, light and dark (see below)
 ```
 
@@ -143,3 +143,8 @@ from the shipped `course.html` with `scripts/extract-data.mjs` and the UI rebuil
 from it. `scripts/check-parity.mjs` deep-compares `src/data/` against a reference
 bundle and was used to prove the rebuild kept every character of content; run it
 against an older `course.html` any time you want that assurance again.
+
+Both take `--bundle` and no longer default to a path, because the repo keeps no
+reference bundle: `course.html` is a build output now, and `lib/bundle-data.mjs`
+parses only the original minified format, which a current build is not. Point them
+at an archived copy of the original.
