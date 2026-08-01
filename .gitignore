@@ -3,6 +3,9 @@ docs/
 # pnpm
 .pnpm-store/
 
+# cursor
+.cursor/
+
 # macOS
 .DS_Store
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds the two things a student receives.
+# Builds the three things a student receives.
 #
+#   dist/README.md                         how to start, from release/README.md
 #   dist/course.html                       the workbook, one self-contained file
 #   dist/genai-engineer-workbook-src.zip   the companion repo, source only
 #
@@ -23,8 +24,9 @@ cd "$(dirname "$0")"
 NAME="genai-engineer-workbook-src"
 OUT="dist"
 
-# `pnpm ship` writes dist/course.html itself, so the loose deliverable is a build
-# output rather than a file committed under src/ — the zip is source only.
+# `pnpm ship` writes dist/course.html and dist/README.md itself, so the loose
+# deliverables are build outputs rather than files committed under src/ — the zip is
+# source only.
 echo "==> Building the workbook"
 (cd app && pnpm ship)
 
@@ -57,6 +59,7 @@ fi
 
 lessons=$(unzip -l "$OUT/$NAME.zip" | grep -c 'pyproject\.toml$' || true)
 echo
+echo "  $OUT/README.md           $(du -h "$OUT/README.md" | cut -f1)"
 echo "  $OUT/course.html         $(du -h "$OUT/course.html" | cut -f1)"
 echo "  $OUT/$NAME.zip  $(du -h "$OUT/$NAME.zip" | cut -f1)"
 echo "  $((lessons / 2)) lesson pairs · no build artifacts"

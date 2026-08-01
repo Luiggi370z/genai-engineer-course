@@ -10,7 +10,7 @@ open straight from disk: no server, no network (fonts aside), progress in
 pnpm install
 pnpm dev            # dev server with HMR
 pnpm build          # -> dist/course.html (single file, JS + CSS inlined)
-pnpm ship           # build, then copy to ../dist/course.html (the deliverable)
+pnpm ship           # build, then copy the bundle + ../release/README.md into ../dist/
 pnpm lint           # biome (lint + format check)
 pnpm format         # biome --write
 pnpm typecheck      # tsc --noEmit

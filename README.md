@@ -161,6 +161,8 @@ fortnight. Those are very different numbers and the course is careful never to b
   want to change the course; students never need it. React and TypeScript, building to
   the single `course.html`, with three gates (alignment, integrity, density) that
   content has to pass before it can ship.
+- **[`release/`](release/README.md)** — what goes in the release next to the workbook.
+  Currently the student-facing README that `pnpm ship` copies into `dist/`.
 
 ## License
 

@@ -18,7 +18,7 @@
     "check-alignment": "node scripts/check-alignment.mjs",
     "check-integrity": "node scripts/check-integrity.mjs",
     "check-density": "node scripts/check-density.mjs",
-    "ship": "pnpm build && mkdir -p ../dist && cp dist/course.html ../dist/course.html"
+    "ship": "pnpm build && mkdir -p ../dist && cp dist/course.html ../dist/course.html && cp ../release/README.md ../dist/README.md"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.2.3",
