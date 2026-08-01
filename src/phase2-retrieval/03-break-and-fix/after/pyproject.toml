@@ -1,0 +1,28 @@
+[project]
+name = "break-and-fix-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "qdrant-client>=1.12,<2",
+  "pytest>=8,<9",
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+integration = ["fastembed>=0.4,<1"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs model downloads (make test-integration)"]

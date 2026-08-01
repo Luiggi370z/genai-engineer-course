@@ -1,0 +1,28 @@
+[project]
+name = "golden-set-before"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "rapidfuzz>=3.9,<4",   # near-duplicate + leakage detection, offline and fast
+  "pytest>=8,<9",
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src"]
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs a judge model via Ollama (make test-integration)"]

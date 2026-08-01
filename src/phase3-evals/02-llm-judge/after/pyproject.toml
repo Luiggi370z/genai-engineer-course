@@ -1,0 +1,38 @@
+[project]
+name = "llm-judge-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pytest>=8,<9",        # the fast tier needs nothing else: the judge is injected
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The judged tier. Heavy tree (RAGAS wraps LangChain) + needs a judge model, so it
+# is opt-in: `make test-integration` with Ollama running.
+# Verified against ragas 0.4.3 on 2026-07-31 — pin narrowly, upgrade deliberately.
+integration = [
+  "ragas>=0.4,<0.5",
+  "openai>=1.60,<3",
+  # Not optional: ragas.llms.base imports langchain_community.chat_models.vertexai,
+  # which langchain-community 0.4 removed. Unpinned, the judged tier dies on import
+  # with ModuleNotFoundError. Pinned as a known-good pair — see README.
+  "langchain-community>=0.3.27,<0.4",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src"]
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs a judge model via Ollama (make test-integration)"]

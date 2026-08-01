@@ -1,0 +1,28 @@
+[project]
+name = "cost-latency-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pytest>=8,<9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+# fastembed lives in the integration group, so the fast tier does not install it.
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs a real embedding model (downloads ONNX weights)"]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+integration = ["fastembed>=0.4,<1"]

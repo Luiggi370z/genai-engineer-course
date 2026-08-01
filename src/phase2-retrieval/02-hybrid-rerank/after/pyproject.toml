@@ -1,0 +1,31 @@
+[project]
+name = "hybrid-rerank-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "qdrant-client>=1.12,<2",   # the vector DB — runs in-memory for tests, Docker in prod
+  "rank-bm25>=0.2.2,<1",      # classic BM25, pure Python (the simple keyword arm)
+  "pytest>=8,<9",
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# Real local models (ONNX, no API keys). Downloads weights on first use (~90MB),
+# so these tests are opt-in: `make test-integration`.
+integration = ["fastembed>=0.4,<1"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs model downloads (run with make test-integration)"]

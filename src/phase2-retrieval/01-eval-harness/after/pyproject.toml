@@ -1,0 +1,30 @@
+[project]
+name = "eval-harness-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "rapidfuzz>=3.9,<4",   # real, offline string-similarity lib for the fast CI gate
+  "pytest>=8,<9",
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The real deal: RAGAS with an LLM judge. Heavy dep tree + needs a judge model,
+# so it's opt-in: `make test-integration` (needs Ollama running).
+integration = ["ragas>=0.2,<1", "langchain-openai>=0.2,<1"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs a judge model via Ollama (make test-integration)"]

@@ -1,0 +1,30 @@
+[project]
+name = "model-bench-before"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.7,<3",
+  "pytest>=8,<9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+# The OpenAI SDK lives in the integration group, so the fast tier does not install it.
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["src"]
+markers = ["integration: needs a live model (ollama serve)"]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The live tier needs a real SDK; the fast tier never imports it.
+integration = ["openai>=1.40,<3"]

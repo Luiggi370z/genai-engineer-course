@@ -1,0 +1,78 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+@import "tailwindcss";
+
+/* Theme is switched by a class on the app root, not by the OS preference alone. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * The design system is an "engineer's lab notebook": paper, ink, graphite.
+ * Colours are declared as custom properties so the utilities resolve them per
+ * element — that is what lets a `.dark` wrapper repaint the whole tree.
+ */
+@theme {
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-paper: #f6f7f4;
+  --color-ink: #1c2422;
+  --color-graphite: #5a6663;
+  --color-card: #ffffff;
+  --color-line: #e2e5e0;
+
+  /* Fixed accents that are not part of the paper/ink scale. */
+  --color-signal-red: #d45a4e;
+  --color-signal-green: #3e8e68;
+  --color-signal-amber: #c98a2b;
+  --color-terminal-bg: #202624;
+  --color-terminal-bar: #171c1a;
+  --color-terminal-fg: #d8ded9;
+  --color-terminal-comment: #7a8a80;
+  --color-terminal-string: #a8c8a0;
+  --color-terminal-keyword: #8fb6e8;
+}
+
+.light {
+  --color-paper: #f6f7f4;
+  --color-ink: #1c2422;
+  --color-graphite: #5a6663;
+  --color-card: #ffffff;
+  --color-line: #e2e5e0;
+}
+
+.dark {
+  --color-paper: #111413;
+  --color-ink: #e9edea;
+  --color-graphite: #9ea8a3;
+  --color-card: #1c211f;
+  --color-line: #3e4642;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+}
+
+/* Faint engineering-paper grid behind the whole app. */
+.grid-bg {
+  background-color: var(--color-paper);
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--color-ink) 4.5%, transparent) 1px, transparent 1px),
+    linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--color-ink) 4.5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 28px 28px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    /* biome-ignore-start lint/complexity/noImportantStyles: an accessibility
+       reset has to win against every utility class it is overriding */
+    transition: none !important;
+    animation: none !important;
+    /* biome-ignore-end lint/complexity/noImportantStyles: see above */
+  }
+}

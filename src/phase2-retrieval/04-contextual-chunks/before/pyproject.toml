@@ -1,0 +1,30 @@
+[project]
+name = "contextual-chunks-before"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "langchain-text-splitters>=0.3,<1",  # the splitter everyone actually uses
+  "pytest>=8,<9",
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# Real local summarizer via Ollama's OpenAI-compatible endpoint.
+integration = ["openai>=1.40,<3"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src"]
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs Ollama running (make test-integration)"]

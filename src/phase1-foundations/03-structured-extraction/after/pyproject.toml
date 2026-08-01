@@ -1,0 +1,27 @@
+[project]
+name = "structured-extraction-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "openai>=1.40,<3",
+  "instructor>=1.5,<2",
+  "pydantic>=2.7,<3",
+  "pytest>=8,<9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]

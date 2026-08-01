@@ -1,0 +1,22 @@
+# The whole stack, one command: assistant + MCP + Qdrant + Ollama. Zero API keys.
+services:
+  assistant:
+    build: ./assistant
+    depends_on: [mcp, qdrant, ollama]
+    environment:
+      - MCP_URL=http://mcp:8080
+      - QDRANT_URL=http://qdrant:6333
+      - OLLAMA_URL=http://ollama:11434
+    ports: ["8000:8000"]
+  mcp:
+    build: ./mcp-server
+    ports: ["8080:8080"]
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports: ["6333:6333"]
+  ollama:
+    image: ollama/ollama:latest
+    ports: ["11434:11434"]
+    volumes: ["ollama:/root/.ollama"]
+volumes:
+  ollama:

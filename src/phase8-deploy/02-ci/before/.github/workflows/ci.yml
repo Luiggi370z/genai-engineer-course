@@ -1,0 +1,17 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: make test          # unit + integration
+      - run: make eval          # RAGAS smoke: fails if faithfulness < 0.85
+  safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: make redteam       # fails if any gated tool fires unapproved
+# Make BOTH jobs required in branch protection: no green, no merge.

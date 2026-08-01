@@ -1,0 +1,35 @@
+[project]
+name = "memory-frameworks-after"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "pytest>=8,<9",   # the fast tier needs nothing else: the adapters are injected
+]
+
+[dependency-groups]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The rented implementations. Opt-in: both pull heavy trees, both want a local model.
+# Verified on 2026-07-31 — pin narrowly, upgrade deliberately, read the release notes.
+integration = [
+  "mem0ai>=2.0,<3",
+  "langmem>=0.0.30,<0.1",
+  "langchain-ollama>=1.0,<2",
+  "fastembed>=0.4,<1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src"]
+reportMissingImports = "none"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+pythonpath = ["."]
+markers = ["integration: needs mem0 + langmem and a local model (make test-integration)"]

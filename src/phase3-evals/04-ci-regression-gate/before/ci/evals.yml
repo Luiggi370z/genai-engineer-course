@@ -1,0 +1,50 @@
+# Copy to .github/workflows/evals.yml in your own repo.
+# (It lives under ci/ here so this lesson folder doesn't try to run in the course repo.)
+#
+# The shape that matters: the fast tier runs on every pull request, the judged tier
+# runs on a schedule. If the judged tier gated every PR, someone would eventually
+# make it optional, and then it would gate nothing.
+
+name: evals
+
+on:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *" # nightly, 03:00 UTC
+
+jobs:
+  fast:
+    name: dataset + harness + gate (no model)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: make check # ruff + pyright + pytest, offline
+      - run: make gate # the committed baseline, per slice
+      - if: failure()
+        run: echo "::notice::Read the diff table above — it names the slice that moved."
+
+  judged:
+    name: judged suite (real judge)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - name: start a judge
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          ollama pull qwen3-coder:30b
+      - run: make test-integration
+      - name: keep the results, not just the verdict
+        uses: actions/upload-artifact@v5
+        with:
+          name: eval-results
+          path: evals/results.json
+
+# Re-baselining is a human decision: run the judged suite, review the diff, and
+# commit evals/baseline.json in its own PR with a note about why the number moved.
+# A gate that updates its own baseline is a gate that never fails.
