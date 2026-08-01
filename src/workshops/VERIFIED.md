@@ -18,6 +18,15 @@ spans back through `InMemorySpanExporter`, so the instrumentation is verified wi
 collector and no network. If an OTel minor bump breaks anything, it will surface here
 first as an attribute-name change rather than an import error.
 
+`assistant/` also gained the **capstone service**: `service.py` (FastAPI composition
+root, tested with `TestClient` offline), `sqlite_memory.py`, `settings.py`,
+`adapters.py`, `mcp_server.py`, and a `Dockerfile`. The real adapters live in an
+`integration` dependency group — `qdrant-client`, `ollama`, `mcp>=2.0.0,<3` (the v2
+SDK; v1 code will NOT run on it), `opentelemetry-exporter-otlp` — imported lazily so
+the fast tier never installs them. The MCP adapter and server are verified against
+the REAL v2 SDK via its in-memory client (`pytest -m integration`: 2 pass with the
+group installed, the Qdrant/Ollama/boot lanes skip without their endpoints).
+
 `interview-loop/` (**W9**) carries no `pyproject.toml` on purpose — it is markdown only.
 `verify-lessons.sh` finds lessons by locating `pyproject.toml` files, so the folder is
 skipped with no special case.

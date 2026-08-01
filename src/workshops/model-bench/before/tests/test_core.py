@@ -25,7 +25,7 @@ from bench.core import (
 # per-call price is easy to reason about: MID is ~2x cheaper than DEAR.
 DEAR = Candidate("dear", "frontier-1", price_in=5.00, price_out=30.00)  # 1100e-6 / call
 MID = Candidate("mid", "middle-1", price_in=2.00, price_out=16.00)  # 520e-6 / call
-FREE = Candidate("local", "qwen3.5:8b", price_in=0.0, price_out=0.0)
+FREE = Candidate("local", "qwen3.5:9b", price_in=0.0, price_out=0.0)
 
 GOOD = '{"vendor": "Acme", "date": "2026-01-01", "total": 10.0}'
 BAD = "Sure! Here is your invoice: vendor is Acme, total about ten dollars."
@@ -94,6 +94,13 @@ def test_percentile_is_nearest_rank_with_no_interpolation():
     assert percentile([10, 20, 30, 40], 50) == 20
     assert percentile([10, 20, 30, 40], 100) == 40
     assert percentile([], 50) == 0.0
+
+
+def test_percentile_rank_ties_use_ceil_not_round():
+    """Regression: round() rounds ties to even, so P50 of two samples would
+    report the max. Nearest-rank is ceil(p/100 * n) - 1, full stop."""
+    assert percentile([10, 20], 50) == 10
+    assert percentile([10, 20, 30, 40, 50, 60], 50) == 30
 
 
 def test_a_dead_provider_becomes_a_row_not_a_crash():

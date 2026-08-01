@@ -1,4 +1,4 @@
-# Phase 4 · System-design mock worksheet (45 minutes, timed, out loud)
+# Phase 6 · System-design mock worksheet (45 minutes, timed, out loud)
 
 > "Design a RAG system over 10M enterprise docs, p95 < 2s, multi-tenant,
 > handling untrusted documents."

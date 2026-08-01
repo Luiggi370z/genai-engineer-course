@@ -1,0 +1,10 @@
+This is a diagnosis (break-and-fix) lesson, so it opts out of the structural
+parity gate (src/verify-parity.py).
+
+Unlike a normal scaffold, the before/ code is not full of TODOs — it runs, but
+carries a planted bug (a mismatched embedder) that the student must diagnose from
+a failing eval and fix. The after/ side adds the regression test that would have
+caught it, so before/ and after/ test files legitimately differ.
+
+verify-lessons.sh still applies: before must lint + type-check clean and fail its
+tests; after must be fully green.

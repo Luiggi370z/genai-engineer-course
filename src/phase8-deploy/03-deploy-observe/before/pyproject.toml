@@ -16,9 +16,12 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
+reportMissingImports = "none"  # the OTLP exporter is integration-only
 
 [dependency-groups]
 dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The real exporter, for when OTEL_EXPORTER_OTLP_ENDPOINT points at a collector.
+integration = ["opentelemetry-exporter-otlp>=1.30,<2"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

@@ -26,7 +26,7 @@ def split(text: str, chunk_size: int = 512, chunk_overlap: int = 75) -> list[str
     raise NotImplementedError  # TODO 1
 
 
-def local_summarizer(model: str = "qwen3.5:8b") -> Summarizer:
+def local_summarizer(model: str = "qwen3.5:9b") -> Summarizer:
     raise NotImplementedError  # TODO 2
 
 

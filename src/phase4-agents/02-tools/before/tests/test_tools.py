@@ -1,3 +1,5 @@
+import inspect
+
 import src.tools as tools
 
 
@@ -12,11 +14,21 @@ def test_errors_are_data_not_exceptions():
     assert "error" in out
 
 
-def test_irreversible_tool_is_gated():
-    # without approval, delete refuses
-    assert "error" in tools.delete_note("2", approve=False)
-    # with approval, it works
-    assert tools.delete_note("2", approve=True)["deleted"] == "2"
+def test_irreversible_tool_refuses_without_a_recorded_approval():
+    assert "error" in tools.delete_note("2")
+
+
+def test_irreversible_tool_runs_once_a_human_approval_is_on_file():
+    tools.grant_approval("2")
+    assert tools.delete_note("2")["deleted"] == "2"
+    # one approval buys exactly one delete — the record is consumed
+    assert "error" in tools.delete_note("2")
+
+
+def test_approval_is_not_a_model_fillable_argument():
+    # The model fills every parameter in a tool signature. If approval were a
+    # parameter, the model could approve its own delete.
+    assert "approve" not in inspect.signature(tools.delete_note).parameters
 
 
 def test_docstrings_say_what_and_when():

@@ -83,7 +83,7 @@ export const foundations: PhaseContent = {
       blocks: [
         {
           kind: "p",
-          text: "Think of **Ollama** as Docker for models: `ollama run qwen3.5:8b` and you’re serving. On Apple Silicon, **MLX** squeezes extra speed from unified memory. Here’s the kicker — both expose an **OpenAI-compatible endpoint**, so “local support” costs you one config entry, not a new code path.",
+          text: "Think of **Ollama** as Docker for models: `ollama run qwen3.5:9b` and you’re serving. On Apple Silicon, **MLX** squeezes extra speed from unified memory. Here’s the kicker — both expose an **OpenAI-compatible endpoint**, so “local support” costs you one config entry, not a new code path.",
         },
         {
           kind: "table",
@@ -92,7 +92,7 @@ export const foundations: PhaseContent = {
             ["~8 GB", "gemma4:e2b · nomic-embed-text", "Light chat, embeddings, learning the APIs"],
             [
               "16 GB",
-              "qwen3.5:8b · gemma4:e4b · gpt-oss:20b",
+              "qwen3.5:9b · gemma4:e4b · gpt-oss:20b",
               "The whole course locally: routing, agents, guard models",
             ],
             [
@@ -199,7 +199,7 @@ class Provider:
 PROVIDERS = {
     "claude": Provider(None, env("ANTHROPIC_API_KEY"), "claude-sonnet-4-6"),
     "gpt":    Provider(None, env("OPENAI_API_KEY"), "gpt-5.5"),
-    "local":  Provider("http://localhost:11434/v1", "ollama", "qwen3.5:8b"),
+    "local":  Provider("http://localhost:11434/v1", "ollama", "qwen3.5:9b"),
 }
 
 def complete(prompt: str, provider: str = "local", temperature: float = 0.2) -> str:
@@ -305,7 +305,7 @@ client = instructor.from_openai(OpenAI())          # hosted: native strict json_
 # )
 
 ticket = client.chat.completions.create(
-    model="gpt-5.5",                # or "qwen3.5:8b"
+    model="gpt-5.5",                # or "qwen3.5:9b"
     response_model=Ticket,          # guaranteed shape, zero regex
     max_retries=2,                  # validation errors are fed back, not swallowed
     messages=[{"role": "user",
@@ -647,7 +647,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       title: "Extraction shoot-out: cloud vs laptop",
       repo: "phase1-foundations/03-structured-extraction",
       rung: "faded",
-      task: "Pull {vendor, date, total} from 20 messy invoices using structured outputs on (a) a frontier model and (b) qwen3.5:8b locally. Compare schema-violation and field-accuracy rates.",
+      task: "Pull {vendor, date, total} from 20 messy invoices using structured outputs on (a) a frontier model and (b) qwen3.5:9b locally. Compare schema-violation and field-accuracy rates.",
       assesses: ["p1-o4"],
       solution: [
         "Both should hit ~0 schema violations (constrained decoding does that for free).",

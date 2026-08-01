@@ -41,7 +41,7 @@ def extract_invoice(
     text: str,
     client: Extractor | None = None,
     provider: str = "local",
-    model: str = "qwen3.5:8b",
+    model: str = "qwen3.5:9b",
 ) -> Invoice:
     """TODO 2: pass `response_model=Invoice` so the shape is guaranteed.
 
@@ -55,7 +55,7 @@ def extract_all(
     texts: list[str],
     client: Extractor | None = None,
     provider: str = "local",
-    model: str = "qwen3.5:8b",
+    model: str = "qwen3.5:9b",
 ) -> tuple[list[Invoice], list[str]]:
     """TODO 3: return (invoices, violations).
 

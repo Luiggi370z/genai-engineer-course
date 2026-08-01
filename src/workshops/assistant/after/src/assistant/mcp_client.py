@@ -1,4 +1,4 @@
-"""Workshop 4 layer — the assistant gains tools from an MCP server by DISCOVERY.
+"""Workshop 7 layer — the assistant gains tools from an MCP server by DISCOVERY.
 
 The win condition: tools are listed at runtime and adapted into the agent's
 registry, NOT hard-coded. Add a tool to the server, restart, the assistant can

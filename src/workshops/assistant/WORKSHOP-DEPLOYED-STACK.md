@@ -71,6 +71,48 @@ decision.
 - [ ] The whole layer runs offline: `InMemorySpanExporter` in tests, no collector, no
       vendor account
 
+## The capstone: one running service
+
+Everything above still treats the assistant as a library. The capstone makes it a
+service. `service.py` is the **composition root** — the one file where every layer
+you built finally meets:
+
+```
+request ─► guardrails.screen ─► agent.run (traced) ─► tools (read-only output
+           (input)                │                    re-screened; irreversible
+                                  │                    ones gated by /approve)
+                                  ├─► RAG   (in-memory BM25  | Qdrant)
+                                  ├─► memory (in-process     | SQLite)
+                                  └─► spans  (in-memory      | + OTLP)
+           guardrails.output_ok ◄─ answer
+```
+
+Offline and deterministic by default — the fast tests drive the real FastAPI app
+with a TestClient and no network. Each real adapter turns on with one env var
+(`settings.py`): `QDRANT_URL`, `OLLAMA_HOST`, `MCP_SERVER`, `ASSISTANT_DB`,
+`OTEL_EXPORTER_OTLP_ENDPOINT`. `adapters.py` holds the real implementations,
+`sqlite_memory.py` is the memory store that survives a restart, and
+`mcp_server.py` is a small real MCP server the assistant discovers tools from.
+
+The `Dockerfile` builds one image that runs as both the assistant API and the MCP
+server; `phase8-deploy/01-compose` deploys it next to pinned Qdrant and Ollama, and
+`src/verify-e2e.sh` proves the composed stack end to end: boot on healthchecks,
+tier report, grounded answer, approval containment, an MCP call over the wire, and
+spans left behind.
+
+### Capstone deliverables
+
+- [ ] `service.py` composes **every** layer — guardrails on input, hardened tool
+      output, gated tools behind `/approve`, RAG contexts, memory writes, spans —
+      and the fast tests prove each seam offline
+- [ ] Memory survives a **process restart** (`sqlite_memory.py`; the tests reopen
+      the store cold)
+- [ ] MCP tools arrive by **discovery through the real SDK** (`adapters.mcp_tools`
+      against `mcp_server.py`, in-memory in the integration lane, over HTTP in the
+      composed stack)
+- [ ] `docker compose up --build` in `phase8-deploy/01-compose/after` reaches
+      healthy, and `./verify-e2e.sh` passes all six checks
+
 ## Stretch goals
 
 - Ship the spans somewhere real. Set `OTEL_EXPORTER_OTLP_ENDPOINT` at a local Phoenix

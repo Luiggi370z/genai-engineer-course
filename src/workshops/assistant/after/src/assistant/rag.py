@@ -1,4 +1,4 @@
-"""Workshop 1 layer — a small hybrid-retrieval RAG core the assistant can query.
+"""Workshop 2 layer — a small hybrid-retrieval RAG core the assistant can query.
 
 Self-contained (offline) BM25 + bag-of-words dense, fused with RRF — the same
 shape as phase2/02-hybrid-rerank, now a reusable component. Swap the store for

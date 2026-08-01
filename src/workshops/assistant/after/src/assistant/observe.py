@@ -11,12 +11,14 @@ Two design choices worth copying:
 knows it is being traced, which means adding a tool cannot forget to. Cross-cutting
 concerns belong at the seam, not sprinkled through every implementation.
 
-**The vendor is an environment variable.** These are plain OTel spans with
-OpenInference attribute names, so Langfuse, Phoenix or your existing APM all read
-them. The in-memory exporter used in tests is the same code path as production.
+**The vendor is an environment variable.** These are plain OTel spans — using
+OpenInference names where a convention exists and clearly-marked custom names
+where none does — so Langfuse, Phoenix or your existing APM all read them. The
+in-memory exporter used in tests is the same code path as production.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -28,8 +30,11 @@ from opentelemetry.trace import Status, StatusCode, Tracer
 
 from assistant.tools import Tool
 
-# OpenInference-style attribute names. Agreed names beat invented ones: a dashboard
-# that has never seen this repo can still read the trace.
+# tool.name follows OpenInference's tool-span convention. The rest are OUR
+# extensions — no convention covers agent step counts or approval pauses (yet),
+# so they are labelled custom rather than passed off as standard. Where an
+# agreed name exists, use it: a dashboard that has never seen this repo can
+# still read the trace.
 TOOL_NAME = "tool.name"
 TOOL_GATED = "tool.requires_approval"
 AGENT_STEPS = "agent.step_count"
@@ -62,10 +67,25 @@ class Recorder:
         self.exporter.clear()
 
 
-def recorder(service: str = "assistant") -> Recorder:
+def recorder(service: str = "assistant", otlp_endpoint: str | None = None) -> Recorder:
+    """A tracer wired to an in-memory exporter, always.
+
+    When `otlp_endpoint` is set (in production, from `OTEL_EXPORTER_OTLP_ENDPOINT`),
+    the SAME provider also gets an OTLP exporter, so spans ship to a collector
+    without changing a line of instrumentation. The in-memory copy stays, so the
+    span assertions in tests and the /health tier report keep working either way.
+    The OTLP SDK is imported lazily so the fast tier never installs it.
+    """
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    if otlp_endpoint:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+        )
     return Recorder(tracer=provider.get_tracer(service), provider=provider, exporter=exporter)
 
 
@@ -126,10 +146,12 @@ def duration_ms(span: ReadableSpan) -> float:
 
 
 def percentile(values: Sequence[float], p: float) -> float:
+    """Nearest-rank: index is ceil(p/100 * n) - 1. Not `round()` — ties-to-even
+    shifts exact ranks and reports the wrong P50/P99."""
     if not values:
         return 0.0
     ordered = sorted(values)
-    idx = min(len(ordered) - 1, max(0, round(p / 100 * len(ordered) + 0.5) - 1))
+    idx = min(len(ordered) - 1, max(0, math.ceil(p / 100 * len(ordered)) - 1))
     return ordered[idx]
 
 

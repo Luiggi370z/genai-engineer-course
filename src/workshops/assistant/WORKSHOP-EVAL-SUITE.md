@@ -35,6 +35,11 @@ functions over data: no I/O, no globals, fully testable.
       against the baseline, and marks a collapse
 - [ ] `cohen_kappa` returns 0.0 for a rubber-stamp judge that scores 0.9 on raw
       agreement — you can explain why that matters
+- [ ] **Trajectory checks score the run, not just the answer**: `tools_run` reads the
+      agent's audit trail back as a trace, `tool_choice_f1` and `goal_completion`
+      score it against a reference plan, and `containment_ok` proves a gated tool
+      never fired without approval — keep that one green through the hardening
+      workshop
 - [ ] The whole suite runs with **no model and no network**, in seconds
 
 ## Stretch goals
@@ -42,8 +47,6 @@ functions over data: no I/O, no globals, fully testable.
 - Swap `KeywordJudge` for the RAGAS judge from `phase3-evals/02-llm-judge` behind the
   same protocol, and compare the two on the same rows.
 - Hand-label 30 rows and record the kappa you would quote alongside your scores.
-- Add a trajectory check that a gated tool never fires without approval, and keep it
-  green through the hardening workshop.
 
 Implement `evals.py`. Reference and tests: `after/src/assistant/evals.py`,
 `after/tests/test_evals.py`.

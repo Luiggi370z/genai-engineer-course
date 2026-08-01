@@ -35,8 +35,8 @@ from src.observe import (
 )
 
 # What LLM latency actually looks like at 100 requests: a tight fast cluster, a
-# handful of retrieval/retry stragglers, and one genuinely awful outlier.
-SKEWED = [300.0] * 90 + [2100.0] * 9 + [8400.0]
+# handful of retrieval/retry stragglers, and two genuinely awful outliers.
+SKEWED = [300.0] * 89 + [2100.0] * 9 + [8400.0] * 2
 
 
 @pytest.fixture
@@ -59,14 +59,14 @@ def load(rec, latencies=SKEWED, cost_each=0.001):
 
 
 def test_a_traced_call_emits_one_span_with_the_convention_attributes(rec):
-    with llm_span(rec.tracer, model="qwen3.5:8b", tier="local") as span:
+    with llm_span(rec.tracer, model="qwen3.5:9b", tier="local") as span:
         bill(span, prompt_tokens=900, completion_tokens=120, cost_usd=0.0)
 
     spans = rec.spans()
     assert len(spans) == 1
     attrs = spans[0].attributes or {}
     assert spans[0].name == SPAN_NAME
-    assert attrs[MODEL] == "qwen3.5:8b"
+    assert attrs[MODEL] == "qwen3.5:9b"
     assert attrs[TIER] == "local"
     assert attrs[PROMPT_TOKENS] == 900
     assert attrs[COST] == 0.0
@@ -93,11 +93,11 @@ def test_the_mean_hides_what_the_tail_shows(rec):
     """The whole argument for a P99 budget, in one assertion."""
     spans = load(rec)
     mean = sum(latencies_ms(spans)) / len(spans)
-    assert mean == pytest.approx(543.0)  # "half a second, feels fast"
+    assert mean == pytest.approx(624.0)  # "0.6s on average — feels fine"
     assert p50(spans) == pytest.approx(300.0)
     assert p95(spans) == pytest.approx(2100.0)
     assert p99(spans) == pytest.approx(8400.0)  # one user in a hundred waits 8.4s
-    assert p99(spans) > mean * 15
+    assert p99(spans) > mean * 13
 
 
 def test_ten_requests_cannot_produce_a_p95_worth_believing(rec):
@@ -116,6 +116,13 @@ def test_percentile_is_nearest_rank_and_safe_on_empty():
     assert percentile([], 99) == 0.0
 
 
+def test_percentile_rank_ties_use_ceil_not_round():
+    """Regression: round() rounds ties to even, so P50 of two samples would
+    report the max. Nearest-rank is ceil(p/100 * n) - 1, full stop."""
+    assert percentile([10, 20], 50) == 10
+    assert percentile([10, 20, 30, 40, 50, 60], 50) == 30
+
+
 def test_spend_is_summed_from_the_cost_attribute(rec):
     spans = load(rec, latencies=[300.0] * 10, cost_each=0.002)
     assert total_cost(spans) == pytest.approx(0.02)
@@ -124,7 +131,7 @@ def test_spend_is_summed_from_the_cost_attribute(rec):
 
 
 def test_spend_splits_by_tier_which_is_what_routing_decisions_need(rec):
-    emit_call(rec.tracer, model="qwen3.5:8b", tier="local", duration_ms=300, cost_usd=0.0)
+    emit_call(rec.tracer, model="qwen3.5:9b", tier="local", duration_ms=300, cost_usd=0.0)
     emit_call(rec.tracer, model="gpt-5.2", tier="frontier", duration_ms=900, cost_usd=0.004)
     emit_call(rec.tracer, model="gpt-5.2", tier="frontier", duration_ms=950, cost_usd=0.006)
     assert spend_by_tier(rec.spans()) == pytest.approx({"local": 0.0, "frontier": 0.010})

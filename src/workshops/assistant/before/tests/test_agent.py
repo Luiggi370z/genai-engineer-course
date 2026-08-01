@@ -29,3 +29,19 @@ def test_gated_tool_fires_with_approval():
     it = iter(script)
     res = run("message the team", lambda g, s: next(it), approvals={"send_telegram": True})
     assert res.text == "sent"
+
+
+def test_every_executed_tool_lands_in_the_audit():
+    # observe.py derives agent.step_count from this list. A successful run that
+    # audits nothing would report zero steps — the regression this test pins.
+    script = [
+        Step(tool="read_emails", args={"limit": 1}),
+        Step(tool="read_news", args={"url": "x"}),
+        Step(tool="read_emails", args={"limit": 2}),
+        Step(tool="", args={}, is_final=True, answer="done"),
+    ]
+    it = iter(script)
+    res = run("morning brief", lambda g, s: next(it))
+    assert res.text == "done"
+    assert len(res.audit) == 3
+    assert all(entry.startswith("ran: ") for entry in res.audit)

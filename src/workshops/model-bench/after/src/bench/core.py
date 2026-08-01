@@ -13,6 +13,7 @@ common way a bench lies to you.
 """
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -90,11 +91,15 @@ class Result:
 
 
 def percentile(values: Sequence[float], p: float) -> float:
-    """Nearest-rank percentile. Small-n honest: no interpolation, no pretending."""
+    """Nearest-rank percentile. Small-n honest: no interpolation, no pretending.
+
+    Rank is ceil(p/100 * n), the textbook rule. `round()` looks equivalent but
+    Python rounds ties to even, which mis-picks the index on exact ranks —
+    P50 of two samples would report the max."""
     if not values:
         return 0.0
     ordered = sorted(values)
-    k = max(0, min(len(ordered) - 1, round(p / 100 * len(ordered) + 0.5) - 1))
+    k = max(0, min(len(ordered) - 1, math.ceil(p / 100 * len(ordered)) - 1))
     return ordered[k]
 
 

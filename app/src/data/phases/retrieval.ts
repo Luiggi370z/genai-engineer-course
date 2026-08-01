@@ -516,7 +516,7 @@ PROMPT = ("In one short sentence, situate this chunk within the document so it "
 </chunk>")
 
 def contextualize(doc, chunk):
-    r = ollama.chat.completions.create(model="qwen3.5:8b", temperature=0,
+    r = ollama.chat.completions.create(model="qwen3.5:9b", temperature=0,
         messages=[{"role": "user",
                    "content": PROMPT.format(doc=doc[:4000], chunk=chunk)}])
     return r.choices[0].message.content.strip() + "

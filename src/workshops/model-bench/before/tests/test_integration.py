@@ -1,6 +1,6 @@
 """The opt-in tier: the same bench, against a model that really answers.
 
-    make test-integration        # needs `ollama serve` and `ollama pull qwen3.5:8b`
+    make test-integration        # needs `ollama serve` and `ollama pull qwen3.5:9b`
 
 Everything the fast tier proves is structural. This tier proves the one thing a
 fake cannot: that a real small model, handed a real messy invoice, produces

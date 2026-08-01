@@ -6,6 +6,8 @@ parses a tool request or a final answer out of the response.
 """
 from __future__ import annotations
 
+import ast
+import operator
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -52,9 +54,38 @@ def run_agent(
 
 
 # --- example tools ---
+_OPS: dict[type[ast.AST], Callable[..., Any]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
 def calculator(expression: str) -> float:
-    """Evaluate a simple arithmetic expression."""
-    return float(eval(expression, {"__builtins__": {}}, {}))  # noqa: S307 — sandboxed dict
+    """Evaluate a simple arithmetic expression (+ - * / % ** and parentheses).
+
+    The expression is model-supplied, i.e. untrusted input, so this walks an
+    AST allowlist instead of calling eval(). Emptying __builtins__ does not
+    sandbox eval — dunder chains climb back to os.system — and a tool boundary
+    is exactly where that payload would arrive. An evaluator that cannot
+    represent anything but arithmetic has nothing to exploit.
+    """
+
+    def walk(node: ast.expr) -> float:
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](walk(node.left), walk(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](walk(node.operand))
+        raise ValueError(f"unsupported expression: {expression!r}")
+
+    return float(walk(ast.parse(expression, mode="eval").body))
 
 
 def search(query: str) -> str:

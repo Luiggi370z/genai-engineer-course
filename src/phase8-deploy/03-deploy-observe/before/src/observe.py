@@ -5,8 +5,8 @@ The wiring is given (`recorder`) and so are the attribute constants. What's your
 1) `llm_span` — a context manager that opens one span per model call, marks it OK
    or ERROR, and **re-raises**. Observability that changes control flow is a
    liability, and a failure with no trace is the one you'll need to debug.
-2) `bill` / `emit_call` — attach the Phase-1 meter's numbers to the span, using the
-   OpenInference names below rather than names you invented.
+2) `bill` / `emit_call` — attach the Phase-1 meter's numbers to the span, using
+   the attribute constants below rather than names you invent inline.
 3) The metrics — `latencies_ms`, `percentile`, `total_cost`, `error_rate`,
    `spend_by_tier`, `cache_hit_rate` — all derived **from the spans**. Resist
    keeping a second list of latencies: two sources of truth disagree eventually,
@@ -14,15 +14,17 @@ The wiring is given (`recorder`) and so are the attribute constants. What's your
 4) `safe_to_promote` — block a build that busts the tail budget or regresses it.
 
 Note what `recorder()` buys you: `InMemorySpanExporter` ships with the SDK, so the
-production tracing code is testable with no collector and no vendor account. In
-production you register an OTLP exporter on the same provider and change nothing
-else — that portability is the entire reason to instrument against OTel rather
-than against a vendor's client library.
+production tracing code is testable with no collector and no vendor account. And
+the production path is already wired: set `OTEL_EXPORTER_OTLP_ENDPOINT` and the
+same provider also ships spans over OTLP, changing nothing else — that portability
+is the entire reason to instrument against OTel rather than against a vendor's
+client library.
 
 Reference: ../after/src/observe.py.
 """
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -32,7 +34,10 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import Tracer
 
-# OpenInference / GenAI semantic conventions — the agreed names. Use them.
+# llm.model_name and llm.token_count.* are OpenInference semantic-convention
+# names — use the agreed vocabulary where one exists. cost.usd, llm.tier and
+# cache.hit are OUR extensions: no convention covers them, so they are labelled
+# custom rather than passed off as standard.
 MODEL = "llm.model_name"
 PROMPT_TOKENS = "llm.token_count.prompt"
 COMPLETION_TOKENS = "llm.token_count.completion"
@@ -59,11 +64,26 @@ class Recorder:
         self.exporter.clear()
 
 
-def recorder(service: str = "assistant") -> Recorder:
-    """Wire a provider that keeps its spans in memory. No network, no vendor."""
+def recorder(service: str = "assistant", otlp_endpoint: str | None = None) -> Recorder:
+    """Wire a provider that keeps its spans in memory. No network, no vendor.
+
+    Unless there is one: when `otlp_endpoint` — or, in production, the standard
+    `OTEL_EXPORTER_OTLP_ENDPOINT` env var — is set, the SAME provider also ships
+    every span over OTLP. The in-memory exporter stays either way, so tests and
+    the metrics helpers below keep reading spans locally. The OTLP package is
+    imported lazily; the fast tier never installs it (`--group integration` does).
+    """
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    otlp_endpoint = otlp_endpoint or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if otlp_endpoint:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+        )
     return Recorder(tracer=provider.get_tracer(service), provider=provider, exporter=exporter)
 
 
@@ -114,7 +134,8 @@ def latencies_ms(spans: Sequence[ReadableSpan]) -> list[float]:
 
 
 def percentile(values: Sequence[float], p: float) -> float:
-    """TODO 5: nearest-rank percentile, 0.0 on empty. No interpolation."""
+    """TODO 5: nearest-rank percentile, 0.0 on empty. No interpolation.
+    The rank is ceil(p/100 * n) — not round(), which shifts ties to even."""
     raise NotImplementedError
 
 

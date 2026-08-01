@@ -170,10 +170,10 @@ export const mindset: PhaseContent = {
         {
           kind: "list",
           items: [
-            '**The "56% AI wage premium" is real** — PwC’s Global AI Jobs Barometer (~1B job ads): AI-skilled workers average a 56% premium, up from 25% the prior year. Economy-wide context, not a personal promise.',
-            "**India:** GenAI/LLM specialists ₹20–70 LPA mid-senior; strong-portfolio freshers ₹8–22; senior at product companies/GCCs up to ₹70 LPA–1 Cr+.",
-            "**US:** base clusters ~$110–185K for typical/remote roles (ZipRecruiter, Glassdoor). Total comp at elite labs is another universe — Levels.fyi medians ~$555K at OpenAI, ~$665K at Anthropic.",
-            "**Present numbers precisely and cite them** — doing so signals the same verify-everything skill as pinning a judge model, and interviewers notice.",
+            '**The "56% AI wage premium" is real** — PwC’s Global AI Jobs Barometer (~1B job ads, verified 2026-07): AI-skilled workers average a 56% premium, up from 25% the prior year. Economy-wide context, not a personal promise.',
+            "**India** (verified 2026-07): GenAI/LLM specialists ₹20–70 LPA mid-senior; strong-portfolio freshers ₹8–22; senior at product companies/GCCs up to ₹70 LPA–1 Cr+.",
+            "**US** (verified 2026-07): base clusters ~$110–185K for typical/remote roles (ZipRecruiter, Glassdoor). Total comp at elite labs is another universe — Levels.fyi medians ~$555K at OpenAI, ~$665K at Anthropic.",
+            "**Present numbers precisely, cite them, and date them** — salary data ages in months. Re-check the sources above before an interview loop; quoting a stale number precisely is worse than quoting a range honestly.",
           ],
         },
       ],

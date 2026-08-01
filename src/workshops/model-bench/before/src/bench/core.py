@@ -83,9 +83,10 @@ class Result:
 def percentile(values: Sequence[float], p: float) -> float:
     """Nearest-rank percentile — no interpolation, and 0.0 for an empty input.
 
-    TODO: sort, pick the rank, clamp the index so p=0 and p=100 both land inside
-    the list. Resist the urge to reach for `statistics.quantiles`: with four
-    samples, interpolation invents latencies nobody measured.
+    TODO: sort, pick the rank — ceil(p/100 * n), not round(), which shifts ties
+    to even — and clamp the index so p=0 and p=100 both land inside the list.
+    Resist the urge to reach for `statistics.quantiles`: with four samples,
+    interpolation invents latencies nobody measured.
     """
     raise NotImplementedError
 

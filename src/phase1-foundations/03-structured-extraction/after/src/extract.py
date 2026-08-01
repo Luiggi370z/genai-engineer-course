@@ -43,7 +43,7 @@ def extract_invoice(
     text: str,
     client: Extractor | None = None,
     provider: str = "local",
-    model: str = "qwen3.5:8b",
+    model: str = "qwen3.5:9b",
 ) -> Invoice:
     """Pull a typed Invoice out of messy text. No regex, guaranteed schema."""
     extractor = client or build_client(provider)
@@ -58,7 +58,7 @@ def extract_all(
     texts: list[str],
     client: Extractor | None = None,
     provider: str = "local",
-    model: str = "qwen3.5:8b",
+    model: str = "qwen3.5:9b",
 ) -> tuple[list[Invoice], list[str]]:
     """The shoot-out's measuring stick: what parsed, and what refused to.
 

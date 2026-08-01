@@ -13,6 +13,8 @@ Reference: ../after/src/agent.py.
 """
 from __future__ import annotations
 
+import ast
+import operator
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -40,6 +42,32 @@ def run_agent(
     raise NotImplementedError  # TODO: build the loop with hard caps
 
 
+_OPS: dict[type[ast.AST], Callable[..., Any]] = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Mod: operator.mod,
+    ast.Pow: operator.pow,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+}
+
+
 def calculator(expression: str) -> float:
-    """Evaluate a simple arithmetic expression."""
-    return float(eval(expression, {"__builtins__": {}}, {}))  # noqa: S307
+    """Evaluate a simple arithmetic expression (+ - * / % ** and parentheses).
+
+    Model-supplied text is untrusted input, so this walks an AST allowlist
+    instead of calling eval() — emptying __builtins__ does not sandbox eval.
+    """
+
+    def walk(node: ast.expr) -> float:
+        if isinstance(node, ast.Constant) and isinstance(node.value, int | float):
+            return float(node.value)
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](walk(node.left), walk(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in _OPS:
+            return _OPS[type(node.op)](walk(node.operand))
+        raise ValueError(f"unsupported expression: {expression!r}")
+
+    return float(walk(ast.parse(expression, mode="eval").body))

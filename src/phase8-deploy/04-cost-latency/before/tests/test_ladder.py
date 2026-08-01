@@ -137,6 +137,13 @@ def test_percentile_is_nearest_rank_and_safe_on_empty():
     assert percentile([], 99) == 0.0
 
 
+def test_percentile_rank_ties_use_ceil_not_round():
+    """Regression: round() rounds ties to even, so P50 of two samples would
+    report the max. Nearest-rank is ceil(p/100 * n) - 1, full stop."""
+    assert percentile([10, 20], 50) == 10
+    assert percentile([10, 20, 30, 40, 50, 60], 50) == 30
+
+
 def test_an_empty_run_reports_zeroes_rather_than_dividing_by_zero():
     lad, _ = ladder()
     rep = report(lad)

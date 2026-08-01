@@ -265,7 +265,7 @@ class Memory:
           kind: "flow",
           title: "The cost ladder: match brainpower to difficulty, node by node",
           nodes: [
-            { label: "Free: your laptop", sub: "qwen3.5:8b — route, classify, redact" },
+            { label: "Free: your laptop", sub: "qwen3.5:9b — route, classify, redact" },
             { label: "Cheap hosted", sub: "Haiku 4.5 / Flash-Lite — scoped work" },
             { label: "Frontier", sub: "Opus 4.8 / GPT-5.5 — planning & synthesis" },
           ],

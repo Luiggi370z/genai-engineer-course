@@ -3,6 +3,7 @@ name = "mcp-auth-after"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+  "pyjwt>=2.8,<3",  # the real cryptography tier: signature, exp, aud
   "pytest>=8,<9",
 ]
 

@@ -157,6 +157,13 @@ def test_percentile_is_nearest_rank():
     assert percentile([10, 20, 30, 40], 100) == 40
 
 
+def test_percentile_rank_ties_use_ceil_not_round():
+    """Regression: round() rounds ties to even, so P50 of two samples would
+    report the max. Nearest-rank is ceil(p/100 * n) - 1, full stop."""
+    assert percentile([10, 20], 50) == 10
+    assert percentile([10, 20, 30, 40, 50, 60], 50) == 30
+
+
 def test_duration_is_read_off_the_span(rec):
     tools = traced_registry(registry(), rec.tracer)
     tools["read_emails"].fn()

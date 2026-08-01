@@ -1,22 +1,47 @@
-# The whole stack, one command: assistant + MCP + Qdrant + Ollama. Zero API keys.
+# The stack, first draft — it boots on a good day, which is not the same thing as
+# deployable. Every weakness in here is one your checks in src/health.py must catch,
+# and then you fix the wiring until `make test` is green:
+#
+#   - images are unpinned         -> every reviewer runs a different stack
+#   - no healthchecks             -> depends_on has nothing meaningful to wait for
+#   - depends_on is the list form -> waits for START, and a started Qdrant
+#                                    is not a ready Qdrant
+#   - every port is published     -> internal services are on the host network
+#   - ollama pulls no models      -> the assistant boots against an empty model store
+#
+# The reference wiring is in ../after/docker-compose.yml — but write the checks
+# first and let them tell you what to fix.
 services:
   assistant:
-    build: ./assistant
-    depends_on: [mcp, qdrant, ollama]
+    build: ../../../workshops/assistant/after
     environment:
-      - MCP_URL=http://mcp:8080
-      - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_URL=http://ollama:11434
+      MCP_SERVER: http://mcp:8080/mcp
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_HOST: http://ollama:11434
+      ASSISTANT_DB: /data/assistant.db
+    volumes:
+      - assistant-data:/data
     ports: ["8000:8000"]
+    depends_on: [mcp, qdrant, ollama]
+
   mcp:
-    build: ./mcp-server
+    build: ../../../workshops/assistant/after
+    command: ["python", "-m", "assistant.mcp_server", "--http"]
     ports: ["8080:8080"]
+
   qdrant:
     image: qdrant/qdrant:latest
     ports: ["6333:6333"]
+    volumes:
+      - qdrant-data:/qdrant/storage
+
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama
     ports: ["11434:11434"]
-    volumes: ["ollama:/root/.ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+
 volumes:
-  ollama:
+  assistant-data:
+  qdrant-data:
+  ollama-models:

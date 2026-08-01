@@ -25,7 +25,7 @@ unzip genai-engineer-workbook-src.zip
 
 # 3. Install the toolchain and pull the two models you need to begin.
 curl -LsSf https://astral.sh/uv/install.sh | sh
-ollama pull qwen3.5:8b        # chat + tool calling
+ollama pull qwen3.5:9b        # chat + tool calling
 ollama pull nomic-embed-text  # embeddings
 
 # 4. Do the first lesson. Its tests fail on purpose — turning them green is the work.
@@ -36,7 +36,8 @@ make check                    # green: lint, types and tests
 ```
 
 Two more models are worth pulling when you reach those phases rather than now:
-`qwen3-coder:30b` for the Phase 3 judge, `llama-guard3:8b` for the Phase 6 guardrails.
+`qwen3-coder:30b` for the Phase 3 judge (needs ~32 GB of RAM — on a 16 GB machine use a
+smaller or hosted judge), and `llama-guard3:8b` for the Phase 6 guardrails.
 
 ---
 
@@ -45,13 +46,20 @@ Two more models are worth pulling when you reach those phases rather than now:
 **Software.** Python 3.11+, [uv](https://docs.astral.sh/uv/),
 [Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.
 
-**Hardware.** A 16 GB machine runs the entire course locally, models included. More RAM
-unlocks stronger models but changes nothing you learn — and if you have less, or no GPU,
-every lesson runs against a hosted budget tier by changing one `base_url`. Phase 1
-carries the full sizing table.
+**Hardware.** Four honest tiers — pick yours and nothing you *learn* changes:
 
-**Money.** None. Every lesson's fast test tier runs offline with zero API keys. Hosted
-providers are optional everywhere, for when you want to see the difference.
+- **Any machine** runs every lesson's fast test suite offline: no models, no keys.
+- **16 GB of RAM** runs the course's working models locally (`qwen3.5:9b`, embeddings,
+  guard models). The 30B eval judge does not fit — use a smaller or hosted judge there.
+- **32 GB of RAM** adds `qwen3-coder:30b` as a free local Phase 3 judge.
+- **No GPU / older laptop:** every lesson runs against a hosted budget tier by changing
+  one `base_url` — that needs an account, an API key, network, and small real money.
+
+Phase 1 carries the full sizing table.
+
+**Money.** The fast test tier of every lesson runs offline with zero API keys, so the
+course can be completed spending nothing. Hosted providers — the no-GPU fallback and the
+optional frontier comparisons — are metered and cost real (small) money.
 
 **Skills.** You should already write Python comfortably (type hints, `async`/`await`,
 Pydantic, pytest), know git, HTTP and JSON, and have met Docker. No machine-learning

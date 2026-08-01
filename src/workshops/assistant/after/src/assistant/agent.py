@@ -1,4 +1,4 @@
-"""Workshop 2 layer — the agent loop with HITL, built on the Phase-3 pattern.
+"""Workshop 4 layer — the agent loop with HITL, built on the Phase-3 pattern.
 
 The 'brain' (decide) is injected so tests are deterministic/offline. Gated tools
 never fire without approval; the loop has a hard step cap.
@@ -58,6 +58,10 @@ def run(goal: str, decide: Decider, approvals: dict[str, bool] | None = None,
             result.audit.append(f"paused for approval: {step.tool}")
             return result
         out = tool.fn(**step.args)
+        # Every executed tool is audited, not only the pauses. observe.py reads
+        # step_count off this list; skip the append and a successful multi-tool
+        # run reports zero steps.
+        result.audit.append(f"ran: {step.tool}")
         state.append((step, out))
     result.text = "stopped: max_steps"
     return result

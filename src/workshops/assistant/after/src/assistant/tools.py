@@ -1,4 +1,4 @@
-"""Workshop 2 layer — the assistant's tools. Every external connection is a tool.
+"""Workshop 4 layer — the assistant's tools. Every external connection is a tool.
 
 Read-only tools run freely; anything that sends/schedules is gated behind
 requires_approval. Connectors are stubbed (email/news/telegram/calendar) so the

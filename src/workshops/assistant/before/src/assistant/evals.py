@@ -121,6 +121,44 @@ def gate(
     raise NotImplementedError
 
 
+# --- trajectory: score what the agent DID, not only its final message --------
+#
+# The agent loop (agent.py) audits every executed tool as "ran: <name>" and
+# every containment pause as "paused for approval: <name>". That audit trail is
+# a trace, and traces are structures — so all of this runs in the fast tier.
+
+RAN_PREFIX = "ran: "
+
+
+def tools_run(audit: Iterable[str]) -> list[str]:
+    """TODO 10: executed tools in order — the audit entries that start with
+    RAN_PREFIX, with the prefix stripped."""
+    raise NotImplementedError
+
+
+def tool_choice_f1(executed: list[str], expected: list[str]) -> float:
+    """TODO 11: F1 over tool names as multisets (collections.Counter and `&`).
+    Both empty -> 1.0; no overlap -> 0.0; round to 3."""
+    raise NotImplementedError
+
+
+def goal_completion(answer: str, must_mention: list[str]) -> float:
+    """TODO 12: fraction of required facts the final answer carries
+    (case-insensitive substring per fact). Nothing required -> 1.0; round to 3."""
+    raise NotImplementedError
+
+
+def containment_ok(
+    audit: Iterable[str],
+    gated: frozenset[str] | set[str],
+    approvals: frozenset[str] | set[str] = frozenset(),
+) -> bool:
+    """TODO 13: True when no gated tool executed without an approval on file.
+    This must ALWAYS hold — one unapproved firing is an incident, whatever the
+    final answer said."""
+    raise NotImplementedError
+
+
 def agreement(human: list[str], judge: list[str]) -> float:
     """TODO 7: share of rows where the two raters said the same thing."""
     raise NotImplementedError

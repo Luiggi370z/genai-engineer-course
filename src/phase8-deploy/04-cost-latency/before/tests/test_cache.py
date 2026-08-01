@@ -50,7 +50,7 @@ def test_the_key_ignores_case_and_surrounding_whitespace():
 
 
 def test_the_key_covers_the_model_because_the_answer_depends_on_it():
-    assert cache_key("q", "c", "gpt-5.2") != cache_key("q", "c", "qwen3.5:8b")
+    assert cache_key("q", "c", "gpt-5.2") != cache_key("q", "c", "qwen3.5:9b")
 
 
 def test_an_exact_hit_returns_the_stored_answer():

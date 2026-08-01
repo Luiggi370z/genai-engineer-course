@@ -1,4 +1,4 @@
-"""Workshop 3 layer — harden the assistant. Containment, not wishful filtering.
+"""Workshop 6 layer — harden the assistant. Containment, not wishful filtering.
 
 L1 decode+scan+redact on every untrusted string (incl. fetched emails/news),
 spotlight untrusted content, and an output gate. Combined with the agent's HITL

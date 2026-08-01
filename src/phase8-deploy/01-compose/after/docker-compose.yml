@@ -1,22 +1,88 @@
-# The whole stack, one command: assistant + MCP + Qdrant + Ollama. Zero API keys.
+# The whole stack, one command: the capstone assistant + its MCP server + Qdrant +
+# Ollama. Zero API keys. Both app services build from the SAME capstone image
+# (workshops/assistant/after — see its Dockerfile); only the assistant's port ever
+# leaves the compose network.
+#
+#   docker compose up --build
+#   curl localhost:8000/health
+#
+# First boot is slow on purpose: the ollama service pulls its models before it
+# reports healthy, and nothing that depends on it starts until it does.
 services:
   assistant:
-    build: ./assistant
-    depends_on: [mcp, qdrant, ollama]
+    build: ../../../workshops/assistant/after
     environment:
-      - MCP_URL=http://mcp:8080
-      - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_URL=http://ollama:11434
-    ports: ["8000:8000"]
+      MCP_SERVER: http://mcp:8080/mcp
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_HOST: http://ollama:11434
+      ASSISTANT_DB: /data/assistant.db
+      # Ship spans to a collector by adding one and uncommenting:
+      # OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318/v1/traces
+    volumes:
+      - assistant-data:/data # memory survives a container restart — that is the point
+    ports:
+      - "8000:8000" # the ONLY published port; everything else stays internal
+    depends_on: # wait for HEALTH, not for start — a started Qdrant isn't a ready Qdrant
+      mcp:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
   mcp:
-    build: ./mcp-server
-    ports: ["8080:8080"]
+    build: ../../../workshops/assistant/after
+    command: ["python", "-m", "assistant.mcp_server", "--http"]
+    healthcheck:
+      # the MCP endpoint answers POSTs, not GETs — an open socket is the readiness signal
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8080), 2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
   qdrant:
-    image: qdrant/qdrant:latest
-    ports: ["6333:6333"]
+    image: qdrant/qdrant:v1.18.3 # pinned — ':latest' means every reviewer runs a different stack
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      # the qdrant image ships no curl; bash's /dev/tcp probe is the standard workaround
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+
   ollama:
-    image: ollama/ollama:latest
-    ports: ["11434:11434"]
-    volumes: ["ollama:/root/.ollama"]
+    image: ollama/ollama:0.32.5 # pinned, same reason
+    entrypoint: ["/bin/sh", "-c"]
+    command: # bootstrap: serve, pull the two models the course uses, then keep serving
+      - |
+        ollama serve &
+        sleep 2
+        ollama pull qwen3.5:9b
+        ollama pull nomic-embed-text
+        wait
+    volumes:
+      - ollama-models:/root/.ollama # pulled models survive `compose down`
+    healthcheck:
+      # healthy = the MODELS are in, not merely the daemon — so the assistant's
+      # service_healthy wait actually waits for the bootstrap to finish
+      test: ["CMD-SHELL", "ollama list | grep -q qwen3.5 && ollama list | grep -q nomic-embed-text"]
+      interval: 15s
+      timeout: 5s
+      retries: 80 # first boot downloads ~6 GB of models; be patient, not broken
+
 volumes:
-  ollama:
+  assistant-data:
+  qdrant-data:
+  ollama-models:

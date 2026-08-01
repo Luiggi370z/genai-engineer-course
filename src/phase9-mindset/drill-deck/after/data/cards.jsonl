@@ -1,5 +1,5 @@
 {"id": "qb-1", "q": "Temperature vs top_p?", "a": "Temperature rescales the whole distribution; top_p truncates to the probability nucleus. Tune one, not both."}
 {"id": "qb-5", "q": "Why hybrid over vector-only?", "a": "Dense embeddings shred exact identifiers into sub-tokens; BM25 catches them. Fuse with RRF, then rerank."}
 {"id": "qb-9", "q": "What makes something an agent, and its safety rails?", "a": "A model in a loop with tools (reason->act->observe). Rails: step cap + timeout in code, sandboxing, least privilege, HITL, graceful degradation."}
-{"id": "qb-13", "q": "MCP vs plain tool calling?", "a": "MCP adds runtime discovery, standard transports, and sessions on top of tool calling. Write the server once, any client uses it."}
+{"id": "qb-13", "q": "MCP vs plain tool calling?", "a": "MCP adds runtime discovery and standard transports on top of tool calling — stateless request/response since the 2026 spec, so never assume the server remembers you. Write the server once, any client uses it."}
 {"id": "qb-16", "q": "Direct vs indirect injection; why unsolved?", "a": "Direct: user types it. Indirect: hidden in data the agent reads (the 2026 nightmare). Structural (instructions+data share one channel), so contain, don't filter."}

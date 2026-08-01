@@ -84,7 +84,8 @@ def _latency_of(tier: Tier) -> float:
 
 
 def percentile(values: Sequence[float], p: float) -> float:
-    """TODO 2: nearest-rank percentile, 0.0 on empty. No interpolation."""
+    """TODO 2: nearest-rank percentile, 0.0 on empty. No interpolation.
+    The rank is ceil(p/100 * n) — not round(), which shifts ties to even."""
     raise NotImplementedError
 
 

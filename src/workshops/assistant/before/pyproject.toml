@@ -4,6 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
   "opentelemetry-sdk>=1.30,<2",
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+  "pydantic>=2.7,<3",
   "pytest>=8,<9",
 ]
 
@@ -16,10 +19,19 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
+reportMissingImports = "none"  # integration-only libs (qdrant/ollama/mcp/otlp) aren't installed in the fast tier
 
 [dependency-groups]
-dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1", "httpx>=0.27,<1"]
+# The real tier. Installed with `uv sync --group integration`; never by the fast gate.
+integration = [
+  "qdrant-client>=1.10,<2",
+  "ollama>=0.3,<1",
+  "mcp>=2.0.0,<3",   # SDK v2 (spec 2026-07-28). v1 code will NOT run on this.
+  "opentelemetry-exporter-otlp>=1.30,<2",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["src"]
+markers = ["integration: needs real services (Qdrant/Ollama/MCP/OTLP) — excluded from the fast tier"]

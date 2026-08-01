@@ -1,4 +1,4 @@
-"""Workshop 2 layer — the agent loop with HITL, built on the Phase-3 pattern.
+"""Workshop 4 layer — the agent loop with HITL, built on the Phase-3 pattern.
 
 The 'brain' (decide) is injected so tests are deterministic/offline. Gated tools
 never fire without approval; the loop has a hard step cap.
@@ -39,4 +39,9 @@ Decider = Callable[[str, list[tuple[Step, Any]]], Step]
 
 def run(goal: str, decide: Decider, approvals: dict[str, bool] | None = None,
         registry: dict[str, Tool] | None = None, max_steps: int = 8) -> AgentResult:
-    raise NotImplementedError  # TODO
+    # TODO: loop to max_steps; final step -> set text and return. Unknown tool ->
+    # error observation, keep going. Gated tool without approval -> record a
+    # Pending, audit "paused for approval: <tool>", return. Executed tool ->
+    # audit "ran: <tool>" (observe.py derives step_count from the audit list —
+    # skip this and a successful multi-tool run reports zero steps).
+    raise NotImplementedError

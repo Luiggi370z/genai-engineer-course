@@ -29,7 +29,7 @@ class Tier:
         raise NotImplementedError
 
 
-LOCAL = Tier("local", "qwen3.5:8b", 0.0, 0.0)
+LOCAL = Tier("local", "qwen3.5:9b", 0.0, 0.0)
 CHEAP = Tier("cheap", "gpt-5.4-mini", 0.25, 2.00)
 FRONTIER = Tier("frontier", "gpt-5.2", 1.75, 14.00)
 

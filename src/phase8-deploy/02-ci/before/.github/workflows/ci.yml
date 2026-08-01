@@ -4,14 +4,14 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - run: make test          # unit + integration
-      - run: make eval          # RAGAS smoke: fails if faithfulness < 0.85
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: make test          # unit tests (fast tier), offline
+      - run: make eval          # quality gate: fails if faithfulness/recall regressed
   safety:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v3
-      - run: make redteam       # fails if any gated tool fires unapproved
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: make redteam       # safety gate: fails if any gated tool fired unapproved
 # Make BOTH jobs required in branch protection: no green, no merge.

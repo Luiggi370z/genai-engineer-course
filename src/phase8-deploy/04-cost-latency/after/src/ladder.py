@@ -12,6 +12,7 @@ them, you now know which rung to blame when the eval score moves.
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
@@ -117,10 +118,13 @@ def _latency_of(tier: Tier) -> float:
 
 
 def percentile(values: Sequence[float], p: float) -> float:
+    """Nearest-rank: index is ceil(p/100 * n) - 1. `round()` is a trap here —
+    ties-to-even shifts exact ranks, and the budget gate below would pass or
+    fail on the wrong P99."""
     if not values:
         return 0.0
     ordered = sorted(values)
-    idx = min(len(ordered) - 1, max(0, round(p / 100 * len(ordered) + 0.5) - 1))
+    idx = min(len(ordered) - 1, max(0, math.ceil(p / 100 * len(ordered)) - 1))
     return ordered[idx]
 
 

@@ -12,7 +12,7 @@ from .core import Candidate, Reply
 # Prices are $/MTok (input, output). Local models are free per token — the cost
 # is your electricity and your patience, neither of which bills per request.
 CANDIDATES: dict[str, Candidate] = {
-    "local": Candidate("local", "qwen3.5:8b", price_in=0.0, price_out=0.0),
+    "local": Candidate("local", "qwen3.5:9b", price_in=0.0, price_out=0.0),
     "local-big": Candidate("local-big", "qwen3-coder:30b", price_in=0.0, price_out=0.0),
     "gpt": Candidate("gpt", "gpt-5.2", price_in=1.75, price_out=14.00),
     "gpt-mini": Candidate("gpt-mini", "gpt-5.4-mini", price_in=0.25, price_out=2.00),

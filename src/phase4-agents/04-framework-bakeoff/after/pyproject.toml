@@ -15,10 +15,20 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
+# The integration-group frameworks aren't installed in the default env.
+reportMissingImports = "none"
 
 [dependency-groups]
 dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The real frameworks. Heavy dep tree, so opt-in: `make test-integration`.
+# LangGraph + Pydantic AI prove their ideas offline; CrewAI needs Ollama.
+integration = [
+  "langgraph>=0.6,<2",
+  "pydantic-ai>=1,<2",
+  "crewai>=0.100,<2",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["."]
+markers = ["integration: real LangGraph/Pydantic AI/CrewAI (make test-integration)"]

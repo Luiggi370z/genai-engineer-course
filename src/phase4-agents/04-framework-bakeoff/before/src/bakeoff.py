@@ -6,8 +6,12 @@
 - crew_style(query, workers): role-based workers each take a turn passing context
   along (fast multi-role prototyping is the idea).
 
-Then write a one-paragraph verdict in README: which fits which job, and why.
-Reference: ../after/src/bakeoff.py.
+These miniatures are the FAST tier — for feeling the shape of each idea offline.
+The real tier is tests/test_integration.py: the same three ideas proven in the
+actual libraries (LangGraph, Pydantic AI, CrewAI) via `make test-integration`.
+
+Then write a one-paragraph verdict in README — from the real tier, not the
+miniatures: which fits which job, and why. Reference: ../after/src/bakeoff.py.
 """
 from __future__ import annotations
 

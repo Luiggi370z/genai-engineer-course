@@ -1,3 +1,5 @@
+import pytest
+
 from src.agent import Decision, calculator, run_agent
 
 
@@ -33,3 +35,14 @@ def test_unknown_tool_becomes_an_observation_not_a_crash():
     it = iter(seq)
     out = run_agent("x", {"calc": calculator}, lambda g, s: next(it))
     assert out == "recovered"
+
+
+def test_calculator_does_arithmetic_and_nothing_else():
+    # The expression comes from the model: it is untrusted input at a tool
+    # boundary. Arithmetic must work; anything else must be refused, not run.
+    assert calculator("2 + 40") == 42.0
+    assert calculator("-(3 * 4) / 2") == -6.0
+    with pytest.raises(ValueError):
+        calculator("__import__('os').system('true')")
+    with pytest.raises(ValueError):
+        calculator("().__class__.__mro__")

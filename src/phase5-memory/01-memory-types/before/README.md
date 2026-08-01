@@ -1,42 +1,49 @@
 # 5.1 Four kinds of memory
 
-Give the agent a memory you can audit, expire and delete — on the retrieval stack you
-already built in Phase 2.
+**Goal.** Build a memory store the agent can audit, expire and delete: one Qdrant
+collection, namespaced by `(user, kind)` in the payload, with a `forget` that
+actually forgets — on the retrieval stack you already built in Phase 2.
+**Prerequisite.** Phase 2 (you have written to and searched a Qdrant collection).
+**Effort.** ~75 min · involved.
+
+## Do this
 
 ```bash
-make setup && make test        # 13 failures; read them, they are the spec
-uv run python -m src.memory    # the report you're working toward
+make setup && make test     # 13 failing tests — read them, they are the spec
+$EDITOR src/memory.py       # fill the write/recall/forget paths, the TTL filter, classify
+make check                  # green: ruff + pyright + pytest, all offline
+uv run python -m src.memory # the report you are working toward
 ```
 
-## Your job
+## What the first failure means
 
-Implement, in `src/memory.py`:
+`test_a_written_fact_is_recallable_with_its_source` fails because `write()` and
+`recall()` aren't built yet. It's asking for the round trip: store one claim as a
+Qdrant point whose payload carries user, kind, text, source and expiry, then get it
+back from a filtered vector search with the source intact. Provenance is the
+non-negotiable part — a memory you can't trace is a memory you can't delete later.
 
-| Method | The interesting part |
-|---|---|
-| `write` | refuse a blank `source`; `ttl_days=None` must store `None`, not `0` |
-| `recall` | filtered search — one namespace, expired rows already excluded |
-| `all` | `scroll`, not search: listing is not ranking |
-| `forget` | delete the point, do not lower its rank |
-| `forget_all` | one filter delete = "forget everything you know about me" |
-| `_scope` | `(user, kind)` as filter conditions |
-| `_filter` | `_scope` plus the TTL rule |
-| `classify` | route a claim to one of the four kinds |
+## Done when
 
-## The two places people get this wrong
+- [ ] `make check` is green (lint, types, fast tests).
+- [ ] Rows with no expiry survive the TTL filter — a plain range condition drops
+      every `null` row, and `test_rows_without_an_expiry_survive_the_ttl_filter`
+      exists purely to catch that.
+- [ ] `forget` leaves an empty recall, not a lower rank (the test asserts `== []`,
+      because a "deleted" fact that still ranks second will resurface in a prompt).
 
-**Expiry.** "Not expired" is two cases: the row has no expiry at all, or its expiry is
-in the future. A single range condition drops every `null` row, and your agent
-forgets everything. The fix is a `min_should` clause with `min_count=1` — one of the
-tests exists purely to catch this.
+## Stuck?
 
-**Forgetting.** It is tempting to down-weight a corrected fact. Don't. The test
-asserts an empty recall, because a row that still ranks second will resurface in a
-prompt eventually, and the user who corrected you will notice.
+1. Build `_scope` and `_filter` first — every read path goes through them, and once
+   they exist `recall`, `all`, and `forget_all` are each about three lines. Use
+   `scroll` for `all()`: listing is not ranking.
+2. "Not expired" is two cases: no expiry at all, or expiry in the future. That is a
+   `models.MinShould` with `min_count=1` over an `IsNullCondition` on `expires_at`
+   and a `Range(gte=cutoff)` — not a single range condition.
 
-## Then do it for your own assistant
-
-Wire this store into the assistant from Workshop 4 and answer three questions in your
-repo: what does it write (and what does it refuse to write), what expiry does each
-kind get, and what happens when the user corrects a fact. Those three answers are the
-memory design — the code is the easy part.
+## Going further (optional integration lane)
+`make test-integration` runs the paraphrase-recall test against real fastembed
+embeddings (`BAAI/bge-small-en-v1.5`). Needs no key or service — it downloads an
+ONNX model on first run and executes locally. Skippable: the fast tier already
+proves namespacing, expiry and deletion; only the "no shared words, same meaning"
+claim needs real vectors.

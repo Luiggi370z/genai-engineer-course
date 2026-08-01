@@ -1,8 +1,12 @@
-"""Workshop 2 layer — the assistant's tools. Every external connection is a tool.
+"""Workshop 4 layer — the assistant's tools. Every external connection is a tool.
 
 Read-only tools run freely; anything that sends/schedules is gated behind
 requires_approval. Connectors are stubbed (email/news/telegram/calendar) so the
 whole thing runs offline; swap the bodies for real APIs via env-var credentials.
+
+The judgement to supply here is not the stub bodies — it's the SHAPE of the
+registry: which tools are read-only and which are irreversible. Get that wrong
+and the whole HITL containment story in agent.py has nothing to stand on.
 """
 from __future__ import annotations
 
@@ -22,35 +26,31 @@ class Tool:
 # --- stubbed connectors (read-only) ---
 def read_emails(since: str = "today", limit: int = 20) -> list[dict]:
     """Read recent emails (read-only). Use to check or summarize the inbox."""
-    return [
-        {"from": "boss@work.com", "subject": "Q3 recap", "snippet": "numbers look good"},
-        {"from": "news@digest.com", "subject": "Daily", "snippet": "AI roundup inside"},
-    ][:limit]
+    # TODO 1: return a small list of email dicts (from/subject/snippet), capped
+    # at `limit`. A stub is fine — the point is that it is read-only.
+    raise NotImplementedError
 
 
 def read_news(url: str) -> str:
     """Fetch and return the text of a news page (read-only)."""
-    return "Headline: local models keep getting smaller and faster. Details..."
+    # TODO 2: return some page text. Read-only; no side effects.
+    raise NotImplementedError
 
 
 # --- gated connectors (irreversible) ---
 def send_telegram(chat_id: str, message: str) -> dict:
     """Send a Telegram message. IRREVERSIBLE — requires approval."""
-    if not chat_id or not message:
-        return {"error": "chat_id and message required"}
-    return {"sent": True, "chat_id": chat_id}
+    # TODO 3: validate chat_id/message, then return a sent-confirmation dict.
+    raise NotImplementedError
 
 
 def schedule_event(title: str, start_iso: str, duration_min: int = 30) -> dict:
     """Create a calendar event. IRREVERSIBLE — requires approval."""
-    if not title or not start_iso:
-        return {"error": "title and start_iso required"}
-    return {"created": title, "start": start_iso}
+    # TODO 4: validate title/start_iso, then return a created-event dict.
+    raise NotImplementedError
 
 
-REGISTRY: dict[str, Tool] = {
-    "read_emails": Tool("read_emails", read_emails, False, read_emails.__doc__ or ""),
-    "read_news": Tool("read_news", read_news, False, read_news.__doc__ or ""),
-    "send_telegram": Tool("send_telegram", send_telegram, True, send_telegram.__doc__ or ""),
-    "schedule_event": Tool("schedule_event", schedule_event, True, schedule_event.__doc__ or ""),
-}
+# TODO 5: register all four tools. read_emails/read_news are read-only
+# (requires_approval=False); send_telegram/schedule_event are irreversible
+# (requires_approval=True). agent.run() reads this map to decide what to gate.
+REGISTRY: dict[str, Tool] = {}

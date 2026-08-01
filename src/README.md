@@ -45,7 +45,7 @@ Requirements: **Python 3.11+**, [uv](https://docs.astral.sh/uv/), and (for most 
 Pull the models the course uses once:
 
 ```bash
-ollama pull qwen3.5:8b          # small chat / tool-calling model
+ollama pull qwen3.5:9b          # small chat / tool-calling model
 ollama pull nomic-embed-text    # embeddings
 ollama pull qwen3-coder:30b     # eval judge (Phase 3) — any capable local model works
 ollama pull llama-guard3:8b     # guard model (Phase 6)
@@ -70,7 +70,7 @@ it: the tool you measure with, and the loop that turns the result into offers.
 | 5 | Memory + crew      | 5 | Memory with provenance + TTL, budgeted context, tiered delegation | `memory.py`, `crew.py` |
 | 6 | Hardened assistant | 6 | Guardrails, spotlighting, least-privilege, red-team CI | `guardrails.py` |
 | 7 | Your own MCP       | 7 | An MCP server, consumed by the assistant via discovery | `mcp_client.py` |
-| 8 | Deployed stack     | 8 | OTel spans around the loop and every tool, answer cache with refusal rules | `observe.py`, `cache.py` |
+| 8 | Deployed stack     | 8 | OTel spans around the loop and every tool, answer cache with refusal rules — plus the capstone: a FastAPI composition root wiring every layer, real adapters (Qdrant/Ollama/MCP/OTLP) behind env vars, SQLite memory, an MCP server, a Docker image | `observe.py`, `cache.py`, `service.py`, `adapters.py` |
 | 9 | Interview loop     | 9 | No code — a scored design-mock rubric and a metrics worksheet | `workshops/interview-loop/` |
 
 Briefs live in `workshops/assistant/WORKSHOP-*.md`, one per layer, plus
@@ -137,11 +137,16 @@ The MCP lessons target **SDK v2** — see `phase7-mcp/SDK-V2-MIGRATION.md`.
 - **Workshop → `workshops/assistant`** (your MCP, used by the assistant)
 
 ### Phase 8 · Run It in Production
-- `01-compose` — containerize assistant + MCP + Qdrant + Ollama
-- `02-ci` — GitHub Actions gating on tests + eval + red-team
-- `03-deploy-observe` — deploy, secrets, health, OpenTelemetry spans read offline
+- `01-compose` — the capstone stack behind one `docker compose up`: pinned images, healthchecks, health-gated dependencies, one published port — plus structural checks over the parsed YAML
+- `02-ci` — GitHub Actions gating on tests + eval + red-team, with real `make eval` / `make redteam` targets
+- `03-deploy-observe` — deploy, secrets, health, OpenTelemetry spans read offline (OTLP export is one env var)
 - `04-cost-latency` — exact + semantic cache, a tier router with a ceiling, a P99 budget gate
-- **Workshop → `workshops/assistant`** (deployed stack)
+- **Workshop → `workshops/assistant`** (deployed stack + capstone service)
+
+The slow lane: `./verify-e2e.sh` (needs Docker) boots the composed stack and proves
+it end to end — tier report, grounded answer, abstention, injection containment,
+approval gating, an MCP call over the wire, spans recorded. `verify-lessons.sh`
+stays offline and never runs it.
 
 ### Phase 9 · The GenAI Mindset
 - `drill-deck` — the interview question bank as flashcards

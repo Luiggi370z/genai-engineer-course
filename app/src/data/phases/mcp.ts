@@ -72,7 +72,7 @@ export const mcp: PhaseContent = {
         {
           kind: "list",
           items: [
-            "It’s a real, governed standard: under the Linux Foundation’s Agentic AI Foundation since late 2025, backed by Anthropic, OpenAI, Google, and Microsoft, with ~10,000 public servers.",
+            "It’s a real, governed standard: under the Linux Foundation’s Agentic AI Foundation since late 2025, backed by Anthropic, OpenAI, Google, and Microsoft, with ~10,000 public servers (as of mid-2026).",
             "Mental model: MCP sits **on top of** the tool calling from Phase 4. It doesn’t replace your REST API — it wraps capabilities so any client can **discover** them at runtime, over a **standard transport**, in a **session**.",
             "The payoff for you: your Phase-4 assistant can pick up a brand-new server with **zero code changes**, because the capability list is data the client fetches, not code you hard-wire.",
           ],
@@ -398,7 +398,7 @@ async def load_mcp_tools(target):
     {
       id: "p5-q1",
       q: "What does MCP add on top of plain tool calling?",
-      a: "Runtime discovery of tools/resources/prompts, a standard transport and session layer, and write-once-use-everywhere interop. Tool calling is how one agent invokes one function; MCP is how any client discovers and uses any server’s capabilities.",
+      a: "Runtime discovery of tools/resources/prompts, a standard transport (stateless request/response since the 2026 spec), and write-once-use-everywhere interop. Tool calling is how one agent invokes one function; MCP is how any client discovers and uses any server’s capabilities.",
     },
     {
       id: "p5-q2",

@@ -13,7 +13,7 @@ def rows() -> list[Row]:
             p50_ms=90, max_ms=120, errors=["schema violation"] * 3),
         Row("dear", "frontier-1", cases=4, ok=4, tokens_in=400, tokens_out=80, cost_usd=0.0044,
             p50_ms=800, max_ms=1500),
-        Row("local", "qwen3.5:8b", cases=4, ok=0, tokens_in=400, tokens_out=80, cost_usd=0.0,
+        Row("local", "qwen3.5:9b", cases=4, ok=0, tokens_in=400, tokens_out=80, cost_usd=0.0,
             p50_ms=2200, max_ms=4000, errors=["schema violation"] * 4),
     ]
 

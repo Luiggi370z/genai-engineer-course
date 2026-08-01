@@ -2,15 +2,32 @@
 
 - read_note: read-only (no gate).
 - draft_reply: reversible write (produces text, doesn't send).
-- delete_note: irreversible -> must be gated (requires approve=True).
+- delete_note: irreversible -> gated by approval the APPLICATION records.
 
 The model picks and fills a tool using ONLY its name, docstring, and type hints.
 So the docstring says WHAT it does and WHEN to use it. Validate every argument;
 return errors as data so the agent can recover instead of crashing.
+
+One boundary above all: **approval is application state, never a tool argument.**
+The model fills every parameter in a tool's signature. Put `approve: bool` in
+there and you have handed the model a pen to sign its own permission slip — one
+injected instruction and the "gate" approves itself. The human's click lands in
+`grant_approval()`, which only application code calls; the tool checks that
+record and exposes nothing the model can set to skip it.
 """
 from __future__ import annotations
 
 _NOTES: dict[str, str] = {"1": "buy milk", "2": "call dentist"}
+
+# Human approvals on file, keyed by note id. Written by the application when a
+# person clicks approve; consumed (one delete per approval) by delete_note.
+_APPROVALS: set[str] = set()
+
+
+def grant_approval(note_id: str) -> None:
+    """Record a human's approval to delete one note. Application code only —
+    this function is NOT in the tool registry the model sees."""
+    _APPROVALS.add(note_id)
 
 
 def read_note(note_id: str) -> dict:
@@ -42,16 +59,18 @@ def draft_reply(note_id: str, tone: str = "friendly") -> dict:
     return {"draft": f"[{tone}] Re: {note['text']} — thanks, will do!"}
 
 
-def delete_note(note_id: str, approve: bool = False) -> dict:
-    """Delete a note permanently. IRREVERSIBLE — requires human approval.
+def delete_note(note_id: str) -> dict:
+    """Delete a note permanently. IRREVERSIBLE — a human must approve it first.
 
     Args:
         note_id: the note to delete.
-        approve: must be True (a human approved) or the delete is refused.
+    Refused unless the application has a human approval on file for this exact
+    note. There is no argument that skips the check.
     """
-    if not approve:
-        return {"error": "refused: delete requires human approval (approve=True)"}
+    if note_id not in _APPROVALS:
+        return {"error": f"refused: no human approval on file for note {note_id!r}"}
     if note_id not in _NOTES:
         return {"error": f"no note {note_id!r}"}
+    _APPROVALS.discard(note_id)  # one approval buys exactly one delete
     del _NOTES[note_id]
     return {"deleted": note_id}

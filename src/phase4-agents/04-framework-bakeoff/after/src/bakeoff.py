@@ -1,13 +1,20 @@
 """The SAME agent, three ways — so you can feel the trade-offs.
 
-To keep the lesson runnable offline with no heavy installs, each "framework" here
-is a faithful *miniature* that captures its defining idea:
+Two tiers, honestly labelled:
+
+**Fast tier (this file).** Each "framework" is a hand-written *miniature* that
+captures its defining idea in ~15 lines, so the comparison runs offline with no
+heavy installs:
   - langgraph_style: a state machine with nodes + a checkpoint dict (durability)
   - pydantic_style: a typed agent where args are validated models (safety)
   - crew_style: role-based workers that each take a turn (fast multi-role)
 
-The course uses the real libraries; the point of this file is the comparison,
-which is identical. See README for the verdict template.
+**Real tier (tests/test_integration.py).** The same three ideas proven in the
+actual libraries — LangGraph's StateGraph + checkpointer, Pydantic AI's typed
+outputs, CrewAI's role/task orchestration — via `make test-integration`.
+
+The miniatures are for feeling the shape of each idea; the verdict you write in
+the README must come from the real tier.
 """
 from __future__ import annotations
 

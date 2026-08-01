@@ -21,6 +21,9 @@ typeCheckingMode = "basic"
 [tool.pytest.ini_options]
 addopts = "-q"
 pythonpath = ["."]
+markers = ["integration: needs Ollama running with qwen3.5:9b (make test-integration)"]
 
 [dependency-groups]
 dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
+# The real tier reuses the same runtime deps — it just needs Ollama serving.
+integration = []

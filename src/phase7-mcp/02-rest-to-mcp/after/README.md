@@ -1,4 +1,4 @@
-# 5.2 REST → MCP — reference (SDK v2)
+# 7.2 REST → MCP — reference (SDK v2)
 
 A `MCPServer` exposing 3 tools, a resource and a prompt over a REST service.
 

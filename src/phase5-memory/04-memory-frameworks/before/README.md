@@ -1,44 +1,52 @@
 # 5.4 Mem0 vs LangMem
 
-Implement one memory protocol three times — a fake, Mem0, LangMem — and run one contract
-suite over all three.
+**Goal.** Implement one memory protocol three times — an offline `FakeStore`, Mem0,
+LangMem — and run a single contract suite over all three, so "we could swap vendors"
+is a claim you can prove rather than a hope.
+**Prerequisite.** 5.1 Four kinds of memory (the protocol mirrors that store's API).
+**Effort.** ~60 min · moderate.
+
+## Do this
 
 ```bash
-make setup && make test        # 10 failures against the fake; that's the spec
-make test-integration          # the same contract against the real libraries
+make setup && make test     # 10 failing tests — read them, they are the spec
+$EDITOR src/store.py        # fill FakeStore: a dict, overlap() scoring, expiry
+$EDITOR src/adapters.py     # then the two rented adapters (integration tier)
+make check                  # green: ruff + pyright + pytest, all offline
 ```
 
-## Your job, in order
+## What the first failure means
 
-1. **`FakeStore`** in `src/store.py` — a dict and `overlap()`. Get the contract green
-   offline first; it is the control for everything after.
-2. **`Mem0Store`** in `src/adapters.py` — `Memory.from_config(MEM0_CONFIG)`, then `add`
-   and `search`.
-3. **`LangMemStore`** — the manage tool with a typed schema, reads from the LangGraph
-   store.
+`test_contract_holds_offline[a_written_fact_is_recallable]` fails because
+`FakeStore.write` and `FakeStore.recall` aren't built yet. It's the first of seven
+contract checks that every adapter must pass: store a claim, recall it by meaning
+(here, `overlap()` word similarity), get the provenance back. Get the fake green
+first — it is the control that tells you whether a later failure is your logic or
+the vendor's.
 
-The contract suite is given. Do not weaken it to make an adapter pass — that is the one
-move that defeats the whole exercise.
+## Done when
 
-## Run before you write
+- [ ] `make check` is green (lint, types, fast tests).
+- [ ] All seven contract checks pass against `FakeStore` — including the blank
+      `source` refusal and the expired row that must not come back — without
+      weakening the suite, which is the one move that defeats the exercise.
+- [ ] `count()` sees expired rows that `recall()` hides: audits and recalls answer
+      different questions.
 
-Both libraries moved recently. Open a REPL, make the call, print what comes back:
+## Stuck?
 
-```python
-from mem0 import Memory
-m = Memory.from_config(MEM0_CONFIG)
-print(m.add("Lu works in UTC-5", user_id="me:semantic", infer=False))
-print(m.search("timezone", filters={"user_id": "me:semantic"}, top_k=5))
-```
+1. `FakeStore` is a dict keyed by `fingerprint(text)` — the helpers `overlap()`,
+   `expiry()` and `words()` are already written. Filter expired rows inside
+   `recall`, score the rest, sort, cut to `k`.
+2. For the rentals, run before you write: both libraries moved recently. Mem0 2.x
+   wants `search(query, filters={"user_id": ...}, top_k=k)` (the bare `user_id=`
+   kwarg and `limit` are the 1.x forms), and LangMem's manage tool returns a
+   sentence like "created memory <uuid>" and nests your schema under `content` —
+   `_unwrap` exists because of that shape.
 
-Three surprises are waiting for you, and finding them yourself is the lesson: what
-`add()` does by default when you leave `infer` alone, which argument carries the
-namespace in 2.x, and what shape LangMem stores a typed schema in.
-
-## The judgement to write down
-
-At the end, one paragraph in the repo: which one you would ship, what you verified it
-against, and what would change your mind. Check the last release date of both before
-you decide — one of them will tell you something.
-
-Needs Ollama running with `nomic-embed-text` pulled for the Mem0 path. No API keys.
+## Going further (optional integration lane)
+`make test-integration` runs the same seven contract assertions against the real
+Mem0 and LangMem libraries (14 tests). Needs Ollama running with `nomic-embed-text`
+pulled for the Mem0 path — no hosted key, but both libraries pull heavy dependency
+trees. Skippable in the sense that the fake proves your contract logic, but the
+rented run is where this lesson's three API surprises actually live.

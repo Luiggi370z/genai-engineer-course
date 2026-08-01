@@ -17,5 +17,5 @@ python -m bench.cli --providers local --json > bench-$(date +%F).json
 
 The fast tier never touches the network: candidates are dicts, the runner is a fake
 with scripted replies, and the clock is injected. The integration tier needs
-`ollama serve` and `ollama pull qwen3.5:8b`; add `OPENAI_API_KEY` only if you want
+`ollama serve` and `ollama pull qwen3.5:9b`; add `OPENAI_API_KEY` only if you want
 the hosted candidates too.

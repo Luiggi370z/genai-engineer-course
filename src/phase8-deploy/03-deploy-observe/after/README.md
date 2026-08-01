@@ -1,8 +1,10 @@
 # 8.3 Deploy & observe — reference
 
-Real OpenTelemetry spans carrying the OpenInference attribute names, with P95/P99,
-spend by tier and a rollback guard all read **off the spans** rather than from a
-parallel bookkeeping list.
+Real OpenTelemetry spans carrying OpenInference attribute names where a convention
+exists (`llm.model_name`, `llm.token_count.*`) and clearly-marked custom extensions
+where none does (`cost.usd`, `llm.tier`, `cache.hit`), with P95/P99, spend by tier
+and a rollback guard all read **off the spans** rather than from a parallel
+bookkeeping list.
 
 `InMemorySpanExporter` ships with the SDK, so the production tracing code is the code
 under test — no collector, no vendor account. Swap in an OTLP exporter and nothing in

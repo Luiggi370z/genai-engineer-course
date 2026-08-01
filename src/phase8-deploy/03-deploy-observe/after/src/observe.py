@@ -5,8 +5,9 @@ Two ideas carry this module.
 **Instrument once.** Every LLM observability product (Langfuse v4, Phoenix,
 Braintrust, your existing APM) either speaks OTel or exports to it. So the spans
 are plain OTel spans carrying the OpenInference attribute names, and *where they
-ship* is an environment variable. Swap `InMemorySpanExporter` for an OTLP exporter
-and this file does not change.
+ship* really is an environment variable: `recorder()` reads
+`OTEL_EXPORTER_OTLP_ENDPOINT` and, when set, adds an OTLP exporter to the same
+provider. Nothing else in this file changes between a unit test and production.
 
 **Read your metrics off the spans.** P95, spend and error rate are derived from the
 exported spans rather than from a parallel bookkeeping list. The moment latency
@@ -17,6 +18,8 @@ instrumentation silently stops recording.
 """
 from __future__ import annotations
 
+import math
+import os
 from collections.abc import Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -26,12 +29,14 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import Status, StatusCode, Tracer
 
-# OpenInference / GenAI semantic conventions. Using the agreed names is what makes
-# a trace legible to a dashboard that has never seen your code; invent your own and
-# every panel is bespoke forever.
+# llm.model_name and llm.token_count.* are OpenInference semantic-convention
+# names — agreed vocabulary a dashboard can read without ever seeing this repo.
+# (OTel's own GenAI conventions use gen_ai.*; pick one family and stick to it.)
 MODEL = "llm.model_name"
 PROMPT_TOKENS = "llm.token_count.prompt"
 COMPLETION_TOKENS = "llm.token_count.completion"
+# cost.usd, llm.tier and cache.hit are OUR extensions — no convention covers
+# them. Custom names are fine; passing them off as standard is not.
 COST = "cost.usd"
 TIER = "llm.tier"
 CACHE_HIT = "cache.hit"
@@ -59,11 +64,26 @@ class Recorder:
         self.exporter.clear()
 
 
-def recorder(service: str = "assistant") -> Recorder:
-    """Wire a provider that keeps its spans in memory. No network, no vendor."""
+def recorder(service: str = "assistant", otlp_endpoint: str | None = None) -> Recorder:
+    """Wire a provider that keeps its spans in memory. No network, no vendor.
+
+    Unless there is one: when `otlp_endpoint` — or, in production, the standard
+    `OTEL_EXPORTER_OTLP_ENDPOINT` env var — is set, the SAME provider also ships
+    every span over OTLP. The in-memory exporter stays either way, so tests and
+    the metrics helpers below keep reading spans locally. The OTLP package is
+    imported lazily; the fast tier never installs it (`--group integration` does).
+    """
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    otlp_endpoint = otlp_endpoint or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+    if otlp_endpoint:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+        )
     return Recorder(tracer=provider.get_tracer(service), provider=provider, exporter=exporter)
 
 
@@ -135,11 +155,16 @@ def latencies_ms(spans: Sequence[ReadableSpan]) -> list[float]:
 
 def percentile(values: Sequence[float], p: float) -> float:
     """Nearest-rank percentile. No interpolation: with 20 samples, invented
-    values between the ones you measured are just a smoother-looking guess."""
+    values between the ones you measured are just a smoother-looking guess.
+
+    The rank is `ceil(p/100 * n)` — the textbook definition. Do not reach for
+    `round()`: Python rounds ties to even, which shifts the index on exact-rank
+    ties (P50 of two samples would report the max) and quietly corrupts the very
+    P99 this module exists to defend."""
     if not values:
         return 0.0
     ordered = sorted(values)
-    idx = min(len(ordered) - 1, max(0, round(p / 100 * len(ordered) + 0.5) - 1))
+    idx = min(len(ordered) - 1, max(0, math.ceil(p / 100 * len(ordered)) - 1))
     return ordered[idx]
 
 
@@ -210,11 +235,11 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
 if __name__ == "__main__":
     rec = recorder()
     # A right-skewed distribution over 100 requests, which is what LLM latency
-    # actually looks like: a fast majority, some stragglers, one genuinely awful one.
-    for i, ms in enumerate([300.0] * 90 + [2100.0] * 9 + [8400.0]):
+    # actually looks like: a fast majority, some stragglers, two genuinely awful ones.
+    for i, ms in enumerate([300.0] * 89 + [2100.0] * 9 + [8400.0] * 2):
         emit_call(
             rec.tracer,
-            model="qwen3.5:8b" if ms < 1000 else "gpt-5.2",
+            model="qwen3.5:9b" if ms < 1000 else "gpt-5.2",
             tier="local" if ms < 1000 else "frontier",
             duration_ms=ms,
             cost_usd=0.0 if ms < 1000 else 0.004,

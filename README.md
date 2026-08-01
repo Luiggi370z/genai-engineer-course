@@ -28,18 +28,21 @@ to build *this kind* of software.
 You do not need a machine-learning background. Vectors, cosine similarity and a feel for
 probability are plenty; there is no maths derivation anywhere in here.
 
-**Hardware.** A **16 GB machine runs the entire course locally**, models included. More
-RAM unlocks stronger models but changes nothing you learn — and if you have less, or no
-GPU, every lesson runs against a hosted budget tier by changing one `base_url`. Phase 1
-carries the full sizing table.
+**Hardware.** Four honest tiers — pick yours and nothing you *learn* changes:
 
-The one exception worth naming: the Phase 3 eval judge is nicer on 32 GB, because a
-bigger local model makes a better judge. It is deliberately swappable, and any capable
-model works.
+| Tier | What runs | What to know |
+|------|-----------|--------------|
+| Any machine | Every lesson's fast test suite (`make test`) | Offline, deterministic, no models, no keys — the whole course can be *completed* here |
+| 16 GB RAM | The course's working models locally: `qwen3.5:8b`, `gemma4:e4b`, embeddings, guard models | The recommended local path. The 30B eval judge does **not** fit here — swap in a smaller judge or a hosted one |
+| 32 GB RAM | + `qwen3-coder:30b` as a free local Phase 3 judge | The comfortable path; bigger judges are measurably better |
+| No GPU / older laptop | Everything, against a hosted budget tier by changing one `base_url` | Needs an account, an API key, and network; costs real (small) money |
 
-**Money.** None. Every lesson's fast test tier runs **offline with zero API keys** —
-that is a design constraint of this course, not an accident. Hosted providers are
-optional everywhere, for when you want to see the difference.
+Phase 1 carries the full sizing table.
+
+**Money.** The fast test tier of every lesson runs **offline with zero API keys** — that
+is a design constraint of this course, not an accident. Running models locally is free.
+The hosted fallback and the optional "see the difference" comparisons against frontier
+providers need an account and cost real money — small, metered, and entirely optional.
 
 **Software.** Python 3.11+, [uv](https://docs.astral.sh/uv/),
 [Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.

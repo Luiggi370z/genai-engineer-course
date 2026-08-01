@@ -122,6 +122,7 @@ export function PhaseToc({ entries, accent }: { entries: TocEntry[]; accent: str
             <li key={entry.id}>
               <a
                 href={`#${entry.id}`}
+                aria-current={active === entry.id ? "location" : undefined}
                 onClick={(event) => {
                   // Keeps the URL clean — the app has no hash routing, so a lingering
                   // fragment would only be a trap on reload.

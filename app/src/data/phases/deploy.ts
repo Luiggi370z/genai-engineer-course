@@ -69,17 +69,21 @@ export const deploy: PhaseContent = {
           title: "One compose file, the whole system",
           code: `services:
   assistant:
-    build: ./assistant
-    depends_on: [mcp, qdrant, ollama]
-    environment: [MCP_URL=http://mcp:8080, QDRANT_URL=http://qdrant:6333]
-    ports: ["8000:8000"]
-  mcp:                          # your Workshop-7 server
-    build: ./mcp-server
-    ports: ["8080:8080"]
+    build: ../workshops/assistant/after   # the capstone image
+    ports: ["8000:8000"]                  # the ONLY published port
+    environment: [MCP_SERVER=http://mcp:8080/mcp, QDRANT_URL=http://qdrant:6333]
+    depends_on:                           # wait for HEALTH, not for start
+      mcp:    { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+      ollama: { condition: service_healthy }
+  mcp:                          # same image, run as the MCP server
+    build: ../workshops/assistant/after
+    command: ["python", "-m", "assistant.mcp_server", "--http"]
   qdrant:
-    image: qdrant/qdrant:latest
-  ollama:                       # local model = no API keys for the demo
-    image: ollama/ollama:latest
+    image: qdrant/qdrant:v1.18.3   # pinned — ':latest' = every reviewer runs a different stack
+  ollama:
+    image: ollama/ollama:0.32.5    # pulls its models, THEN reports healthy
+# (healthchecks elided here — the lesson writes one per service)
 # reviewers run ONE command and the assistant + MCP + retrieval all come up.`,
         },
         {
@@ -106,12 +110,13 @@ export const deploy: PhaseContent = {
           code: `jobs:
   quality:
     steps:
-      - run: make test              # unit + integration
-      - run: make eval              # RAGAS: fails if faithfulness < 0.85
+      - run: make test              # unit tests — the fast, offline tier
+      - run: make eval              # quality gate: faithfulness/recall bars
   safety:
     steps:
       - run: make redteam           # fails if any gated tool fires unapproved
-# branch protection: both jobs must pass to merge. No green, no ship.`,
+# two REQUIRED jobs, not one averaged score: a safety bypass and a quality
+# regression are different incidents. No green, no ship.`,
         },
         {
           kind: "list",
@@ -398,12 +403,12 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       title: "Containerize the assistant + MCP",
       repo: "phase8-deploy/01-compose",
       rung: "faded",
-      task: "Write multi-stage Dockerfiles and a compose file that brings your Workshop-4 assistant, your Workshop-7 MCP server, Qdrant, and Ollama up together from one command, with zero API keys on the demo path.",
+      task: "Write structural checks over the compose file (parsed YAML: pinned images, a healthcheck per service, health-gated depends_on, one published port), watch them fail on the shipped first draft, then fix the wiring until the whole stack — capstone assistant, MCP server, Qdrant, Ollama — is one trustworthy `docker compose up`, zero API keys.",
       assesses: ["p6-o1"],
       needs: ["p3-o2", "p5-o3"],
       solution: [
-        "depends_on for ordering; env vars for every URL and secret; a local model so the demo needs no keys.",
-        "Test the reviewer experience: fresh clone, one command, does it come up?",
+        "condition: service_healthy for ordering — a started Qdrant is not a ready Qdrant; env vars for every URL; the ollama service pulls its models before reporting healthy.",
+        "Test the reviewer experience: fresh clone, one command, does it come up? `verify-e2e.sh` automates exactly that.",
       ],
     },
     {

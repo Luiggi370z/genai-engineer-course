@@ -1,4 +1,4 @@
-# 5.1 Consume a server — reference (SDK v2)
+# 7.1 Consume a server — reference (SDK v2)
 
 The five beats — **connect → initialize → discover → call → close** — against a real
 server, with real protocol messages, entirely offline.

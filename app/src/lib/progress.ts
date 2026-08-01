@@ -59,3 +59,40 @@ export function saveTheme(theme: Theme): void {
     // see saveProgress
   }
 }
+
+/**
+ * Serialize progress for download. Versioned and timestamped so a future format
+ * change can migrate old files instead of rejecting them.
+ */
+export function exportProgressFile(progress: Progress): string {
+  return JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), progress }, null, 2);
+}
+
+/**
+ * Parse an uploaded progress file. Accepts the versioned export shape or a bare
+ * `{id: boolean}` map, drops anything that isn't a boolean entry, and returns
+ * null (never throws) on garbage — the caller decides how to tell the user.
+ */
+export function parseProgressFile(raw: string): Progress | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const box = parsed as Record<string, unknown>;
+    const map = "progress" in box ? box.progress : parsed;
+    if (typeof map !== "object" || map === null) return null;
+    const entries = Object.entries(map as Record<string, unknown>).filter(
+      ([, value]) => typeof value === "boolean",
+    );
+    return Object.fromEntries(entries) as Progress;
+  } catch {
+    return null;
+  }
+}
+
+export function clearProgress(): void {
+  try {
+    localStorage.removeItem(PROGRESS_KEY);
+  } catch {
+    // see saveProgress
+  }
+}

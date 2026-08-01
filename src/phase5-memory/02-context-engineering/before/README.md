@@ -1,42 +1,50 @@
 # 5.2 Context engineering
 
-Spend the window on purpose: keep, compress, evict, park — under a hard cap.
+**Goal.** Spend the context window on purpose: four moves (keep, compress, evict,
+park) and an `assemble()` that fills a prompt under a hard token cap without ever
+truncating a claim or evicting a pin.
+**Prerequisite.** 5.1 Four kinds of memory (these lines are what a recall returns).
+**Effort.** ~60 min · moderate.
+
+## Do this
 
 ```bash
-make setup && make test        # 13 failures; the failures are the spec
-uv run python -m src.context   # the receipt you're working toward
+make setup && make test      # 13 failing tests — read them, they are the spec
+$EDITOR src/context.py       # fill dedupe, evict_superseded, compress, assemble
+make check                   # green: ruff + pyright + pytest, all offline
+uv run python -m src.context # the receipt you are working toward
 ```
 
-## Your job
+## What the first failure means
 
-In `src/context.py`, implement the four moves and the assembly that uses them:
+`test_assembly_never_exceeds_the_budget` fails because `assemble()` isn't built yet.
+It's asking for the core invariant: given a task, pinned lines and ranked candidates,
+fill the window until the next line would not fit — and stop. The cap is arithmetic,
+not a suggestion, and every other behaviour (parking, pinning, the `BudgetError`)
+hangs off this loop.
 
-| Function | The interesting part |
-|---|---|
-| `dedupe` | near-duplicates, not exact ones — `rapidfuzz` with `default_process` |
-| `evict_superseded` | a correction deletes the line it replaces |
-| `compress` | one summary line that names the lines it came from |
-| `assemble` | task + pins first, fill by rank, park what does not fit |
+## Done when
 
-Already written for you: the `Line` and `Context` records, both counters, the
-summary-drift check (`facts_preserved`) and the poison-removal helper (`drop_source`).
+- [ ] `make check` is green (lint, types, fast tests).
+- [ ] Pins survive budget pressure, and pins that alone exceed the budget raise
+      `BudgetError` loudly (`test_pinning_more_than_the_budget_is_a_loud_error`).
+- [ ] A line that does not fit is parked whole, never truncated — half a fact reads
+      as a whole fact to the model, and the test checks the render for fragments.
 
-## The three ways this goes wrong
+## Stuck?
 
-**Truncating.** When a line does not fit, park it whole. A half-fact reads as a whole
-fact to the model — that is how a partial invoice number becomes an invented one.
+1. Do the three moves before the assembly: `dedupe`, `evict_superseded` and
+   `compress` each have their own test, so you can get them green in isolation and
+   then compose them inside `assemble()`.
+2. `dedupe` compares with `fuzz.token_set_ratio(a, b, processor=default_process)`
+   from `rapidfuzz` — the processor is not optional. In `assemble()`, the order is
+   the design: task + pins first (mark them with `dataclasses.replace(line,
+   pinned=True)`), then evict, dedupe, rank by score descending, and park whatever
+   does not fit.
 
-**Evicting the leash.** Pins go in before anything else, and if the pins alone exceed
-the budget, that is a `BudgetError` you want to see loudly at assembly time.
-
-**Trusting the summarizer.** Compression is a lossy write. Run `facts_preserved()`
-against your summarizer with facts you know are in the transcript, and watch it fail
-before you rely on it.
-
-## Then do it for your own assistant
-
-Wire this into the assistant and log the receipt on every step: tokens used, lines
-kept, lines parked. Let it run a long task and read the log — you will see the window
-fill with things that stopped mattering around step four. That log is the difference
-between an agent that degrades gracefully over twenty steps and one that quietly
-forgets its instructions at step twelve.
+## Going further (optional integration lane)
+`make test-integration` re-runs the budget check counted with the real `tiktoken`
+`o200k_base` tokenizer instead of the word-count stand-in. Needs network once —
+`get_encoding` downloads the BPE file on first use — but no key or GPU. Skippable:
+the fast tier already proves the assembly logic; the real tokenizer only confirms
+the budget holds in the units money is spent in.

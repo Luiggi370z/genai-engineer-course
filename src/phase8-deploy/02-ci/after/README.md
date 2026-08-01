@@ -1,3 +1,3 @@
-# 6.2 CI — reference
+# 8.2 CI — reference
 
-A GitHub Actions workflow with quality + safety jobs, and the gate logic as a testable function. Make both jobs required in branch protection.
+A GitHub Actions workflow with quality + safety jobs that call real make targets: `make eval` runs the quality gate (faithfulness/recall bars) and `make redteam` runs the safety gate (zero bypasses) over a committed report, via the CLI in `src/gate.py`. The two gates fail independently — a safety bypass and a quality regression are different incidents — which is why they are two required jobs, not one averaged score. In your own repo the targets point at the capstone's eval suite and red-team fixture instead of a fixture report. Make both jobs required in branch protection.

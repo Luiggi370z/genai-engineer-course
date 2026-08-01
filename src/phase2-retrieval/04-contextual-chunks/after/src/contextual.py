@@ -32,7 +32,7 @@ def split(text: str, chunk_size: int = 512, chunk_overlap: int = 75) -> list[str
     return splitter.split_text(text)
 
 
-def local_summarizer(model: str = "qwen3.5:8b") -> Summarizer:
+def local_summarizer(model: str = "qwen3.5:9b") -> Summarizer:
     """A FREE summarizer on Ollama via the OpenAI-compatible endpoint."""
     from openai import OpenAI
 

@@ -65,6 +65,38 @@ body {
   background-size: 28px 28px;
 }
 
+/*
+ * The skip link. A dedicated class rather than `sr-only focus:not-sr-only`
+ * because Tailwind v4 reads `focus:not-*` as its `:not()` variant, so the
+ * un-hiding utility never gets generated and the link stays clipped.
+ */
+.skip-link {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.skip-link:focus-visible {
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 50;
+  width: auto;
+  height: auto;
+  padding: 0.5rem 1rem;
+  clip-path: none;
+  border-radius: 0.375rem;
+  background: var(--color-ink);
+  color: var(--color-paper);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   ::before,

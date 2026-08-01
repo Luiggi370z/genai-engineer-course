@@ -31,7 +31,9 @@ from opentelemetry.trace import Tracer
 
 from assistant.tools import Tool
 
-# OpenInference-style attribute names.
+# tool.name follows OpenInference's tool-span convention; the agent.*, cache.hit
+# and cost.usd names are OUR extensions — labelled custom, not passed off as
+# standard.
 TOOL_NAME = "tool.name"
 TOOL_GATED = "tool.requires_approval"
 AGENT_STEPS = "agent.step_count"
@@ -65,10 +67,21 @@ class Recorder:
         self.exporter.clear()
 
 
-def recorder(service: str = "assistant") -> Recorder:
+def recorder(service: str = "assistant", otlp_endpoint: str | None = None) -> Recorder:
+    """A tracer wired to an in-memory exporter, always. When `otlp_endpoint` is set
+    (in production, from `OTEL_EXPORTER_OTLP_ENDPOINT`), the same provider also gets
+    an OTLP exporter, so spans ship to a collector with no change to instrumentation.
+    The OTLP SDK is imported lazily so the fast tier never installs it."""
     provider = TracerProvider()
     exporter = InMemorySpanExporter()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
+    if otlp_endpoint:
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        provider.add_span_processor(
+            BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint))
+        )
     return Recorder(tracer=provider.get_tracer(service), provider=provider, exporter=exporter)
 
 
@@ -108,7 +121,8 @@ def duration_ms(span: ReadableSpan) -> float:
 
 
 def percentile(values: Sequence[float], p: float) -> float:
-    """TODO 5: nearest-rank percentile, 0.0 on empty."""
+    """TODO 5: nearest-rank percentile, 0.0 on empty.
+    The rank is ceil(p/100 * n) — not round(), which shifts ties to even."""
     raise NotImplementedError
 
 
