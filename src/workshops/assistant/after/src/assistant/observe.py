@@ -42,6 +42,7 @@ AGENT_PAUSED = "agent.paused_for_approval"
 AGENT_OUTCOME = "agent.outcome"  # completed | paused_for_approval | policy_violation
 AGENT_PENDING_TOOL = "agent.pending_tool"
 AGENT_APPROVED = "agent.approved_tools"
+AGENT_APPROVAL_IDS = "agent.approval_ids"
 CACHE_HIT = "cache.hit"
 COST = "cost.usd"
 
@@ -128,10 +129,15 @@ def traced_run(run: Any, goal: str, tracer: Tracer, **kwargs: Any) -> Any:
     stopped for a human look identical in a latency chart and could not be more
     different in a review.
 
-    The approval story rides along too: which grants were live when the run
-    started (`agent.approved_tools`), which tool it is now waiting on
+    The approval story rides along too: which grants the run was allowed to spend
+    (`agent.approved_tools`), the id of each grant it actually spent
+    (`agent.approval_ids`), which tool it is now waiting on
     (`agent.pending_tool`), and a single `agent.outcome` you can group a
     dashboard by without reconstructing it from three booleans.
+
+    Recording the grant id is what makes an approval auditable end to end: the
+    same id appears on the /approve response, in the audit log, and here, so
+    "who authorized this send?" is a lookup rather than a reconstruction.
     """
     with tracer.start_as_current_span("agent.run") as span:
         approvals = kwargs.get("approvals") or {}
@@ -139,6 +145,11 @@ def traced_run(run: Any, goal: str, tracer: Tracer, **kwargs: Any) -> Any:
             AGENT_APPROVED, sorted(name for name, granted in approvals.items() if granted)
         )
         result = run(goal, **kwargs)
+        spent: dict[str, str] = getattr(result, "approval_ids", {}) or {}
+        if spent:
+            # a consuming store was in play; the allow-list snapshot above was empty
+            span.set_attribute(AGENT_APPROVED, sorted(spent))
+            span.set_attribute(AGENT_APPROVAL_IDS, [spent[k] for k in sorted(spent)])
         span.set_attribute(AGENT_STEPS, len(getattr(result, "audit", []) or []))
         pending = getattr(result, "pending", None)
         span.set_attribute(AGENT_PAUSED, pending is not None)

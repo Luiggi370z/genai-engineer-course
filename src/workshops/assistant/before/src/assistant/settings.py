@@ -10,6 +10,8 @@ reach the network and CI stays free:
     MCP_SERVER                    -> discover tools from a real MCP server
     OTEL_EXPORTER_OTLP_ENDPOINT   -> ship spans over OTLP as well as keeping them in memory
     ASSISTANT_JWT_SECRET          -> require a Bearer JWT on every mutating endpoint
+    ASSISTANT_APPROVAL_TTL        -> seconds a human approval stays spendable (default 300)
+    ASSISTANT_STREAM_MODE         -> "raw" emits chunks before the output gate (local only)
     TELEGRAM_BOT_TOKEN            -> send_telegram talks to the real Telegram Bot API
     NEWS_FEED_URL                 -> read_news fetches a real RSS feed (keyless)
     RATE_LIMIT_RPS (+_BURST)      -> token-bucket rate limit on every non-health route
@@ -21,6 +23,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+
+from assistant.output_gate import SAFE_BUFFERED
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,10 @@ class Settings:
     # auth is opt-in so the zero-key demo path keeps working out of the box
     jwt_secret: str | None = None
     jwt_audience: str = "assistant"
+    # how long a human approval stays spendable — see approvals.py
+    approval_ttl_seconds: float = 300.0
+    # "safe-buffered" screens before releasing; "raw" emits first — see output_gate.py
+    stream_mode: str = SAFE_BUFFERED
     # real connectors are opt-in for the same reason; the stubs are the default
     telegram_bot_token: str | None = None
     news_feed_url: str | None = None
@@ -56,6 +64,8 @@ class Settings:
             otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
             jwt_secret=os.getenv("ASSISTANT_JWT_SECRET"),
             jwt_audience=os.getenv("ASSISTANT_JWT_AUDIENCE", "assistant"),
+            approval_ttl_seconds=float(os.getenv("ASSISTANT_APPROVAL_TTL", "300")),
+            stream_mode=os.getenv("ASSISTANT_STREAM_MODE", SAFE_BUFFERED),
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
             news_feed_url=os.getenv("NEWS_FEED_URL"),
             rate_limit_rps=(

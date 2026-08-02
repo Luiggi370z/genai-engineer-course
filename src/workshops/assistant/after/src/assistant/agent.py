@@ -32,13 +32,30 @@ class AgentResult:
     pending: Pending | None = None
     audit: list[str] = field(default_factory=list)
     fired_irreversible_tool_without_approval: bool = False
+    # tool -> the id of the grant its execution spent, when running under a
+    # consuming approval store rather than a plain allow-list
+    approval_ids: dict[str, str] = field(default_factory=dict)
 
 
 Decider = Callable[[str, list[tuple[Step, Any]]], Step]
+# Given a tool name and the exact arguments about to be used, spend one grant and
+# return its id — or None when no grant covers this call.
+Consumer = Callable[[str, dict[str, Any]], "str | None"]
 
 
 def run(goal: str, decide: Decider, approvals: dict[str, bool] | None = None,
-        registry: dict[str, Tool] | None = None, max_steps: int = 8) -> AgentResult:
+        registry: dict[str, Tool] | None = None, max_steps: int = 8,
+        consume: Consumer | None = None) -> AgentResult:
+    """Run the loop. Gated tools need approval, expressed one of two ways.
+
+    `approvals` is the teaching form: a name -> bool allow-list, enough to show
+    that a gated tool pauses. `consume` is the production form the capstone wires
+    in: it is called with the exact arguments at the moment of execution and
+    spends a single-use grant bound to caller, tool and arguments. Prefer it in
+    anything real — an allow-list checked before the loop cannot notice that the
+    arguments changed, that the grant belonged to someone else, or that another
+    request already spent it.
+    """
     registry = registry or REGISTRY
     approvals = approvals or {}
     result = AgentResult()
@@ -52,11 +69,24 @@ def run(goal: str, decide: Decider, approvals: dict[str, bool] | None = None,
         if tool is None:
             state.append((step, {"error": f"unknown tool {step.tool!r}"}))
             continue
-        if tool.requires_approval and not approvals.get(step.tool, False):
-            # pause instead of firing — HITL containment
-            result.pending = Pending(step.tool, step.args)
-            result.audit.append(f"paused for approval: {step.tool}")
-            return result
+        if tool.requires_approval:
+            # Take the grant HERE, against the arguments actually about to run —
+            # not from a snapshot taken before the loop started.
+            approval_id = (
+                consume(step.tool, step.args) if consume is not None else None
+            )
+            allowed = (
+                approval_id is not None
+                if consume is not None
+                else approvals.get(step.tool, False)
+            )
+            if not allowed:
+                # pause instead of firing — HITL containment
+                result.pending = Pending(step.tool, step.args)
+                result.audit.append(f"paused for approval: {step.tool}")
+                return result
+            if approval_id is not None:
+                result.approval_ids[step.tool] = approval_id
         out = tool.fn(**step.args)
         # Every executed tool is audited, not only the pauses. observe.py reads
         # step_count off this list; skip the append and a successful multi-tool

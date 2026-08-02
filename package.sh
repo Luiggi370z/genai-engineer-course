@@ -17,6 +17,12 @@
 # artifact. Deliberate: the upper-bounded pins in every pyproject.toml are what the
 # course actually teaches about reproducibility, and a lock file resolved on one
 # machine in 2026 is not a gift to whoever installs later.
+#
+# One exception, tracked in .gitignore: workshops/assistant/after/uv.lock. A lesson
+# is installed with `uv sync`, which resolves; the capstone image is built with
+# `uv sync --frozen`, which does not. That lock is a build input, and a release that
+# omits it produces a ZIP nobody can `docker compose build`. verify-release-build.sh
+# proves the shipped archive still builds.
 set -euo pipefail
 
 cd "$(dirname "$0")"

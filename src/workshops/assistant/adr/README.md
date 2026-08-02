@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Five decisions that shape the capstone, each with the alternatives it beat and
+Six decisions that shape the capstone, each with the alternatives it beat and
 the cost it accepted. Read them with [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
 open — the diagrams show *what*, these say *why*.
 
@@ -11,6 +11,7 @@ open — the diagrams show *what*, these say *why*.
 | [0003](0003-approvals-as-consumable-grants.md) | Approvals as consumable grants with idempotency keys |
 | [0004](0004-otel-spans-as-the-observability-currency.md) | OpenTelemetry spans as the only observability currency |
 | [0005](0005-sqlite-for-state.md) | SQLite for memory, audit and idempotency — one file, not three services |
+| [0006](0006-holdback-window-on-the-output-stream.md) | A holdback window on the output stream, so streamed text is screened before release |
 
 The format is deliberately short (context → decision → alternatives →
 consequences). An ADR nobody reads is a decision nobody can challenge; these fit

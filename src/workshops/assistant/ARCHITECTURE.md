@@ -54,7 +54,8 @@ flowchart LR
 The trust rule that shapes the whole flow: **content is never trusted because of
 where it was stored, only because of where it came from** — so user input,
 retrieved documents and tool output are each screened at their own boundary, and
-approval is trusted state (`/approve` grants), never text.
+approval is trusted state (a `/approve` grant record bound to caller, arguments
+and expiry), never text.
 
 ```mermaid
 sequenceDiagram
@@ -77,8 +78,8 @@ sequenceDiagram
         S->>R: search(question, tenant=subject)
         R-->>S: docs
         S->>G: screen each doc (drop poisoned, redact PII)
-        S->>A: run under a traced span, approvals = grants
-        A->>T: tool call (gated → pause unless a grant is live)
+        S->>A: run under a traced span, consume = the caller's grants
+        A->>T: tool call (gated → claim a grant for THESE args, or pause)
         T->>G: screen tool output before it becomes evidence
         A-->>S: evidence + audit trail
         S->>L: tool.ran / tool.pending
@@ -88,7 +89,9 @@ sequenceDiagram
     end
 ```
 
-The same pipeline serves `/ask/stream` as SSE — the output gate runs on the
-accumulated text and the `done` event carries the verdict. A replayed `/approve`
-is deduplicated by `Idempotency-Key`, and each grant is consumed by the run that
-uses it, so "approved once" means "fires once".
+The same pipeline serves `/ask/stream` as SSE, and the output gate is the same
+gate: `output_gate.py` holds a 256-character window back so a chunk reaching the
+client has already been screened, rather than apologizing for one that was not
+(ADR-0006). A replayed `/approve` is deduplicated by `Idempotency-Key`, and a
+grant is claimed atomically by the run that spends it, so "approved once" means
+"this caller, this call, fires once" (ADR-0003).

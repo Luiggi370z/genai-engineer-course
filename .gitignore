@@ -21,3 +21,7 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 uv.lock
+# ...except the capstone's. Its Dockerfile installs with `uv sync --frozen`, so that
+# lock is an input to the shipped image build rather than a local artifact: without
+# it, a clean checkout (CI) and the student ZIP both fail at `COPY ... uv.lock`.
+!src/workshops/assistant/after/uv.lock

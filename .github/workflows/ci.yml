@@ -74,6 +74,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # Build the RELEASE artifact first, not the checkout: `git archive` is what the
+      # student ZIP is cut from, so an ignored-but-present build input (the capstone
+      # uv.lock) fails here instead of in a student's terminal.
+      - run: ./src/verify-release-build.sh
       - run: docker compose build
         working-directory: src/phase8-deploy/01-compose/after
       # the observability overlay must stay mergeable even though CI never boots it

@@ -145,9 +145,28 @@ def test_health_is_never_shed():
 SEND = {"question": "please message the team about the outage"}
 
 
+def paused_call(c):
+    """The exact call the assistant is waiting on, as the pause reports it."""
+    return c.post("/ask", json=SEND).json()["pending"]
+
+
+def approve(c, pending, headers=None):
+    """Approve exactly that call.
+
+    A grant is bound to the arguments, so authorizing a send means echoing back
+    the ones the pause reported. That round trip IS the flow — a client that
+    cannot name the call it is approving should not be approving it.
+    """
+    return c.post(
+        "/approve",
+        json={"tool": pending["tool"], "args": pending["args"]},
+        headers=headers or {},
+    )
+
+
 def test_an_approval_authorizes_exactly_one_run():
     c = TestClient(create_app(Settings()))
-    c.post("/approve", json={"tool": "send_telegram"})
+    approve(c, paused_call(c))
     first = c.post("/ask", json=SEND).json()
     assert "ran: send_telegram" in first["audit"]
     second = c.post("/ask", json=SEND).json()
@@ -159,8 +178,9 @@ def test_an_approval_authorizes_exactly_one_run():
 def test_a_replayed_approval_does_not_grant_twice():
     c = TestClient(create_app(Settings()))
     headers = {"Idempotency-Key": "approve-outage-123"}
-    first = c.post("/approve", json={"tool": "send_telegram"}, headers=headers).json()
-    replay = c.post("/approve", json={"tool": "send_telegram"}, headers=headers).json()
+    pending = paused_call(c)
+    first = approve(c, pending, headers).json()
+    replay = approve(c, pending, headers).json()
     assert "replayed" not in first
     assert replay["replayed"] is True
 
@@ -174,7 +194,8 @@ def test_a_replayed_approval_does_not_grant_twice():
 
 def test_two_distinct_approvals_grant_two_runs():
     c = TestClient(create_app(Settings()))
-    c.post("/approve", json={"tool": "send_telegram"}, headers={"Idempotency-Key": "a1"})
-    c.post("/approve", json={"tool": "send_telegram"}, headers={"Idempotency-Key": "a2"})
+    pending = paused_call(c)
+    approve(c, pending, {"Idempotency-Key": "a1"})
+    approve(c, pending, {"Idempotency-Key": "a2"})
     assert "ran: send_telegram" in c.post("/ask", json=SEND).json()["audit"]
     assert "ran: send_telegram" in c.post("/ask", json=SEND).json()["audit"]

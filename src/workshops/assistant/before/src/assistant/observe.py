@@ -41,6 +41,7 @@ AGENT_PAUSED = "agent.paused_for_approval"
 AGENT_OUTCOME = "agent.outcome"  # completed | paused_for_approval | policy_violation
 AGENT_PENDING_TOOL = "agent.pending_tool"
 AGENT_APPROVED = "agent.approved_tools"
+AGENT_APPROVAL_IDS = "agent.approval_ids"
 CACHE_HIT = "cache.hit"
 COST = "cost.usd"
 
@@ -118,6 +119,13 @@ def traced_run(run: Any, goal: str, tracer: Tracer, **kwargs: Any) -> Any:
     tool a paused run is waiting on, and AGENT_OUTCOME = one of "completed",
     "paused_for_approval" or "policy_violation", so a dashboard can group runs
     without reconstructing the outcome from three booleans.
+
+    A run driven by a consuming approval store has no allow-list to read, so when
+    `result.approval_ids` is non-empty use it instead: AGENT_APPROVED = its sorted
+    keys, AGENT_APPROVAL_IDS = the matching grant ids. Recording the id is what
+    makes an approval auditable end to end — the same id appears on the /approve
+    response, in the audit log and here, so "who authorized this send?" is a
+    lookup rather than a reconstruction.
     """
     raise NotImplementedError
 

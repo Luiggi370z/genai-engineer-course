@@ -9,11 +9,14 @@ Kinds recorded by the service:
     policy.blocked      input refused by guardrails (detail = reason)
     tool.pending        a gated tool paused for approval
     tool.ran            any tool executed inside the agent loop
-    approval.granted    /approve added one grant
+    approval.granted    /approve minted one single-use grant
     approval.replayed   /approve replayed (idempotency key already seen)
 
+Rows for a gated tool carry the id of the grant its execution spent, so the
+approval, the span attribute and the trail all name the same record.
+
 Shares the ASSISTANT_DB file when configured, so the trail survives a restart
-alongside memory and the idempotency table.
+alongside memory, approvals and the idempotency table.
 """
 from __future__ import annotations
 

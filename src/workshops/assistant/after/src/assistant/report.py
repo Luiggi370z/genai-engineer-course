@@ -77,6 +77,7 @@ DECISIONS = [
     ("ADR-0003", "Approvals as consumable grants with idempotency keys"),
     ("ADR-0004", "OpenTelemetry spans as the only observability currency"),
     ("ADR-0005", "SQLite for memory, audit and idempotency — one file, not three services"),
+    ("ADR-0006", "A holdback window on the output stream, screened before release"),
 ]
 
 

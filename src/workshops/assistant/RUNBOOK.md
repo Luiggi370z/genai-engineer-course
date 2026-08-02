@@ -11,9 +11,10 @@ is set).
 
 - **Detect**: `make redteam` fails in CI; or the audit log shows a `tool.ran`
   entry you cannot match to a legitimate `approval.granted` for that subject.
-- **Contain**: revoke standing grants by restarting the service (grants are
-  in-process by design); if auth is on, rotate `ASSISTANT_JWT_SECRET` to
-  invalidate all outstanding tokens.
+- **Contain**: revoke outstanding approvals with
+  `DELETE FROM approvals` in the `ASSISTANT_DB` file (they are durable rows, not
+  in-process state — a restart alone no longer clears them); if auth is on,
+  rotate `ASSISTANT_JWT_SECRET` to invalidate all outstanding tokens.
 - **Diagnose**: pull the failing input from the red-team report; check which
   layer should have caught it — L1 screen (`guardrails.py`), context screen
   (`screen_contexts`), tool-output hardening (`harden_registry`), or the
@@ -73,19 +74,23 @@ is set).
 
 ## 5. A retried approval double-fired (should be impossible — treat as a bug)
 
-- **Detect**: audit log shows two `tool.ran` rows for one `approval.granted`
-  (no second grant, no `approval.replayed` in between).
-- **Contain**: restart the service (clears in-process grants).
-- **Diagnose**: check the client sent an `Idempotency-Key`; without one, two
-  POSTs are two legitimate approvals by contract. With one, inspect the
-  `idempotency_keys` table in the `ASSISTANT_DB` file.
-- **Recover / learn**: if the client cannot send keys, add server-side
-  fingerprinting (subject + tool + time window) — and add the failing sequence
-  to `test_reliability.py` first.
+- **Detect**: audit log shows two `tool.ran` rows naming the SAME
+  `approval <id>` — one grant, two executions. (Two rows with two different ids
+  are two approvals, which is contract, not a bug.)
+- **Contain**: `DELETE FROM approvals` to revoke what is outstanding, then stop
+  the service until diagnosed — the consume is supposed to make this impossible,
+  so the gate itself is suspect.
+- **Diagnose**: `consume` must be the single `DELETE ... RETURNING` statement in
+  `approvals.py`. A `SELECT` followed by a `DELETE`, or a grant looked up before
+  the loop instead of at the call site, reopens the double-spend. Check the
+  client sent an `Idempotency-Key` too; without one, two POSTs are two
+  legitimate approvals by contract.
+- **Recover / learn**: add the failing sequence to `test_reliability.py` first
+  (race a thread pool at one grant and assert exactly one winner), then fix.
 
 ## State: backup and restore
 
-All durable state — memory, audit log, idempotency keys — lives in ONE SQLite
+All durable state — memory, audit log, approvals, idempotency keys — lives in ONE SQLite
 file (`ASSISTANT_DB`, the `assistant-data` compose volume; ADR-0005), so backup
 is a file copy taken through SQLite's own online-backup so a mid-write copy can
 never be torn:

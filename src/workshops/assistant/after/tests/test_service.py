@@ -21,7 +21,7 @@ def test_health_reports_the_offline_tier():
     assert body["tier"] == {
         "rag": "in-memory", "memory": "in-process", "brain": "rule-based",
         "tools": "builtin", "otlp": "in-memory-only",
-        "auth": "off", "connectors": "stubs",
+        "auth": "off", "connectors": "stubs", "stream": "safe-buffered",
     }
     assert body["spans_recorded"] == 0  # nothing has run yet
 
@@ -68,13 +68,27 @@ def test_an_injected_question_is_refused_at_the_door():
 
 def test_a_gated_tool_pauses_until_it_is_approved():
     c = client()
-    first = c.post("/ask", json={"question": "please message the team about the outage"}).json()
+    ask = {"question": "please message the team about the outage"}
+    first = c.post("/ask", json=ask).json()
     assert first["pending"]["tool"] == "send_telegram"  # paused, not fired
 
-    c.post("/approve", json={"tool": "send_telegram"})
-    second = c.post("/ask", json={"question": "please message the team about the outage"}).json()
+    # Approving means approving THIS call. The pause hands back the exact
+    # arguments; the client echoes them into /approve, and the grant is bound to
+    # them.
+    pending = first["pending"]
+    c.post("/approve", json={"tool": pending["tool"], "args": pending["args"]})
+    second = c.post("/ask", json=ask).json()
     assert "pending" not in second
     assert "ran: send_telegram" in second["audit"]
+
+
+def test_approving_a_tool_without_its_arguments_authorizes_nothing():
+    """Fail closed. A grant that names no arguments matches only a call that
+    takes none, so the blanket 'approve the tool' shape cannot come back."""
+    c = client()
+    ask = {"question": "please message the team about the outage"}
+    c.post("/approve", json={"tool": "send_telegram"})
+    assert c.post("/ask", json=ask).json()["pending"]["tool"] == "send_telegram"
 
 
 def test_the_memory_layer_records_a_worth_remembering_turn():

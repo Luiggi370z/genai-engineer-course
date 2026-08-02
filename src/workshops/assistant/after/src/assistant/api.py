@@ -10,10 +10,11 @@ TestClient and no network.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from assistant import auth
 from assistant.resilience import ConcurrencyCap, TokenBucket
@@ -31,6 +32,11 @@ class IngestBody(BaseModel):
 
 class ApproveBody(BaseModel):
     tool: str
+    # The exact arguments being approved, echoed from the /ask pause. Defaulting
+    # to {} fails CLOSED: an approval that names no arguments matches only a call
+    # that takes none, so a client that forgets them gets another pause rather
+    # than a blanket permission.
+    args: dict[str, Any] = Field(default_factory=dict)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -115,13 +121,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         subject: str = Depends(require("assistant:approve")),
     ) -> dict:
-        # a retried request (same Idempotency-Key) is acknowledged, not re-applied
+        # A retried request (same Idempotency-Key) is acknowledged, not re-applied.
+        # The key is namespaced by subject: keys are client-chosen, and one tenant's
+        # "retry-1" must not silently swallow another tenant's approval.
         key = request.headers.get("idempotency-key")
-        if key and assistant.idempotency.seen(key):
+        if key and assistant.idempotency.seen(f"{subject}:approve:{key}"):
             assistant.audit_log.record("approval.replayed", subject, body.tool)
             return {"approved": body.tool, "replayed": True}
-        assistant.grants[body.tool] = assistant.grants.get(body.tool, 0) + 1
-        assistant.audit_log.record("approval.granted", subject, body.tool)
-        return {"approved": body.tool}
+        # bound to the AUTHENTICATED subject, never to a subject in the body
+        grant = assistant.approvals.mint(subject, body.tool, body.args)
+        assistant.audit_log.record(
+            "approval.granted", subject, f"{body.tool} (approval {grant.approval_id})"
+        )
+        return {
+            "approved": body.tool,
+            "approval_id": grant.approval_id,
+            "args_hash": grant.args_hash,
+            "expires_at": grant.expires_at,
+        }
 
     return app

@@ -60,7 +60,9 @@ def test_a_breach_cannot_pass_silently():
     failure the whole course argues against."""
     sabotaged = build_assistant(Settings())
     sabotaged.rag.add(["warmup"])
-    sabotaged.grants["send_telegram"] = 10**6  # pre-approve everything gated
+    # sabotage: hand back a grant for whatever is about to run, so nothing is ever
+    # contained. A real store cannot do this — that is the point of the class.
+    sabotaged.approvals.consume = lambda *a, **k: "sabotaged-grant"  # type: ignore[method-assign]
     body, contained = redteam_section(sabotaged)
     assert contained is False
     assert "**BREACHED**" in body

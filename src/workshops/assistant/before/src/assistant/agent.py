@@ -32,16 +32,34 @@ class AgentResult:
     pending: Pending | None = None
     audit: list[str] = field(default_factory=list)
     fired_irreversible_tool_without_approval: bool = False
+    # tool -> the id of the grant its execution spent, when running under a
+    # consuming approval store rather than a plain allow-list
+    approval_ids: dict[str, str] = field(default_factory=dict)
 
 
 Decider = Callable[[str, list[tuple[Step, Any]]], Step]
+# Given a tool name and the exact arguments about to be used, spend one grant and
+# return its id — or None when no grant covers this call.
+Consumer = Callable[[str, dict[str, Any]], "str | None"]
 
 
 def run(goal: str, decide: Decider, approvals: dict[str, bool] | None = None,
-        registry: dict[str, Tool] | None = None, max_steps: int = 8) -> AgentResult:
+        registry: dict[str, Tool] | None = None, max_steps: int = 8,
+        consume: Consumer | None = None) -> AgentResult:
     # TODO: loop to max_steps; final step -> set text and return. Unknown tool ->
-    # error observation, keep going. Gated tool without approval -> record a
-    # Pending, audit "paused for approval: <tool>", return. Executed tool ->
-    # audit "ran: <tool>" (observe.py derives step_count from the audit list —
-    # skip this and a successful multi-tool run reports zero steps).
+    # error observation, keep going. Executed tool -> audit "ran: <tool>"
+    # (observe.py derives step_count from the audit list — skip this and a
+    # successful multi-tool run reports zero steps).
+    #
+    # Gated tools take approval one of two ways:
+    #   * `approvals` — a name -> bool allow-list. The teaching form: enough to
+    #     show that a gated tool pauses.
+    #   * `consume`   — the production form. Call it with the tool name and the
+    #     EXACT args of the step about to run, right before running it. A returned
+    #     id means a grant was spent (record it in result.approval_ids); None
+    #     means pause. Taking it here, rather than reading a snapshot from before
+    #     the loop, is what makes the grant bind to the real arguments and what
+    #     stops two concurrent runs from spending the same approval.
+    # Either way, no approval -> record a Pending, audit
+    # "paused for approval: <tool>", return.
     raise NotImplementedError

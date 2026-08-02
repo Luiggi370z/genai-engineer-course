@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from assistant.adapters import InMemoryRag
+from assistant.approvals import ApprovalStore
 from assistant.audit_log import AuditLog
 from assistant.composers import (
     Composer,
@@ -101,14 +102,15 @@ def build_assistant(settings: Settings | None = None) -> Assistant:
         compose = offline_compose
         stream_compose = word_stream(offline_compose)
 
-    # replay protection and the audit trail share the memory DB, so both survive
-    # a restart with it
+    # outstanding approvals, replay protection and the audit trail share the memory
+    # DB, so all three survive a restart with it
     store = settings.assistant_db or ":memory:"
 
     return Assistant(
         settings=settings, rag=rag, memory=memory, base_registry=registry,
         rec=recorder(otlp_endpoint=settings.otlp_endpoint),
         compose=compose, stream_compose=stream_compose,
+        approvals=ApprovalStore(store, settings.approval_ttl_seconds),
         idempotency=IdempotencyStore(store), audit_log=AuditLog(store),
         degraded=degraded,
     )
