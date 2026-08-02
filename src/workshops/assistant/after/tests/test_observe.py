@@ -13,7 +13,10 @@ from opentelemetry.trace import StatusCode
 
 from assistant.agent import Step, run
 from assistant.observe import (
+    AGENT_APPROVED,
+    AGENT_OUTCOME,
     AGENT_PAUSED,
+    AGENT_PENDING_TOOL,
     AGENT_STEPS,
     TOOL_GATED,
     TOOL_NAME,
@@ -108,6 +111,7 @@ def test_the_agent_run_gets_a_root_span_carrying_its_outcome(rec):
 
     root = rec.named("agent.run")[0]
     assert (root.attributes or {})[AGENT_PAUSED] is False
+    assert (root.attributes or {})[AGENT_OUTCOME] == "completed"
     assert root.status.status_code is StatusCode.OK
     # The tool span is a child, so the tree shows the tool inside the run.
     tool_span = rec.named("tool.read_emails")[0]
@@ -130,8 +134,50 @@ def test_a_run_paused_for_approval_is_visible_in_the_trace(rec):
     root = rec.named("agent.run")[0]
     assert (root.attributes or {})[AGENT_PAUSED] is True
     assert (root.attributes or {})[AGENT_STEPS] == 1
+    # The outcome and the tool it is waiting on are attributes, not archaeology.
+    assert (root.attributes or {})[AGENT_OUTCOME] == "paused_for_approval"
+    assert (root.attributes or {})[AGENT_PENDING_TOOL] == "send_telegram"
     # The gated tool never ran, so there is no span for it — containment, proven.
     assert gated_tool_calls(rec.spans()) == []
+
+
+def test_the_root_span_records_which_approvals_the_run_started_with(rec):
+    """The approval story lives on the trace: an auditor reading one span sees the
+    grants that were live, not just that a gated tool happened to fire."""
+    result = traced_run(
+        run,
+        "text my boss",
+        rec.tracer,
+        decide=script(
+            Step("send_telegram", {"chat_id": "1", "message": "hi"}),
+            Step("", {}, is_final=True, answer="sent"),
+        ),
+        approvals={"send_telegram": True, "delete_file": False},
+        registry=traced_registry(registry(), rec.tracer),
+    )
+    assert result.pending is None
+
+    root = rec.named("agent.run")[0]
+    # Only the truthy grants count — a denied approval is not an approval.
+    assert list((root.attributes or {})[AGENT_APPROVED]) == ["send_telegram"]
+    assert (root.attributes or {})[AGENT_OUTCOME] == "completed"
+    assert gated_tool_calls(rec.spans()) == ["send_telegram"]
+
+
+def test_a_containment_breach_is_an_error_with_a_policy_violation_outcome(rec):
+    """traced_run trusts the loop's own confession. If a gated tool fired without
+    approval, the root span must say so loudly — ERROR status, explicit outcome —
+    because this is the one trace a reviewer must never scroll past."""
+    class Breach:
+        audit = ["ran: send_telegram"]
+        pending = None
+        fired_irreversible_tool_without_approval = True
+
+    traced_run(lambda goal, **_: Breach(), "text my boss", rec.tracer)
+
+    root = rec.named("agent.run")[0]
+    assert root.status.status_code is StatusCode.ERROR
+    assert (root.attributes or {})[AGENT_OUTCOME] == "policy_violation"
 
 
 def test_time_by_tool_finds_where_the_wall_clock_actually_went(rec):

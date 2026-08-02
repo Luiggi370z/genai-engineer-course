@@ -33,7 +33,7 @@ probability are plenty; there is no maths derivation anywhere in here.
 | Tier | What runs | What to know |
 |------|-----------|--------------|
 | Any machine | Every lesson's fast test suite (`make test`) | Offline, deterministic, no models, no keys — the whole course can be *completed* here |
-| 16 GB RAM | The course's working models locally: `qwen3.5:8b`, `gemma4:e4b`, embeddings, guard models | The recommended local path. The 30B eval judge does **not** fit here — swap in a smaller judge or a hosted one |
+| 16 GB RAM | The course's working models locally: `qwen3.5:9b`, `gemma4:e4b`, embeddings, guard models | The recommended local path. The 30B eval judge does **not** fit here — swap in a smaller judge or a hosted one |
 | 32 GB RAM | + `qwen3-coder:30b` as a free local Phase 3 judge | The comfortable path; bigger judges are measurably better |
 | No GPU / older laptop | Everything, against a hosted budget tier by changing one `base_url` | Needs an account, an API key, and network; costs real (small) money |
 
@@ -58,7 +58,7 @@ open course.html
 
 # 2. Install the toolchain and pull the models the course uses.
 curl -LsSf https://astral.sh/uv/install.sh | sh
-ollama pull qwen3.5:8b        # chat + tool calling
+ollama pull qwen3.5:9b        # chat + tool calling
 ollama pull nomic-embed-text  # embeddings
 
 # 3. Do the first lesson.

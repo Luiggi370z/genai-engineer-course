@@ -1,6 +1,6 @@
 # Verification stamp — `phase3-evals`
 
-**Last verified:** 2026-07-31
+**Last verified:** 2026-08-01
 **How:** every `after/` reference passed `make check` (ruff + pyright + pytest) on this date,
 and every `before/` scaffold passed lint + type with its tests failing by design.
 Lesson 3.2's judged tier (`make test-integration`) was additionally run against a real

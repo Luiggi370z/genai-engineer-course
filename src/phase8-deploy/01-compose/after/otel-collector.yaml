@@ -1,0 +1,21 @@
+# Collector config for the observability overlay: receive OTLP over HTTP from the
+# assistant, print every span to stdout. `verbosity: detailed` is deliberate — the
+# e2e check greps the collector's logs for the `agent.run` root span, which is the
+# proof that spans were observed outside the assistant's process. In production the
+# debug exporter becomes an otlp exporter at Phoenix/Langfuse/your APM; the
+# assistant never learns the difference.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]

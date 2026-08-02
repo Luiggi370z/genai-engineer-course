@@ -2,7 +2,10 @@
 
 Wire in guardrails.layer1 (on user input AND treat retrieved docs as untrusted),
 spotlight the retrieved content, keep gated tools behind approval, and add the
-L3 output gate. The redteam tests define "contained".
+L3 output gate. Tool output (`tool_outputs`) is the SECOND untrusted channel —
+a fetched page or email body gets exactly the retrieved-document treatment, and
+content on either channel can never grant approval (only the `approve` argument,
+set by a human, can). The redteam tests define "contained".
 
 Reference: ../after/src/agent.py.
 """
@@ -20,5 +23,10 @@ class Result:
     audit: list[str] = field(default_factory=list)
 
 
-def guarded_run(user_msg: str, retrieved: list[str], approve: bool = False) -> Result:
+def guarded_run(
+    user_msg: str,
+    retrieved: list[str],
+    approve: bool = False,
+    tool_outputs: list[str] | None = None,
+) -> Result:
     raise NotImplementedError  # TODO: contain it

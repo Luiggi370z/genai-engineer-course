@@ -10,3 +10,12 @@ What makes this deployable rather than a diagram:
 - **One published port.** Only the assistant reaches the host; MCP, Qdrant and Ollama stay on the compose network.
 
 `src/health.py` reviews the compose file structurally (parsed YAML — services, pins, healthchecks, dependency conditions, published ports), and the tests prove the checks catch a broken file, not just bless this one.
+
+## Observability overlay (optional)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+docker compose -f docker-compose.yml -f docker-compose.observability.yml logs collector
+```
+
+`docker-compose.observability.yml` adds a pinned OpenTelemetry Collector (`otel-collector.yaml` config: OTLP-in over HTTP, debug exporter to stdout) and sets `OTEL_EXPORTER_OTLP_ENDPOINT` on the assistant. The assistant's instrumentation does not change — the same spans that back `spans_recorded` on `/health` also ship over OTLP, and `logs collector` shows the `agent.run` trees arriving **outside the process**. Swap the debug exporter for an `otlp` exporter at Phoenix, Langfuse or your APM and nothing upstream notices; that pluggability is why the course exports OTel instead of a vendor SDK. `verify-e2e.sh` boots with this overlay and asserts the collector saw the spans.

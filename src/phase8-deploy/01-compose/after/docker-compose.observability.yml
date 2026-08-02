@@ -1,0 +1,35 @@
+# Optional observability overlay — spans observed OUTSIDE the process.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml up --build
+#   docker compose -f docker-compose.yml -f docker-compose.observability.yml logs collector
+#
+# The base stack keeps its spans in memory (spans_recorded on /health). This overlay
+# adds a pinned OpenTelemetry Collector and points the assistant's OTLP exporter at
+# it — no instrumentation changes, which is the entire argument for OTel. The debug
+# exporter prints every span to the collector's stdout, so `logs collector` is the
+# proof the spans left the process. Swap the exporter for OTLP-to-Phoenix/Langfuse/
+# your APM and nothing upstream changes.
+#
+# It is an overlay, not part of the base file, because it is genuinely optional:
+# the zero-key demo needs no collector, and the structural review in src/health.py
+# judges the stack a stranger runs by default.
+services:
+  assistant:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318/v1/traces
+    depends_on:
+      # service_started, not service_healthy: the collector image is built from
+      # scratch (no shell, no curl), so there is nothing to run a healthcheck with.
+      # Losing a span batch during startup is acceptable; blocking the boot is not.
+      collector:
+        condition: service_started
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.157.0 # pinned, like every other pull
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.5
+    stop_grace_period: 10s
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro

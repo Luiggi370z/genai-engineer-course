@@ -19,4 +19,4 @@ ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app/src
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --retries=12 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-CMD ["uvicorn", "--factory", "assistant.service:create_app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "--factory", "assistant.api:create_app", "--host", "0.0.0.0", "--port", "8000"]

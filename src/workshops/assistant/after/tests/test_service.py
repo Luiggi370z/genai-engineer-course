@@ -3,7 +3,10 @@ TestClient with every adapter in its offline default. No network, no model."""
 
 from fastapi.testclient import TestClient
 
-from assistant.service import ABSTAIN, Settings, build_assistant, create_app
+from assistant.api import create_app
+from assistant.composers import ABSTAIN
+from assistant.service import build_assistant
+from assistant.settings import Settings
 
 
 def client() -> TestClient:
@@ -18,6 +21,7 @@ def test_health_reports_the_offline_tier():
     assert body["tier"] == {
         "rag": "in-memory", "memory": "in-process", "brain": "rule-based",
         "tools": "builtin", "otlp": "in-memory-only",
+        "auth": "off", "connectors": "stubs",
     }
     assert body["spans_recorded"] == 0  # nothing has run yet
 
@@ -34,6 +38,17 @@ def test_a_grounded_question_is_answered_from_ingested_docs():
     body = c.post("/ask", json={"question": "how long do refunds take"}).json()
     assert "refunds" in body["answer"].lower()
     assert body["contexts"]
+
+
+def test_a_grounded_answer_carries_structured_citations():
+    c = client()
+    c.post("/ingest", json={"docs": ["approved refunds are processed within five business days"]})
+    body = c.post("/ask", json={"question": "how long do refunds take"}).json()
+    assert body["citations"], "a grounded answer must cite its evidence"
+    first = body["citations"][0]
+    assert first["id"] == "c1"
+    assert "refunds" in first["snippet"]
+    assert first["source"] == "rag"
 
 
 def test_an_unanswerable_question_abstains_instead_of_inventing():

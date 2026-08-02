@@ -15,7 +15,7 @@ artifact is a habit, not a repo).
 | Hardened assistant | 6 | guardrails, spotlighting, output gate | `guardrails.py` | `WORKSHOP-HARDENED.md` |
 | Your own MCP | 7 | consume an MCP server by discovery | `mcp_client.py` | `WORKSHOP-MCP.md` |
 | Deployed stack | 8 | OTel spans around the loop and every tool, answer cache with refusal rules | `observe.py`, `cache.py` | `WORKSHOP-DEPLOYED-STACK.md` |
-| Capstone: the composed service | 8 | FastAPI composition root wiring every layer; real adapters (Qdrant, Ollama, MCP SDK, OTLP) behind env vars; SQLite memory; an MCP server; a Docker image | `service.py`, `settings.py`, `adapters.py`, `sqlite_memory.py`, `mcp_server.py` | `WORKSHOP-DEPLOYED-STACK.md` |
+| Capstone: the composed service | 8 | One module per concern: composition root, HTTP surface, request pipeline, composers, trust-boundary screening, degraded fallbacks; real adapters (Qdrant, Ollama, MCP SDK, OTLP) behind env vars; SQLite memory; an MCP server; a Docker image | `service.py`, `api.py`, `core.py`, `composers.py`, `screening.py`, `fallbacks.py`, `settings.py`, `adapters.py`, `sqlite_memory.py`, `mcp_server.py` | `WORKSHOP-DEPLOYED-STACK.md` |
 
 Do them in order — each builds on the last, and from the eval layer onwards every
 later layer is measured by the one before it.
@@ -30,3 +30,9 @@ exercises); each real adapter turns on via one env var (`QDRANT_URL`,
 `Dockerfile` here builds the image that `phase8-deploy/01-compose` deploys, and
 `src/verify-e2e.sh` (repo root of the companion code) proves the whole composed
 stack boots, retrieves, contains, and traces.
+
+The system documentation lives beside the code: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+(component + data-flow diagrams), [`adr/`](adr/) (five decision records),
+[`THREAT-MODEL.md`](THREAT-MODEL.md), [`RUNBOOK.md`](RUNBOOK.md). `make report`
+in `after/` generates `PORTFOLIO.md` — the measured one-page summary (evals,
+red-team, latency, cost, decisions) a reviewer reads first.

@@ -96,13 +96,17 @@ export const deploy: PhaseContent = {
     },
     {
       id: "p6-c2",
-      title: "CI that gates on quality and safety",
+      title: "CI that gates on quality, safety, latency and cost",
       tag: "CI/CD",
       teaches: ["p6-o2"],
       blocks: [
         {
           kind: "p",
-          text: 'Your Phases 3 and 6 gave you two suites that now become merge gates: the **RAGAS eval** (quality) and the **red-team suite** (safety). CI runs them on every pull request; a regression in either blocks the merge. This is what "eval-first" looks like in production — the tests you already wrote, wired to the branch protection.',
+          text: "Your Phases 3 and 6 gave you suites that now become merge gates: the **RAGAS eval** (quality), the **red-team suite** (safety), plus two budget gates over the same report — **P99 latency** and **cost per golden-set run**. CI runs all four on every pull request; a regression in any one blocks the merge.",
+        },
+        {
+          kind: "p",
+          text: 'The report is **version-stamped** (model, prompt, corpus, dataset) — an unstamped report blocks every gate, because numbers without provenance are not evidence. This is what "eval-first" looks like in production: the tests you already wrote, wired to the branch protection.',
         },
         {
           kind: "code",
@@ -115,8 +119,13 @@ export const deploy: PhaseContent = {
   safety:
     steps:
       - run: make redteam           # fails if any gated tool fires unapproved
-# two REQUIRED jobs, not one averaged score: a safety bypass and a quality
-# regression are different incidents. No green, no ship.`,
+  budgets:
+    steps:
+      - run: make latency           # P99 gate — the tail, not the average
+      - run: make cost              # spend gate — fail here, not on the invoice
+      - run: make prove-gates       # seeded regressions must BLOCK
+# separate REQUIRED jobs, not one averaged score: a safety bypass, a quality
+# regression, and a budget blowout are different incidents. No green, no ship.`,
         },
         {
           kind: "list",
@@ -416,7 +425,7 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       title: "The CI gate",
       repo: "phase8-deploy/02-ci",
       rung: "faded",
-      task: "Add a GitHub Actions workflow that runs unit tests, a RAGAS smoke eval, and the red-team suite. Make both quality and safety required checks for merge.",
+      task: "Build the four independently failing merge gates — quality (faithfulness/recall), safety (zero red-team bypasses), P99 latency and cost — over a version-stamped report, wire them into the make targets a GitHub Actions workflow calls, and prove each gate can actually block with the seeded regressions (`make prove-gates`).",
       assesses: ["p6-o2"],
       needs: ["p-evals-o5", "p4-o4"],
       solution: [
@@ -593,7 +602,7 @@ def is_cacheable(result, gated_tools_fired) -> bool:
     {
       id: "p6-q3",
       q: "What belongs in the CI gate for a GenAI app, beyond normal tests?",
-      a: "The eval suite (RAGAS quality gate) and the red-team suite (safety gate), both as required checks. A merge that regresses faithfulness or lets a landed injection fire a gated tool should be blocked, not merged with a warning.",
+      a: "The eval suite (RAGAS quality gate), the red-team suite (safety gate), and the two budget gates — P99 latency and cost per eval run — all as required checks over a version-stamped report. A merge that regresses faithfulness, lets a landed injection fire a gated tool, or blows the tail-latency or spend budget should be blocked, not merged with a warning.",
     },
     {
       id: "p6-q4",

@@ -39,6 +39,9 @@ TOOL_NAME = "tool.name"
 TOOL_GATED = "tool.requires_approval"
 AGENT_STEPS = "agent.step_count"
 AGENT_PAUSED = "agent.paused_for_approval"
+AGENT_OUTCOME = "agent.outcome"  # completed | paused_for_approval | policy_violation
+AGENT_PENDING_TOOL = "agent.pending_tool"
+AGENT_APPROVED = "agent.approved_tools"
 CACHE_HIT = "cache.hit"
 COST = "cost.usd"
 
@@ -124,14 +127,30 @@ def traced_run(run: Any, goal: str, tracer: Tracer, **kwargs: Any) -> Any:
     will actually filter on later: a run that hit the step cap and a run that
     stopped for a human look identical in a latency chart and could not be more
     different in a review.
+
+    The approval story rides along too: which grants were live when the run
+    started (`agent.approved_tools`), which tool it is now waiting on
+    (`agent.pending_tool`), and a single `agent.outcome` you can group a
+    dashboard by without reconstructing it from three booleans.
     """
     with tracer.start_as_current_span("agent.run") as span:
+        approvals = kwargs.get("approvals") or {}
+        span.set_attribute(
+            AGENT_APPROVED, sorted(name for name, granted in approvals.items() if granted)
+        )
         result = run(goal, **kwargs)
         span.set_attribute(AGENT_STEPS, len(getattr(result, "audit", []) or []))
-        span.set_attribute(AGENT_PAUSED, getattr(result, "pending", None) is not None)
+        pending = getattr(result, "pending", None)
+        span.set_attribute(AGENT_PAUSED, pending is not None)
+        if pending is not None:
+            span.set_attribute(AGENT_PENDING_TOOL, pending.tool)
         if getattr(result, "fired_irreversible_tool_without_approval", False):
+            span.set_attribute(AGENT_OUTCOME, "policy_violation")
             span.set_status(Status(StatusCode.ERROR, "gated tool fired without approval"))
         else:
+            span.set_attribute(
+                AGENT_OUTCOME, "paused_for_approval" if pending is not None else "completed"
+            )
             span.set_status(Status(StatusCode.OK))
         return result
 

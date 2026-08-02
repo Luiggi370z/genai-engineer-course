@@ -8,16 +8,34 @@
 #
 # First boot is slow on purpose: the ollama service pulls its models before it
 # reports healthy, and nothing that depends on it starts until it does.
+# Reliability posture, uniform across services: `restart: unless-stopped` brings a
+# crashed container back (but respects an operator's explicit stop), memory/cpu
+# limits keep one runaway service from starving the rest of the laptop, and
+# `stop_grace_period` gives uvicorn/ollama time to drain in-flight work before
+# SIGKILL.
 services:
   assistant:
     build: ../../../workshops/assistant/after
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    stop_grace_period: 20s
     environment:
       MCP_SERVER: http://mcp:8080/mcp
       QDRANT_URL: http://qdrant:6333
       OLLAMA_HOST: http://ollama:11434
       ASSISTANT_DB: /data/assistant.db
-      # Ship spans to a collector by adding one and uncommenting:
-      # OTEL_EXPORTER_OTLP_ENDPOINT: http://collector:4318/v1/traces
+      # Ship spans to a real collector with the observability overlay (adds a pinned
+      # otel-collector and sets OTEL_EXPORTER_OTLP_ENDPOINT — see the overlay file):
+      #   docker compose -f docker-compose.yml -f docker-compose.observability.yml up
+      # Optional hardening/real connectors — the stack is zero-key without them:
+      # ASSISTANT_JWT_SECRET: change-me-32-bytes-minimum-please! # Bearer JWT on every mutating endpoint
+      # TELEGRAM_BOT_TOKEN: "123456:ABC..."                      # send_telegram talks to the real Bot API
+      # NEWS_FEED_URL: https://hnrss.org/frontpage               # read_news fetches a real RSS feed
+      # Load shedding (off by default; the service rejects politely when set):
+      # RATE_LIMIT_RPS: "5"
+      # RATE_LIMIT_BURST: "10"
+      # MAX_CONCURRENCY: "4"
     volumes:
       - assistant-data:/data # memory survives a container restart — that is the point
     ports:
@@ -44,6 +62,10 @@ services:
   mcp:
     build: ../../../workshops/assistant/after
     command: ["python", "-m", "assistant.mcp_server", "--http"]
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+    stop_grace_period: 10s
     healthcheck:
       # the MCP endpoint answers POSTs, not GETs — an open socket is the readiness signal
       test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 8080), 2)"]
@@ -53,6 +75,10 @@ services:
 
   qdrant:
     image: qdrant/qdrant:v1.18.3 # pinned — ':latest' means every reviewer runs a different stack
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    stop_grace_period: 15s
     volumes:
       - qdrant-data:/qdrant/storage
     healthcheck:
@@ -64,6 +90,10 @@ services:
 
   ollama:
     image: ollama/ollama:0.32.5 # pinned, same reason
+    restart: unless-stopped
+    mem_limit: 12g # a 9B model plus the embedder need real headroom
+    cpus: 4.0
+    stop_grace_period: 30s # let an in-flight generation finish before SIGKILL
     entrypoint: ["/bin/sh", "-c"]
     command: # bootstrap: serve, pull the two models the course uses, then keep serving
       - |

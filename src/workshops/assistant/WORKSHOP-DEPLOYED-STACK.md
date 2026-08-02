@@ -60,6 +60,11 @@ decision.
       records the failure, it does not absorb it
 - [ ] The root `agent.run` span carries **step count and whether it paused**, so a
       run that stopped for a human is distinguishable from one that hit the cap
+- [ ] The same root span tells the **approval story**: which grants the run started
+      with (`agent.approved_tools`), which tool a paused run waits on
+      (`agent.pending_tool`), and a single `agent.outcome` — `completed`,
+      `paused_for_approval` or `policy_violation` (the last one is span-status
+      ERROR, because it is the trace a reviewer must never scroll past)
 - [ ] `gated_tool_calls` reports **which irreversible tools actually fired**, and a
       test proves a contained run reports none
 - [ ] `time_by_tool` / `slowest_tool` answer **where the wall clock went**, read off
@@ -71,11 +76,33 @@ decision.
 - [ ] The whole layer runs offline: `InMemorySpanExporter` in tests, no collector, no
       vendor account
 
+## The operate drill: diagnose from the trace, not the code
+
+Production failures do not announce which tool broke. `tests/test_diagnosis.py`
+seeds the two classic incidents — one tool quietly degraded, one intermittently
+failing — and diagnoses them **from the spans alone**:
+
+1. **Symptom** — the `agent.run` root span got slow (`duration_ms`).
+2. **Localise** — `time_by_tool` / `slowest_tool` name the culprit; no code read.
+3. **Confirm** — `failed_spans` separates *broken* (retry/fix upstream) from
+   *slow* (capacity/caching) on the same trace, because the two need different
+   fixes.
+
+The drill also shows why the CI gate budgets **P99, not the mean**: one degraded
+call in ten barely moves the average and owns the tail. Rehearse it offline, then
+run the same three readers against the collector copy of the spans in the deployed
+stack — that is the "diagnose" step of `RUNBOOK.md`, practised before the pager
+goes off.
+
 ## The capstone: one running service
 
 Everything above still treats the assistant as a library. The capstone makes it a
-service. `service.py` is the **composition root** — the one file where every layer
-you built finally meets:
+service, organized so each module owns exactly one concern — `service.py` is the
+**composition root** (the one file where adapters are chosen), `api.py` is the
+HTTP surface, `core.py` is the request pipeline, `composers.py` turns evidence
+into prose, `screening.py` guards the trust boundaries, and `fallbacks.py` keeps
+a dead adapter from becoming a dead service. Together they wire every layer you
+built:
 
 ```
 request ─► guardrails.screen ─► agent.run (traced) ─► tools (read-only output
@@ -90,33 +117,63 @@ request ─► guardrails.screen ─► agent.run (traced) ─► tools (read-on
 Offline and deterministic by default — the fast tests drive the real FastAPI app
 with a TestClient and no network. Each real adapter turns on with one env var
 (`settings.py`): `QDRANT_URL`, `OLLAMA_HOST`, `MCP_SERVER`, `ASSISTANT_DB`,
-`OTEL_EXPORTER_OTLP_ENDPOINT`. `adapters.py` holds the real implementations,
-`sqlite_memory.py` is the memory store that survives a restart, and
-`mcp_server.py` is a small real MCP server the assistant discovers tools from.
+`OTEL_EXPORTER_OTLP_ENDPOINT`, plus three optional hardening/connector vars —
+`ASSISTANT_JWT_SECRET` (Bearer JWT on every mutating endpoint, `auth.py`),
+`TELEGRAM_BOT_TOKEN` and `NEWS_FEED_URL` (real connector bodies, `connectors.py`;
+the approval gate and output re-screen apply unchanged). `adapters.py` holds the
+real implementations, `sqlite_memory.py` is the memory store that survives a
+restart, and `mcp_server.py` is a small real MCP server the assistant discovers
+tools from.
+
+The HTTP surface is `/health`, `/ingest`, `/ask`, `/ask/stream` (the same answer
+as server-sent events, chunk by chunk), and `/approve`. Grounded answers carry
+structured `citations` (`[{id, source, snippet}]`) that the model-tier prompt
+labels with the same `[c#]` ids.
 
 The `Dockerfile` builds one image that runs as both the assistant API and the MCP
 server; `phase8-deploy/01-compose` deploys it next to pinned Qdrant and Ollama, and
 `src/verify-e2e.sh` proves the composed stack end to end: boot on healthchecks,
-tier report, grounded answer, approval containment, an MCP call over the wire, and
-spans left behind.
+tier report, grounded answer, approval containment, an MCP call over the wire,
+spans left behind — and, via the `docker-compose.observability.yml` overlay, the
+same spans arriving at a real otel-collector **outside the process**.
 
 ### Capstone deliverables
 
-- [ ] `service.py` composes **every** layer — guardrails on input, hardened tool
-      output, gated tools behind `/approve`, RAG contexts, memory writes, spans —
-      and the fast tests prove each seam offline
+- [ ] `service.py` + `core.py` compose **every** layer — guardrails on input,
+      hardened tool output, gated tools behind `/approve`, RAG contexts, memory
+      writes, spans — and the fast tests prove each seam offline
+- [ ] `/ask/stream` streams the same gated pipeline as SSE, grounded answers carry
+      structured citations, and the optional JWT gate rejects missing/expired/
+      wrong-audience/wrong-scope tokens (all proven offline in `tests/`)
+- [ ] Security depth holds offline: poisoned retrieved documents are dropped
+      before composition, tenants cannot cross-read documents or memories, every
+      approval and tool run lands in the persistent audit log, and a replayed
+      approval never fires twice (`tests/test_security.py`,
+      `tests/test_reliability.py`; threat model in `THREAT-MODEL.md`, incident
+      response in `RUNBOOK.md`)
 - [ ] Memory survives a **process restart** (`sqlite_memory.py`; the tests reopen
       the store cold)
 - [ ] MCP tools arrive by **discovery through the real SDK** (`adapters.mcp_tools`
       against `mcp_server.py`, in-memory in the integration lane, over HTTP in the
       composed stack)
 - [ ] `docker compose up --build` in `phase8-deploy/01-compose/after` reaches
-      healthy, and `./verify-e2e.sh` passes all six checks
+      healthy, and `./verify-e2e.sh` passes all eleven checks — including the
+      operate tier: spans observed at a real collector outside the process,
+      degraded-but-honest answers with Qdrant stopped, and state that survives a
+      restart (grounded answers, audit rows, memories)
+- [ ] `make report` writes `PORTFOLIO.md` — eval scores per slice, live red-team
+      containment, latency percentiles read off the spans, the cost story and the
+      ADR list, every number measured by `src/assistant/report.py` and the
+      generator itself tested (a breach cannot pass silently)
+- [ ] The design is documented like a system, not a homework: diagrams in
+      `ARCHITECTURE.md`, decisions with alternatives and costs in `adr/`, threats
+      in `THREAT-MODEL.md`, incidents and backup/restore in `RUNBOOK.md`
 
 ## Stretch goals
 
-- Ship the spans somewhere real. Set `OTEL_EXPORTER_OTLP_ENDPOINT` at a local Phoenix
-  or a Langfuse project and look at the actual tree. Change **nothing** in
+- Ship the spans to a real backend. The observability overlay already proves they
+  leave the process; swap its debug exporter for an `otlp` exporter at a local
+  Phoenix or a Langfuse project and look at the actual tree. Change **nothing** in
   `observe.py` — if you have to, your instrumentation is not portable yet.
 - Put cost on the spans. Bring the Phase-1 meter in, set `cost.usd` per model call,
   and report spend per goal. Then find the single most expensive request you have ever

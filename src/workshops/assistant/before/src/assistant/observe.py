@@ -38,6 +38,9 @@ TOOL_NAME = "tool.name"
 TOOL_GATED = "tool.requires_approval"
 AGENT_STEPS = "agent.step_count"
 AGENT_PAUSED = "agent.paused_for_approval"
+AGENT_OUTCOME = "agent.outcome"  # completed | paused_for_approval | policy_violation
+AGENT_PENDING_TOOL = "agent.pending_tool"
+AGENT_APPROVED = "agent.approved_tools"
 CACHE_HIT = "cache.hit"
 COST = "cost.usd"
 
@@ -108,6 +111,13 @@ def traced_run(run: Any, goal: str, tracer: Tracer, **kwargs: Any) -> Any:
     actually filter on later, because a run that stopped for a human and a run that
     hit the step cap look identical on a latency chart and could not be more
     different in a review. Mark the span ERROR on a containment breach.
+
+    Then put the approval story on the same span: AGENT_APPROVED = the sorted
+    names in `kwargs["approvals"]` whose grant is truthy (set it BEFORE calling
+    `run` — it describes what the run started with), AGENT_PENDING_TOOL = the
+    tool a paused run is waiting on, and AGENT_OUTCOME = one of "completed",
+    "paused_for_approval" or "policy_violation", so a dashboard can group runs
+    without reconstructing the outcome from three booleans.
     """
     raise NotImplementedError
 

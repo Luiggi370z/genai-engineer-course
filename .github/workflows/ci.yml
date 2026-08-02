@@ -1,0 +1,81 @@
+# Repo-wide CI: the same checks the local verification scripts run, as separate
+# required jobs so a failure names its owner (a lesson, the scaffolds, parity,
+# the app, or the deployable image) instead of hiding in one long log.
+name: ci
+on: [push, pull_request]
+
+jobs:
+  lessons-after:
+    # every after/ lesson: sync + lint + fast tests + types (offline by design)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: ./src/verify-lessons.sh
+
+  lessons-before:
+    # every before/ scaffold: lint + types green, tests failing BY DESIGN
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: ./src/verify-lessons.sh --before
+
+  parity:
+    # before/after structure, matching tests, make targets, README claims
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 src/verify-parity.py
+
+  gates:
+    # the phase 8.2 merge gates over the committed, version-stamped report —
+    # plus proof that every seeded regression blocks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/phase8-deploy/02-ci/after
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: make eval
+      - run: make redteam
+      - run: make latency
+      - run: make cost
+      - run: make prove-gates
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: src/phase8-deploy/02-ci/after/evals/report.json
+
+  app:
+    # the workbook: typecheck + data alignment/integrity/density checks + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm lint
+        working-directory: app
+      - run: pnpm test
+        working-directory: app
+      - run: pnpm build
+        working-directory: app
+
+  compose-build:
+    # the capstone image must at least BUILD on every change; booting the full
+    # stack (models included) stays local via src/verify-e2e.sh
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker compose build
+        working-directory: src/phase8-deploy/01-compose/after
+      # the observability overlay must stay mergeable even though CI never boots it
+      - run: docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet
+        working-directory: src/phase8-deploy/01-compose/after

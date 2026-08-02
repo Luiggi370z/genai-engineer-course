@@ -70,7 +70,7 @@ it: the tool you measure with, and the loop that turns the result into offers.
 | 5 | Memory + crew      | 5 | Memory with provenance + TTL, budgeted context, tiered delegation | `memory.py`, `crew.py` |
 | 6 | Hardened assistant | 6 | Guardrails, spotlighting, least-privilege, red-team CI | `guardrails.py` |
 | 7 | Your own MCP       | 7 | An MCP server, consumed by the assistant via discovery | `mcp_client.py` |
-| 8 | Deployed stack     | 8 | OTel spans around the loop and every tool, answer cache with refusal rules — plus the capstone: a FastAPI composition root wiring every layer, real adapters (Qdrant/Ollama/MCP/OTLP) behind env vars, SQLite memory, an MCP server, a Docker image | `observe.py`, `cache.py`, `service.py`, `adapters.py` |
+| 8 | Deployed stack     | 8 | OTel spans around the loop and every tool, answer cache with refusal rules — plus the capstone: a FastAPI composition root wiring every layer, real adapters (Qdrant/Ollama/MCP/OTLP) behind env vars, SQLite memory, an MCP server, a Docker image | `observe.py`, `cache.py`, `service.py`, `api.py`, `core.py`, `adapters.py` |
 | 9 | Interview loop     | 9 | No code — a scored design-mock rubric and a metrics worksheet | `workshops/interview-loop/` |
 
 Briefs live in `workshops/assistant/WORKSHOP-*.md`, one per layer, plus
@@ -145,8 +145,9 @@ The MCP lessons target **SDK v2** — see `phase7-mcp/SDK-V2-MIGRATION.md`.
 
 The slow lane: `./verify-e2e.sh` (needs Docker) boots the composed stack and proves
 it end to end — tier report, grounded answer, abstention, injection containment,
-approval gating, an MCP call over the wire, spans recorded. `verify-lessons.sh`
-stays offline and never runs it.
+approval gating, an MCP call over the wire, spans recorded, and (via the
+observability overlay) the same spans arriving at an otel-collector outside the
+process. `verify-lessons.sh` stays offline and never runs it.
 
 ### Phase 9 · The GenAI Mindset
 - `drill-deck` — the interview question bank as flashcards

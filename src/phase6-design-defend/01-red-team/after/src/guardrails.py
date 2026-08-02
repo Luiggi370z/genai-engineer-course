@@ -26,6 +26,17 @@ INJECTION = [
     re.compile(r"you are now|new system prompt|disregard", re.I),
     re.compile(r"reveal.{0,20}(system )?prompt", re.I),
     re.compile(r"forward .* to .*@", re.I),
+    # multilingual: attackers do not write English on principle. Same "override
+    # the instructions" move in ES/FR/DE/PT — the verb + object pair is the tell.
+    re.compile(
+        r"(ignora|ignorez|ignoriere|ignore)\b.{0,40}"
+        r"(instrucciones|instructions|anweisungen|instru\u00e7\u00f5es)",
+        re.I,
+    ),
+    # exfiltration: moving data OUT is the goal of most landed injections.
+    # A transfer verb aimed at an external address or URL is blocked outright.
+    re.compile(r"(send|forward|email|upload|export)\b.{0,60}\bto\b.{0,40}@", re.I),
+    re.compile(r"(upload|post|send)\b.{0,60}https?://", re.I),
 ]
 
 

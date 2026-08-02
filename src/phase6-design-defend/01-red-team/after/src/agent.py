@@ -26,7 +26,12 @@ SAFE_TOOLS = {"read_note", "summarize"}
 GATED_TOOLS = {"send_message", "delete"}  # require approval=True
 
 
-def guarded_run(user_msg: str, retrieved: list[str], approve: bool = False) -> Result:
+def guarded_run(
+    user_msg: str,
+    retrieved: list[str],
+    approve: bool = False,
+    tool_outputs: list[str] | None = None,
+) -> Result:
     r = Result(text="")
     ok, cleaned = layer1(user_msg)
     if not ok:
@@ -35,12 +40,19 @@ def guarded_run(user_msg: str, retrieved: list[str], approve: bool = False) -> R
         r.audit.append(f"L1 blocked: {cleaned}")
         return r
 
-    # untrusted retrieved content is spotlighted, never trusted as instructions
-    safe_ctx = [spotlight(c) for c in retrieved]
+    # untrusted content arrives on TWO channels — retrieved documents and tool
+    # output (a fetched page, an email body). Both are spotlighted, never trusted
+    # as instructions; neither can approve anything.
+    untrusted = list(retrieved) + list(tool_outputs or [])
+    safe_ctx = [spotlight(c) for c in untrusted]
 
-    # simulate the model deciding to act. Even if injected text in `retrieved`
-    # "tells" it to send a message, a gated tool needs approval — containment.
-    wants_gated = any("send" in c.lower() or "forward" in c.lower() for c in retrieved)
+    # simulate the model deciding to act. Even if injected text in the untrusted
+    # channels "tells" it to send — or claims approval was ALREADY given — a gated
+    # tool needs approval from the APPROVE ARGUMENT, which only a human sets.
+    wants_gated = any(
+        "send" in c.lower() or "forward" in c.lower() or "delete" in c.lower()
+        for c in untrusted
+    )
     if wants_gated and not approve:
         r.text = "A risky action was requested but requires human approval."
         r.audit.append("gated tool suppressed (no approval)")
@@ -48,7 +60,7 @@ def guarded_run(user_msg: str, retrieved: list[str], approve: bool = False) -> R
         return r
 
     answer = f"Summary of {len(safe_ctx)} item(s)."
-    if not layer3_output_ok(answer, retrieved):
+    if not layer3_output_ok(answer, untrusted):
         r.text = SAFE_REFUSAL
         r.audit.append("L3 output gate failed")
         return r

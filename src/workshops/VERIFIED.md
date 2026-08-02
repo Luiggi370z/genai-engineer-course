@@ -1,6 +1,6 @@
 # Verification stamp — `workshops`
 
-**Last verified:** 2026-07-31
+**Last verified:** 2026-08-01
 **How:** every `after/` reference passed `make check` (ruff + pyright + pytest) on this date,
 and every `before/` scaffold passed lint + type with its tests failing by design.
 
@@ -26,6 +26,39 @@ SDK; v1 code will NOT run on it), `opentelemetry-exporter-otlp` — imported laz
 the fast tier never installs them. The MCP adapter and server are verified against
 the REAL v2 SDK via its in-memory client (`pytest -m integration`: 2 pass with the
 group installed, the Qdrant/Ollama/boot lanes skip without their endpoints).
+
+## What landed on 2026-08-01
+
+The capstone grew its production tier: `auth.py` (opt-in Bearer JWT, `pyjwt>=2.8,<3`
+in the main dependencies — pure-Python, no key infrastructure), `connectors.py`
+(real Telegram/RSS tool bodies behind env vars), `resilience.py` + `idempotency.py`
+(retries/timeouts, token-bucket + concurrency-cap middleware, replay-safe
+approvals), `audit_log.py` (persistent, same SQLite file as memory), streaming
+(`/ask/stream`), structured citations, tenant scoping, and `report.py`
+(`make report` → `PORTFOLIO.md`). Three field bugs worth remembering, all caught by
+the live 11-check e2e run against real Ollama (a thinking model that spends minutes
+reasoning before its first token):
+
+1. The timeout in `resilience.py` originally used `ThreadPoolExecutor` as a context
+   manager, whose exit blocks on the abandoned worker — the timeout raised on
+   schedule and then waited anyway. Pinned by
+   `test_a_timeout_returns_promptly_instead_of_waiting_for_the_abandoned_call`.
+2. `fallback_stream` guarded errors but not TIME — a generator's slowness happens
+   between yields, where `resilient` cannot see it, so `/ask/stream` hung for the
+   whole generation. Now each chunk must arrive within the compose deadline or the
+   stream falls back/truncates. Pinned by the stall tests in `test_reliability.py`.
+3. `offline_compose`, running as the degraded fallback for the model tier, answered
+   with whatever Qdrant retrieved — but a vector store returns the nearest
+   neighbours of ANY question, so "nearest" was quietly treated as "relevant".
+   It now abstains unless a context shares a content word with the question.
+   Pinned by `test_the_degraded_composer_does_not_fabricate_grounding`.
+
+The capstone's `service.py` had grown to ~650 lines carrying six concerns, so it
+was split along its natural seams — `service.py` (composition root only),
+`api.py` (HTTP surface; the uvicorn factory moved with it, see the Dockerfile
+CMD), `core.py` (the Assistant pipeline), `composers.py`, `screening.py`, and
+`fallbacks.py` — every module now sits inside the 150–500-line band the course
+preaches. Same tests, same behavior; only import paths moved.
 
 `interview-loop/` (**W9**) carries no `pyproject.toml` on purpose — it is markdown only.
 `verify-lessons.sh` finds lessons by locating `pyproject.toml` files, so the folder is
