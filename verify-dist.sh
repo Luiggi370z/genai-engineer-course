@@ -1,21 +1,23 @@
 #!/usr/bin/env bash
-# Is what is committed under dist/ this commit's release, or a stale one?
+# Is the dist/ on this machine the release of the commit you are on?
 #
 #   ./verify-dist.sh
 #
-# Runs in CI on every push. A minified bundle looks equally plausible whatever it
-# was built from, so "the workbook is up to date" is not a question you can answer
-# by opening the file — which is how a release ships with three-week-old content
-# and nobody notices until a student asks why a lesson in the zip is not in the
-# workbook.
+# Run it before you upload. dist/ is a build artifact and is NOT in the repository
+# — it is reproduced from any commit by ./package.sh — so nothing here is a CI
+# concern: there is no committed release that could go stale, which is most of the
+# reason not to commit one. What remains is the local mistake, and it is an easy
+# one: package a release, keep working, then publish the dist/ still sitting in
+# your working directory a dozen commits later. A minified bundle looks equally
+# plausible whatever it was built from, so opening the file cannot tell you.
 #
 # Four checks, cheapest first:
 #
 #   1. dist/BUILD.json exists and names a commit git knows
 #   2. the src/, app/ and release/ trees it was built from are the trees at HEAD —
 #      content, not commits, so a docs-only commit does not invalidate a good dist
-#   3. the committed artifacts still hash to what the stamp recorded (nobody
-#      hand-edited course.html, and no partial copy landed)
+#   3. the artifacts still hash to what the stamp recorded (nobody hand-edited
+#      course.html, and no partial copy landed)
 #   4. the zip carries exactly the files `git archive HEAD -- src` would produce
 #
 # Deliberately *not* a byte-for-byte rebuild of course.html. A bundler's output
@@ -31,7 +33,7 @@ NAME="genai-engineer-workbook-src"
 STAMP="dist/BUILD.json"
 
 if [ ! -f "$STAMP" ]; then
-  echo "error: no $STAMP — run ./package.sh and commit dist/" >&2
+  echo "error: no $STAMP — run ./package.sh to build a release first" >&2
   exit 1
 fi
 

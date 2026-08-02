@@ -94,9 +94,11 @@ Phase 6 guardrails) are worth pulling when you reach those phases rather than no
 The workbook is a build output, not a file in this repo. If you cloned instead of
 downloading the release, build it yourself — that needs Node, which nothing else in
 the course does: `cd app && pnpm install`, then `./package.sh` from the repo root.
-That builds all three artifacts from one commit and stamps `dist/BUILD.json` with it;
-`./verify-dist.sh` — which CI runs on every push — is what catches a `dist/` nobody
-rebuilt.
+That builds all three artifacts from one commit and stamps `dist/BUILD.json` with it.
+`dist/` is deliberately not in the repository — it is reproducible from any commit,
+and committing a megabyte of minified output per release would grow every clone
+forever. If you are the one publishing, run `./verify-dist.sh` first: it is what
+catches a `dist/` you built, kept working past, and were about to upload anyway.
 
 Your progress in `course.html` is saved in the browser's `localStorage`, so tick things
 off as you go — but keep in mind it lives in that one browser on that one machine. Three

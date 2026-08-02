@@ -85,10 +85,12 @@ if unzip -l "$STAGE/$NAME.zip" | grep -Eq '(\.venv/|__pycache__/|\.pyc$|\.pytest
   exit 1
 fi
 
-# The stamp. `verify-dist.sh` reads this to answer "is what is committed under
-# dist/ actually this commit's release, or a stale one nobody noticed" — a
-# question no amount of looking at the files themselves can settle, because a
-# minified bundle looks equally plausible whatever it was built from.
+# The stamp. It travels with the release so whoever holds these three files can
+# say which commit produced them, and `verify-dist.sh` reads it to answer "is the
+# dist/ in this working directory still the release of the commit I am on" before
+# somebody uploads one built a dozen commits ago — a question no amount of looking
+# at the files themselves can settle, because a minified bundle looks equally
+# plausible whatever it was built from.
 echo "==> Stamping the build"
 commit=$(git rev-parse HEAD)
 python3 - "$STAGE" "$commit" "$NAME" <<'PY'

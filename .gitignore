@@ -9,17 +9,13 @@ docs/
 # macOS
 .DS_Store
 
-# Node / app build
+# Node / app build. `dist/` covers both vite's scratch output under app/ and the
+# release folder at the root: a built artifact is not source, and a 1.4 MB
+# workbook plus zip committed on every release would grow the clone forever to
+# store something `./package.sh` reproduces from any commit in seconds.
 node_modules/
 dist/
 .vite/
-
-# ...except the release folder at the root, which is the opposite of a build
-# artifact: it is the thing a student downloads, and `verify-dist.sh` exists to
-# ask whether what is COMMITTED there is this commit's release or a stale one.
-# That question needs the files in the repository. `app/dist/` stays ignored —
-# it is vite's scratch output on the way here.
-!/dist/
 
 # `make report` and `make evidence` output: measured evidence belongs to a run,
 # not to the repo. A committed report is a number nobody re-measured; CI

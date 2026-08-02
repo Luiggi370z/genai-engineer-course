@@ -28,19 +28,6 @@ jobs:
       - uses: actions/checkout@v5
       - run: python3 src/verify-parity.py
 
-  dist:
-    # the committed release is this commit's release, not a stale one. A minified
-    # bundle looks equally plausible whatever it was built from, so nothing short
-    # of the stamp in dist/BUILD.json can tell — which is how a release ships
-    # three-week-old content and nobody notices.
-    runs-on: ubuntu-latest
-    steps:
-      # Needs the tree objects the stamp names, so no shallow clone.
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-      - run: ./verify-dist.sh
-
   gates:
     # the phase 8.2 merge gates as a LESSON: the policy runs over the committed
     # fixture report, and every seeded regression must block — proof that a gate
