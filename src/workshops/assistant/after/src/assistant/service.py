@@ -2,7 +2,8 @@
 across the workshops into one running thing:
 
     request -> auth (optional Bearer JWT, env-gated)      [api.py]
-            -> guardrails.screen (input)                  [core.py]
+            -> screen (input; guard.py adds a model when configured)
+                                                          [core.py]
             -> agent.run loop  (observe span)             [core.py]
                  -> tools (screening.py re-screens read-only content)
                  -> RAG (offline BM25 or Qdrant)          [adapters.py]
@@ -33,11 +34,14 @@ from assistant.composers import (
 )
 from assistant.core import Assistant
 from assistant.fallbacks import FallbackRag, fallback_composer, fallback_stream
+from assistant.guard import build_screen
 from assistant.idempotency import IdempotencyStore
 from assistant.memory import AssistantMemory
 from assistant.observe import recorder
+from assistant.outbox import Outbox
 from assistant.settings import Settings
-from assistant.tools import REGISTRY, Tool
+from assistant.tenancy import TenantMemory
+from assistant.tools import REGISTRY, rewrap
 
 
 def build_assistant(settings: Settings | None = None) -> Assistant:
@@ -49,32 +53,43 @@ def build_assistant(settings: Settings | None = None) -> Assistant:
         degraded[component] = reason
 
     if settings.qdrant_url:
-        from assistant.adapters import QdrantStore
+        from assistant.adapters import QdrantStore, hash_embed, ollama_embed
+        # A real embedder if one is named, the hash vector otherwise, and the
+        # fallback is REPORTED rather than silent: retrieval that quietly runs on
+        # vocabulary overlap looks like retrieval right up until someone asks
+        # about "reimbursements" and gets nothing about refunds.
+        embed = hash_embed
+        if settings.embed_model:
+            if settings.ollama_host:
+                embed = ollama_embed(settings.ollama_host, settings.embed_model)
+            else:
+                report("embed", "ASSISTANT_EMBED_MODEL set without OLLAMA_HOST")
         rag: Any = FallbackRag(
-            QdrantStore(settings.qdrant_url, settings.qdrant_collection),
+            QdrantStore(settings.qdrant_url, settings.qdrant_collection, embed=embed),
             InMemoryRag(), report,
         )
     else:
         rag = InMemoryRag()
 
+    # One store PER SUBJECT, not one store with a subject label on each row —
+    # see tenancy.py for the recall leak that distinction closes.
     if settings.assistant_db:
         from assistant.sqlite_memory import SqliteMemory
-        memory: Any = SqliteMemory(settings.assistant_db)
+        db = settings.assistant_db
+        memory = TenantMemory(lambda subject: SqliteMemory(db, user=subject))
     else:
-        memory = AssistantMemory()
+        memory = TenantMemory(lambda subject: AssistantMemory(user=subject))
 
     registry = dict(REGISTRY)
     if settings.telegram_bot_token and "send_telegram" in registry:
         from assistant.connectors import telegram_sender
-        stub = registry["send_telegram"]
-        registry["send_telegram"] = Tool(
-            stub.name, telegram_sender(settings.telegram_bot_token), True, stub.doc
+        registry["send_telegram"] = rewrap(
+            registry["send_telegram"], telegram_sender(settings.telegram_bot_token)
         )
     if settings.news_feed_url and "read_news" in registry:
         from assistant.connectors import news_fetcher
-        stub = registry["read_news"]
-        registry["read_news"] = Tool(
-            stub.name, news_fetcher(settings.news_feed_url), False, stub.doc
+        registry["read_news"] = rewrap(
+            registry["read_news"], news_fetcher(settings.news_feed_url)
         )
     if settings.mcp_server:
         from assistant.adapters import mcp_tools
@@ -98,8 +113,15 @@ def build_assistant(settings: Settings | None = None) -> Assistant:
         compose = offline_compose
         stream_compose = word_stream(offline_compose)
 
-    # outstanding approvals, replay protection and the audit trail share the memory
-    # DB, so all three survive a restart with it
+    # One screen object for every untrusted channel — question, retrieved docs,
+    # tool output, ingested docs. Built here so turning the guard model on is a
+    # composition-root decision and not four independent ones.
+    screen = build_screen(settings.ollama_host, settings.guard_model)
+
+    # Outstanding approvals, replay protection, the outbox and the audit trail
+    # share the memory DB, so all four survive a restart with it. The outbox
+    # especially: an outbox that lives in `:memory:` records intents right up
+    # until the crash it exists to explain.
     store = settings.assistant_db or ":memory:"
 
     return Assistant(
@@ -107,6 +129,7 @@ def build_assistant(settings: Settings | None = None) -> Assistant:
         rec=recorder(otlp_endpoint=settings.otlp_endpoint),
         compose=compose, stream_compose=stream_compose,
         approvals=ApprovalStore(store, settings.approval_ttl_seconds),
-        idempotency=IdempotencyStore(store), audit_log=AuditLog(store),
-        degraded=degraded,
+        idempotency=IdempotencyStore(store), outbox=Outbox(store),
+        audit_log=AuditLog(store),
+        degraded=degraded, screen=screen,
     )

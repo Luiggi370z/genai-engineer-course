@@ -1,0 +1,70 @@
+# The OAuth 2.1 lane — a real identity provider instead of a shared secret.
+#
+#   ASSISTANT_JWT_SECRET=$(openssl rand -base64 48) \
+#     docker compose -f docker-compose.yml \
+#                    -f docker-compose.secure.yml \
+#                    -f docker-compose.oauth.yml up --build
+#   python oauth/pkce_login.py            # browser opens, you log in, token prints
+#
+# What changes: the assistant stops verifying HS256 with a secret it also holds
+# and starts verifying RS256 against Keycloak's published JWKS. That is the
+# whole difference, and it is the one that matters — with a shared secret every
+# verifier is also a forger, and the blast radius of a leaked service config is
+# "anyone can mint any token". With JWKS this service holds public keys only.
+#
+# ASSISTANT_JWKS_URL wins over ASSISTANT_JWT_SECRET in auth.py, so leaving the
+# secure overlay's secret set is harmless; the RS256 path takes precedence.
+#
+# Keycloak is pinned and imports `oauth/assistant-realm.json` at boot: one realm,
+# one PUBLIC client with PKCE required (OAuth 2.1 has no client secret to leak
+# in a CLI or a browser), one audience mapper so tokens carry `aud: assistant`,
+# and one demo user. Not production configuration — production has real users,
+# real TLS and a real database behind Keycloak — but a real protocol.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.5.2 # pinned, same reason as everything else
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    command: ["start-dev", "--import-realm", "--http-port=8081"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_HEALTH_ENABLED: "true"
+      # Pin the issuer so `iss` is the same string every time, whoever asked.
+      # Without this Keycloak derives it from the request's Host header, and a
+      # token minted through the browser would carry a different issuer than the
+      # one the assistant was told to require.
+      KC_HOSTNAME: http://localhost:8081
+      # ...but let the assistant fetch JWKS over the compose network under its
+      # own hostname, instead of being redirected to a localhost it cannot reach.
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+    volumes:
+      # The realm file only. Keycloak imports every *.json it finds in this
+      # directory, so mounting the whole `oauth/` folder would make the login
+      # script's neighbours part of the identity provider's configuration.
+      - ./oauth/assistant-realm.json:/opt/keycloak/data/import/assistant-realm.json:ro
+    ports:
+      # Published because the LOGIN happens in your browser on the host: the
+      # authorization endpoint has to be reachable from outside the network, and
+      # the issuer URL in the token has to match what both sides see.
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'UP' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  assistant:
+    environment:
+      # The public half of the issuer's signing key. Fetched once and cached;
+      # rotation is Keycloak's problem, not a redeploy.
+      ASSISTANT_JWKS_URL: http://keycloak:8081/realms/assistant/protocol/openid-connect/certs
+      # Required, so a token from some other realm cannot be replayed here even
+      # if it is otherwise well-formed. This must match the `iss` Keycloak puts
+      # in the token, which is the URL the CLIENT used — hence localhost.
+      ASSISTANT_JWT_ISSUER: http://localhost:8081/realms/assistant
+      ASSISTANT_JWT_AUDIENCE: assistant
+    depends_on:
+      keycloak:
+        condition: service_healthy

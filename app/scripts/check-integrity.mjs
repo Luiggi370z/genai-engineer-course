@@ -36,7 +36,8 @@ const { errors, counts } = audit({
 
 console.log(
   `Integrity scan · ${counts.ids} ids · ${counts.blocks} blocks · ` +
-    `${counts.resources} resources · ${counts.electives} electives`,
+    `${counts.resources} resources · ${counts.electives} electives · ` +
+    `${counts.defenses} defended checkpoints`,
 );
 
 if (process.argv.includes("--report")) {
@@ -58,4 +59,7 @@ if (errors.length) {
   for (const e of errors) console.error(`  - [${e.rule}] ${e.subject}: ${e.message}`);
   process.exit(1);
 }
-console.log("\nIntegrity OK — ids are unique, links are links, tables are rectangles.");
+console.log(
+  "\nIntegrity OK — ids are unique, links are links, tables are rectangles, and " +
+    "every phase asks for all four halves of a design answer.",
+);

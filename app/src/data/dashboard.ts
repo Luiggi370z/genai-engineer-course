@@ -5,7 +5,7 @@
 
 export const dashboard = {
   title: "The GenAI Engineer Workbook",
-  refreshed: "refreshed July 2026",
+  refreshed: "refreshed August 2026",
   intro:
     'A friendly, fact-checked path from "I call LLM APIs sometimes" to "I ship evaluated, guarded, deployed GenAI systems" — the skill set hiring managers are actually screening for. ',
   introEmphasis: "Pace yourself by the gates, not the calendar.",
@@ -33,5 +33,5 @@ export const dashboard = {
     },
   ],
   honestyNote:
-    "Honesty corner: model names drift weekly (verified here as of June 2026); the durable bets are the patterns — provider-agnostic clients, hybrid retrieval + reranking, eval-first habits, layered guardrails. Benchmark on your own data, and treat any single salary number as directional.",
+    "Honesty corner: model names drift weekly — every price, tier and model tag on these pages carries the date it was last checked, printed under the table it belongs to; the durable bets are the patterns — provider-agnostic clients, hybrid retrieval + reranking, eval-first habits, layered guardrails. Benchmark on your own data, and treat any single salary number as directional.",
 } as const;

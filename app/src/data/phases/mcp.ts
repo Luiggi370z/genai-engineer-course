@@ -1,6 +1,7 @@
 // Generated from the shipped course bundle by scripts/extract-data.mjs.
 // Edit freely from here on — this file is the source of truth for the content.
 
+import { claim, sourceNote } from "../reference";
 import type { PhaseContent } from "../types";
 
 export const mcp: PhaseContent = {
@@ -73,15 +74,16 @@ export const mcp: PhaseContent = {
           kind: "list",
           items: [
             "It’s a real, governed standard: under the Linux Foundation’s Agentic AI Foundation since late 2025, backed by Anthropic, OpenAI, Google, and Microsoft, with ~10,000 public servers (as of mid-2026).",
-            "Mental model: MCP sits **on top of** the tool calling from Phase 4. It doesn’t replace your REST API — it wraps capabilities so any client can **discover** them at runtime, over a **standard transport**, in a **session**.",
+            "Mental model: MCP sits **on top of** the tool calling from Phase 4. It doesn’t replace your REST API — it wraps capabilities so any client can **discover** them at runtime, over a **standard transport**, with **no state held between calls**.",
             "The payoff for you: your Phase-4 assistant can pick up a brand-new server with **zero code changes**, because the capability list is data the client fetches, not code you hard-wire.",
           ],
         },
+        { kind: "sources", ...sourceNote([claim("mcp-servers"), claim("mcp-spec")]) },
         {
           kind: "callout",
           tone: "tip",
           title: "Why MCP gets its own phase",
-          text: "MCP is now table stakes in 2026 GenAI interviews and real jobs — and it has enough moving parts (three primitives, two transports, a session lifecycle, and a genuinely tricky auth story) that cramming it into the agents phase shortchanged it. Here it gets the room it deserves.",
+          text: "MCP is now table stakes in 2026 GenAI interviews and real jobs — and it has enough moving parts (three primitives, three ways to reach a server, a five-beat lifecycle and a genuinely tricky auth story) that cramming it into the agents phase shortchanged it. Here it gets the room it deserves.",
         },
       ],
     },
@@ -97,7 +99,7 @@ export const mcp: PhaseContent = {
         },
         {
           kind: "flow",
-          title: "Every client session, same five beats",
+          title: "Every client, same five beats",
           nodes: [
             { label: "Connect", sub: "open the transport" },
             { label: "initialize", sub: "capability handshake" },
@@ -108,7 +110,7 @@ export const mcp: PhaseContent = {
         },
         {
           kind: "p",
-          text: "On the wire it’s just **JSON-RPC 2.0** — plain request/response messages. You almost never touch that layer (the SDK does), but knowing it’s there explains the two transports you choose between:",
+          text: "On the wire it’s just **JSON-RPC 2.0** — plain request/response messages. You almost never touch that layer (the SDK does), but knowing it’s there explains the three ways a v2 `Client` can reach a server:",
         },
         {
           kind: "list",
@@ -237,7 +239,7 @@ if __name__ == "__main__":
             [
               "OAuth 2.1 + PKCE",
               "Any public-facing remote server, or one acting on behalf of users who must consent.",
-              "Mandatory per the Nov-2025 spec for public servers. Validate token audience; never pass tokens through.",
+              "Mandatory for public servers since the Nov-2025 revision, and unchanged by the 2026-07-28 spec. Validate token audience; never pass tokens through.",
             ],
           ],
         },
@@ -269,12 +271,14 @@ if __name__ == "__main__":
       title: "Be a client first",
       repo: "phase7-mcp/01-consume-a-server",
       rung: "faded",
-      task: "Before building anything, connect a Python ClientSession to a prebuilt reference server over stdio. Run the handshake, list its tools and resources, call one. (Needs Node/npx on PATH.)",
+      proves: "integrate",
+      task: "Before building anything, open a v2 `Client` against a prebuilt reference server, run the handshake, list its tools and resources, and call one. The lesson hands the `Client` the server *object*, so the protocol calls are real with no network and no subprocess; the same code takes a URL or a stdio transport instead.",
       assesses: ["p5-o2"],
       needs: ["p3-o2"],
       solution: [
         "The lifecycle never changes: connect → initialize → list → call → close. Internalize that order.",
         "Using a server you didn’t write means zero server code to debug — anything that breaks is your client. That’s why we go consumer-first.",
+        "In-memory is not a mock. It is the real protocol with the transport removed, which is why the same test passes unchanged once you point the client at a URL.",
       ],
     },
     {
@@ -282,6 +286,7 @@ if __name__ == "__main__":
       title: "Wrap a REST API as an MCP server",
       repo: "phase7-mcp/02-rest-to-mcp",
       rung: "faded",
+      proves: "implement",
       task: "Take a small public REST API (weather, or the provided toy service) and expose it as an MCP server with 3 tools, one resource, and one prompt. Verify everything in the MCP Inspector — no agent yet.",
       assesses: ["p5-o3"],
       needs: ["p3-o2"],
@@ -295,6 +300,7 @@ if __name__ == "__main__":
       title: "Three doors: stdio, Bearer, OAuth",
       repo: "phase7-mcp/03-auth-modes",
       rung: "faded",
+      proves: "integrate",
       task: "Deploy your server three ways: as a local stdio server (env-var secrets), as a remote HTTP server behind a static Bearer token, and as a remote server with OAuth 2.1 + PKCE. Write down which you’d use for a personal tool, a team tool, and a public SaaS integration.",
       assesses: ["p5-o4"],
       solution: [
@@ -306,6 +312,7 @@ if __name__ == "__main__":
       id: "p5-e4",
       title: "Blank editor: a server for something you actually use",
       rung: "independent",
+      proves: "implement",
       task: "Empty directory, no template, no copying from exercise 2. Pick a service you personally use that has an API — your note app, a home-automation hub, your bank’s export endpoint, a hobby project — and expose it over MCP from scratch: two tools, one resource, one prompt. Then prove it in the Inspector, and finally connect a client you also write yourself and call one tool end to end. The unfamiliar API is the point: this is the first time nobody has picked a well-behaved one for you.",
       assesses: ["p5-o2", "p5-o3"],
       needs: ["p3-o2"],
@@ -325,6 +332,7 @@ if __name__ == "__main__":
     subtitle:
       "Build an MCP server for a service you care about — then let your Phase-4 assistant consume it as a tool.",
     repo: "workshops/assistant",
+    proves: "integrate",
     assesses: ["p5-o2", "p5-o3", "p5-o4"],
     needs: ["p3-o2"],
     blocks: [
@@ -373,19 +381,27 @@ async def load_mcp_tools(target):
       {
         id: "w4-d1",
         text: "An MCP server exposing at least **3 tools, 1 resource, and 1 prompt** over a real service",
+        tier: "minimum",
       },
-      { id: "w4-d2", text: "Verified in the **MCP Inspector** before any agent connects" },
+      {
+        id: "w4-d2",
+        text: "Verified in the **MCP Inspector** before any agent connects",
+        tier: "full",
+      },
       {
         id: "w4-d3",
         text: "Secured correctly for its deployment: **env-var secrets (stdio)** or **Bearer/OAuth (remote)** with audience validation",
+        tier: "full",
       },
       {
         id: "w4-d4",
         text: "Your **Workshop-4 assistant consumes it via discovery** — tools are listed at runtime, not hard-coded",
+        tier: "minimum",
       },
       {
         id: "w4-d5",
         text: "Adding a new tool to the server makes it usable by the assistant **with no assistant code change**",
+        tier: "full",
       },
     ],
     stretch: [
@@ -399,21 +415,25 @@ async def load_mcp_tools(target):
       id: "p5-q1",
       q: "What does MCP add on top of plain tool calling?",
       a: "Runtime discovery of tools/resources/prompts, a standard transport (stateless request/response since the 2026 spec), and write-once-use-everywhere interop. Tool calling is how one agent invokes one function; MCP is how any client discovers and uses any server’s capabilities.",
+      demands: ["alternatives", "constraints"],
     },
     {
       id: "p5-q2",
-      q: "Walk the five beats of a client session.",
-      a: "Connect (open the transport) → initialize (capability handshake) → list_tools/list_resources (runtime discovery) → call_tool/read_resource (use it) → close (tear down). Every client you ever write repeats exactly this.",
+      q: "Walk the five beats a client performs — and say what the 2026 spec changed about them.",
+      a: "Connect (open the transport) → initialize (capability handshake) → list_tools/list_resources (runtime discovery) → call_tool/read_resource (use it) → close (tear down). Every client you ever write repeats exactly this. What 2026-07-28 changed is not the beats but where they live: the protocol went stateless, so they no longer have to happen inside one held-open connection, and you must never assume the server remembers you between calls. Say what each beat costs you when you skip it, because that is the half an interviewer is listening for: skip `initialize` and you are calling a server whose capabilities you assumed; skip discovery and you have hard-coded a tool list that goes stale the next time the server ships; skip `close` and you leak a subprocess per session until the box runs out of file descriptors. The ordering is a constraint, not a convention — discovery cannot precede the handshake that tells you what there is to discover.",
+      demands: ["constraints", "failure-modes"],
     },
     {
       id: "p5-q3",
       q: "Which auth method for a local tool, a team tool, and a public SaaS server — and one trap for each?",
       a: "Local stdio → none, env-var secrets (trap: hard-coding keys). Team remote → Bearer/API key over HTTPS (trap: plaintext in config). Public → OAuth 2.1 + PKCE (trap: forwarding the client token upstream — the confused-deputy vulnerability; get your own token).",
+      demands: ["alternatives", "constraints", "failure-modes"],
     },
     {
       id: "p5-q4",
       q: "Why verify a server in the Inspector before connecting an agent?",
       a: "It isolates protocol bugs from agent bugs. If the Inspector can list and call your tools, your server is correct — so anything that breaks after wiring the agent is the agent’s fault, not the protocol’s.",
+      demands: ["alternatives", "evidence"],
     },
   ],
   resources: [

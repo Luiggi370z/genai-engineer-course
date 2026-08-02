@@ -19,8 +19,13 @@ def as_agent_tools(
 ) -> dict[str, Tool]:
     """Turn discovered MCP tool specs into agent Tools — no hand-coding per tool.
 
-    Each spec: {"name", "description", "requires_approval"?}. The invoker actually
-    calls the MCP server (call_tool) at runtime.
+    Each spec: {"name", "description", "requires_approval"?, "required_args"?}.
+    The invoker actually calls the MCP server (call_tool) at runtime.
+
+    `required_args` comes from the server's own input schema. Carrying it onto
+    the Tool is what lets planner.py treat a discovered tool exactly like a
+    built-in one: it can tell whether it is able to fill the call. Drop it and
+    every discovered tool looks argument-free, which is worse than unusable.
     """
     raise NotImplementedError  # TODO
 def extend_assistant(

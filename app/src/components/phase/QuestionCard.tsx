@@ -2,12 +2,27 @@ import MinusSignIcon from "@hugeicons/core-free-icons/MinusSignIcon";
 import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
-import type { QuestionAnswer } from "../../data/types";
+import type { DefenseElement, QuestionAnswer } from "../../data/types";
 import { InlineText } from "../../lib/markdown";
 import type { Progress } from "../../lib/progress";
 
+/**
+ * What each rubric element is asking for, in the words the student should hear
+ * themselves say. The labels are short because they sit in a row of chips; the
+ * titles carry the actual instruction on hover and to a screen reader.
+ */
+const DEMAND: Record<DefenseElement, { label: string; means: string }> = {
+  alternatives: { label: "alternatives", means: "name what else you could have built" },
+  constraints: { label: "constraints", means: "name what ruled the others out" },
+  evidence: { label: "evidence", means: "name the measurement that says it worked" },
+  "failure-modes": {
+    label: "failure modes",
+    means: "name where it breaks, and how you would know",
+  },
+};
+
 interface QuestionCardProps {
-  q: QuestionAnswer;
+  q: QuestionAnswer & { demands?: DefenseElement[] };
   accent: string;
   progress: Progress;
   onToggle: (id: string) => void;
@@ -49,6 +64,24 @@ export function QuestionCard({ q, accent, progress, onToggle, source }: Question
           <HugeiconsIcon icon={open ? MinusSignIcon : PlusSignIcon} size={13} strokeWidth={2.5} />
         </span>
       </button>
+      {/* Outside the collapse on purpose. A bar you only meet after reading the
+          answer is a bar you grade yourself against, and everyone passes that one. */}
+      {q.demands && q.demands.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2.5 pl-[52px]">
+          <span className="font-mono text-[9.5px] uppercase tracking-[0.12em] text-graphite">
+            your answer must name
+          </span>
+          {q.demands.map((d) => (
+            <span
+              key={d}
+              title={DEMAND[d].means}
+              className="rounded-full border border-line px-2 py-0.5 text-[10.5px] text-graphite"
+            >
+              {DEMAND[d].label}
+            </span>
+          ))}
+        </div>
+      )}
       {open && (
         <div className="border-t border-line/70 px-4 pt-1 pb-3.5">
           <p className="mb-3 text-[13px] leading-[1.7] text-ink/80">

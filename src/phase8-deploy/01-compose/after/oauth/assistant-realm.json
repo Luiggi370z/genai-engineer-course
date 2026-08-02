@@ -1,0 +1,92 @@
+{
+  "realm": "assistant",
+  "enabled": true,
+  "displayName": "GenAI assistant (course demo realm)",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "clientScopes": [
+    {
+      "name": "assistant:ask",
+      "protocol": "openid-connect",
+      "description": "Ask the assistant a question",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "assistant:ingest",
+      "protocol": "openid-connect",
+      "description": "Add documents to the assistant's corpus",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    },
+    {
+      "name": "assistant:approve",
+      "protocol": "openid-connect",
+      "description": "Approve an irreversible tool call",
+      "attributes": { "include.in.token.scope": "true", "display.on.consent.screen": "true" }
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "assistant-cli",
+      "name": "Assistant CLI (public, PKCE)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["http://127.0.0.1:8765/callback"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "oauth2.device.authorization.grant.enabled": "false"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "assistant:ask",
+        "assistant:ingest",
+        "assistant:approve"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "assistant-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "assistant",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Demo",
+      "email": "alice@example.invalid",
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "requiredActions": [],
+      "realmRoles": ["default-roles-assistant"]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Demo",
+      "email": "bob@example.invalid",
+      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "requiredActions": [],
+      "realmRoles": ["default-roles-assistant"]
+    }
+  ]
+}

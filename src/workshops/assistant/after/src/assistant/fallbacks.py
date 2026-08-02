@@ -41,20 +41,41 @@ class FallbackRag:
         self._add = resilient(primary.add, policy)
         self._search = resilient(primary.search, policy)
 
-    def add(self, docs: list[str], tenant: str = auth.ANONYMOUS) -> int:
-        self.fallback.add(docs, tenant=tenant)
+    def add(self, docs: list, tenant: str = auth.ANONYMOUS) -> int:
+        mirrored = self.fallback.add(docs, tenant=tenant)
         try:
             return self._add(docs, tenant=tenant)
         except Exception as exc:
             self._report("rag", f"ingest fell back to in-memory: {exc}")
-            return len(docs)
+            # the standby's count, not len(docs): both stores chunk the same way,
+            # so this is the real number of retrievable units either way
+            return mirrored
 
-    def search(self, query: str, k: int = 3, tenant: str = auth.ANONYMOUS) -> list[str]:
+    def search(self, query: str, k: int = 3, tenant: str = auth.ANONYMOUS) -> list:
         try:
             return self._search(query, k, tenant=tenant)
         except Exception as exc:
             self._report("rag", f"search fell back to in-memory: {exc}")
             return self.fallback.search(query, k, tenant=tenant)
+
+    def delete(self, source: str, tenant: str = auth.ANONYMOUS) -> int:
+        """Delete from BOTH stores, always. A deletion that only lands on the
+        primary is a deletion that un-deletes itself the next time the primary is
+        unreachable and the standby answers — which is the worst possible moment
+        for a withdrawn document to come back."""
+        removed = self.fallback.delete(source, tenant=tenant)
+        try:
+            return self.primary.delete(source, tenant=tenant)
+        except Exception as exc:
+            self._report("rag", f"delete fell back to in-memory: {exc}")
+            return removed
+
+    def get(self, chunk_id: str, tenant: str = auth.ANONYMOUS):
+        try:
+            return self.primary.get(chunk_id, tenant=tenant)
+        except Exception as exc:
+            self._report("rag", f"citation lookup fell back to in-memory: {exc}")
+            return self.fallback.get(chunk_id, tenant=tenant)
 
 
 def fallback_composer(
@@ -66,12 +87,17 @@ def fallback_composer(
     model stays down. Degraded prose beats a 500 — the evidence is already here."""
     guarded = resilient(primary, policy)
 
-    def compose(goal: str, contexts: list[str], state: list[tuple[Step, Any]]) -> str:
+    def compose(
+        goal: str,
+        contexts: list[str],
+        state: list[tuple[Step, Any]],
+        memories: list[str] | None = None,
+    ) -> str:
         try:
-            return guarded(goal, contexts, state)
+            return guarded(goal, contexts, state, memories)
         except Exception as exc:
             report("brain", f"composition fell back to offline: {exc}")
-            return offline_compose(goal, contexts, state)
+            return offline_compose(goal, contexts, state, memories)
 
     return compose
 
@@ -93,13 +119,17 @@ def fallback_stream(
     stream held /ask/stream hostage the whole time.)"""
 
     def stream(
-        goal: str, contexts: list[str], state: list[tuple[Step, Any]]
+        goal: str,
+        contexts: list[str],
+        state: list[tuple[Step, Any]],
+        memories: list[str] | None = None,
     ) -> Iterator[str]:
         frames: Queue = Queue()
+        degraded = word_stream(offline_compose)
 
         def drain() -> None:
             try:
-                for chunk in primary(goal, contexts, state):
+                for chunk in primary(goal, contexts, state, memories or []):
                     frames.put(("chunk", chunk))
                 frames.put(("end", None))
             except Exception as exc:  # noqa: BLE001 — the seam exists to catch anything
@@ -113,7 +143,7 @@ def fallback_stream(
             except Empty:
                 report("brain", f"stream produced no chunk within {timeout}s")
                 if not yielded:
-                    yield from word_stream(offline_compose)(goal, contexts, state)
+                    yield from degraded(goal, contexts, state, memories or [])
                 return
             if kind == "chunk":
                 yielded = True
@@ -121,7 +151,7 @@ def fallback_stream(
             elif kind == "error":
                 report("brain", f"stream fell back to offline: {payload}")
                 if not yielded:
-                    yield from word_stream(offline_compose)(goal, contexts, state)
+                    yield from degraded(goal, contexts, state, memories or [])
                 return
             else:
                 return

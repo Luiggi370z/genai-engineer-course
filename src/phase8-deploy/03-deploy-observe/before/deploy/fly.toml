@@ -1,0 +1,56 @@
+# The deploy manifest, in git, with no secret in it.
+#
+# This is what `render_manifest()` produces, written out for the one provider this
+# course names (Fly.io). It is checked in so the deploy is reviewable: the diff
+# that changes how much memory production has, or which secrets it can read, is a
+# diff somebody approves rather than a console click nobody saw.
+#
+# NOT LIVE-PROVISIONED. Nothing in this repo has run against a paid account. Set
+# DEPLOY_LANE=fly and your own app name to use it.
+#
+# The image tag is deliberately absent. `release.sh` passes it with
+# `--image registry.fly.io/$FLY_APP:$SHA`, because a tag committed to a file is a
+# tag that goes stale the moment somebody deploys without editing the file.
+
+app = "assistant"           # override with FLY_APP
+primary_region = "iad"
+
+[build]
+  dockerfile = "../../../../workshops/assistant/after/Dockerfile"
+
+[env]
+  # Configuration only. Every value here is public by construction — if you are
+  # tempted to add one that is not, it belongs in `fly secrets set` and in the
+  # SECRETS list in release.sh. `leaked_secrets()` fails the deploy either way.
+  ASSISTANT_TIER = "fast"
+  ASSISTANT_DB = "/data/assistant.db"
+  ASSISTANT_STREAM_MODE = "safe-buffered"
+  REQUEST_DEADLINE_SECONDS = "30"
+  MAX_CONCURRENCY = "8"
+  OTEL_SERVICE_NAME = "assistant"
+
+[http_service]
+  internal_port = 8000
+  force_https = true          # the platform terminates TLS; this refuses the plaintext port
+  auto_stop_machines = false  # a cold start inside a 30s request budget is a 504
+  min_machines_running = 1
+
+  # The platform's own health check. It is NOT the smoke test: this only proves
+  # the process is up, and a healthy machine running last week's image passes it.
+  # Proving the right code is serving is `release.py verify`'s job.
+  [[http_service.checks]]
+    type = "http"
+    path = "/health"
+    interval = "15s"
+    timeout = "2s"
+
+# All durable state — memory, audit log, approvals, idempotency keys, the outbox —
+# is one SQLite file (ADR-0005). One volume, one backup procedure, one thing that
+# cannot be regenerated. Qdrant re-ingests; Ollama re-pulls.
+[mounts]
+  source = "assistant-data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"

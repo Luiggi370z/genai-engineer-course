@@ -1,4 +1,4 @@
-"""`make report` — run the assistant on trial and write PORTFOLIO.md.
+"""`make report` — run the assistant on trial, then write it down twice.
 
 A capstone you cannot show is a capstone you cannot claim. This module runs the
 whole composed service offline (zero keys, deterministic) and writes one portfolio
@@ -6,25 +6,43 @@ page a reviewer can read in two minutes: eval scores per slice, red-team
 containment results, latency percentiles read off the OTel spans, the cost story,
 and the design decisions with their ADRs.
 
-Everything is measured, nothing is asserted: the eval table comes from
-`evals.run_suite` over a golden set, the containment table from actually firing
-the attacks at the service, and the latency table from the same spans `/health`
-counts. The honesty rules of Phase 3 apply to your own portfolio hardest of all —
-the judge is the offline KeywordJudge and the report says so, because a reviewer
-who catches one inflated number stops believing the rest of the page.
+It also writes `report.json`, which is the same run in the shape the merge gate
+reads (`phase8-deploy/02-ci`). The two outputs are not two measurements — they
+are one `Measured` record rendered for two audiences, because a page a human
+believes and a number CI enforces must never be able to disagree. A gate that
+reads a committed fixture is checking that somebody remembered to edit a file;
+this one blocks on what the code in front of it actually did.
+
+Everything is measured, nothing is asserted: the eval scores come from
+`evals.run_suite` over a golden set, the containment result from actually firing
+the attacks at the service, the latency from the same spans `/health` counts.
+The honesty rules of Phase 3 apply to your own portfolio hardest of all — the
+judge is the offline KeywordJudge and the report says so, because a reviewer who
+catches one inflated number stops believing the rest of the page.
+
+The version stamps are DERIVED, never typed. `model` is the tier that ran,
+`prompt` is a hash of `grounded_prompt`'s own source, `corpus` and `dataset` are
+hashes of the inputs. Hand-written stamps rot silently — the number changes, the
+label does not, and the report becomes a confident lie about which system it
+describes.
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from assistant import evals
-from assistant.core import Assistant
+from assistant import composers, evals
+from assistant.core import Assistant, model_name
 from assistant.evals import GoldenRow, KeywordJudge, run_suite
 from assistant.observe import duration_ms, percentile, time_by_tool
+from assistant.provenance import corpus_version, dataset_version, prompt_version
 from assistant.service import build_assistant
 from assistant.settings import Settings
+from assistant.usage import Usage
+from assistant.usage import measure as measure_usage
 
 # The corpus and golden set are small on purpose: the point of the report is the
 # HARNESS — swap in your own corpus and rows and the page regenerates.
@@ -78,17 +96,71 @@ DECISIONS = [
     ("ADR-0004", "OpenTelemetry spans as the only observability currency"),
     ("ADR-0005", "SQLite for memory, audit and idempotency — one file, not three services"),
     ("ADR-0006", "A holdback window on the output stream, screened before release"),
+    ("ADR-0007", "Tool selection reads the registry, so a discovered tool can be chosen"),
+    ("ADR-0008", "Memory is partitioned by subject, not labelled with one"),
+    ("ADR-0009", "The gate requires claims, and the issuer is pluggable (HS256 or JWKS)"),
+    ("ADR-0010", "The screen expands and squashes before it scans, and may ask a model"),
+    ("ADR-0011", "One trace per request, and version stamps derived from what they describe"),
 ]
 
+#: What the CI gate reads. Deliberately the same four numbers `phase8-deploy/02-ci`
+#: budgets, plus the stamps without which none of them mean anything.
+@dataclass
+class Measured:
+    faithfulness: float
+    recall: float
+    redteam_bypasses: int
+    p99_ms: float
+    cost_usd: float
+    tokens_in: int
+    tokens_out: int
+    runs: int
+    versions: dict[str, str] = field(default_factory=dict)
 
-def eval_section(assistant: Assistant) -> str:
-    """Score the live service against the golden set, per slice."""
+
+def versions_for(assistant: Assistant) -> dict[str, str]:
+    """The four stamps the gate requires, each derived from what actually ran.
+
+    Same functions `core.py` stamps its spans with (provenance.py), so a trace
+    and the report describing it name the same system rather than two systems
+    that happen to have been running at the same time.
+    """
+    return {
+        "model": model_name(assistant),
+        "prompt": prompt_version(),
+        "corpus": corpus_version(CORPUS),
+        # the probe count rides in the label because the probes are code, not
+        # rows: their questions are in this file next to the checks that read
+        # the answers, and the count is what a reader needs to see
+        "dataset": dataset_version("golden", [row.question for row in GOLDEN])
+        + f"+probes-{len(REDTEAM_PROBES)}",
+    }
+
+
+def run_evals(assistant: Assistant, meter: dict | None = None) -> evals.SuiteResult:
+    """Score the live service against the golden set, counting what it consumed.
+
+    The token count is taken from the prompt the composer would build and the
+    answer it produced, so the cost line describes THIS workload rather than a
+    guess about a similar one."""
+    meter = meter if meter is not None else {}
 
     def answer(question: str) -> tuple[str, list[str]]:
         response = assistant.ask(question)
-        return response["answer"], response.get("contexts", [])
+        text, contexts = response["answer"], response.get("contexts", [])
+        used = measure_usage(
+            composers.grounded_prompt(question, contexts, [], response.get("memories")),
+            text,
+        )
+        meter["in"] = meter.get("in", 0) + used.tokens_in
+        meter["out"] = meter.get("out", 0) + used.tokens_out
+        return text, contexts
 
-    result = run_suite(GOLDEN, answer, KeywordJudge())
+    return run_suite(GOLDEN, answer, KeywordJudge())
+
+
+def eval_section(result: evals.SuiteResult) -> str:
+    """Render the scored suite, per slice."""
     table = evals.format_table(result)
     return (
         "## Eval scores (offline judge)\n\n"
@@ -100,23 +172,34 @@ def eval_section(assistant: Assistant) -> str:
     )
 
 
-def redteam_section(assistant: Assistant) -> tuple[str, bool]:
-    """Fire every probe at the service; report contained/BREACHED per row."""
-    rows, all_contained = [], True
+def run_probes(assistant: Assistant) -> list[tuple[str, bool]]:
+    """Fire every probe at the live service; (name, contained) per probe."""
+    results = []
     for probe in REDTEAM_PROBES:
         if "poison" in probe:
             assistant.rag.add([probe["poison"]])
         response = assistant.ask(probe["question"])
-        contained = bool(probe["check"](response))
-        all_contained = all_contained and contained
-        rows.append(f"| {probe['name']} | {'contained' if contained else '**BREACHED**'} |")
+        results.append((str(probe["name"]), bool(probe["check"](response))))
+    return results
+
+
+def redteam_section(assistant: Assistant) -> tuple[str, bool]:
+    """Fire every probe at the service; report contained/BREACHED per row."""
+    return render_probes(run_probes(assistant))
+
+
+def render_probes(results: list[tuple[str, bool]]) -> tuple[str, bool]:
+    rows = [
+        f"| {name} | {'contained' if contained else '**BREACHED**'} |"
+        for name, contained in results
+    ]
     body = (
         "## Red-team containment\n\n"
         "| probe | result |\n|---|---|\n" + "\n".join(rows) + "\n\n"
         "Live probes against the running service, not fixture reads. The full "
         "45-case versioned dataset lives in `phase6-design-defend/01-red-team`.\n"
     )
-    return body, all_contained
+    return body, all(contained for _, contained in results)
 
 
 def latency_section(assistant: Assistant) -> str:
@@ -137,16 +220,28 @@ def latency_section(assistant: Assistant) -> str:
     )
 
 
-def cost_section(assistant: Assistant) -> str:
+def cost_usd(assistant: Assistant, tokens_in: int, tokens_out: int) -> float:
+    """Measured tokens, priced at the tier this deployment actually pays for.
+
+    The same meter `core.py` puts on every compose span (usage.py), so the sum
+    of the traces and the total on the report are the same claim measured once."""
+    return Usage(tokens_in, tokens_out).cost(assistant.settings.price_tier)
+
+
+def cost_section(assistant: Assistant, measured: Measured) -> str:
     """The cost story, honestly told for the tier that ran."""
     tier = assistant.tier()
     return (
         "## Cost\n\n"
-        f"Composer tier: `{tier['brain']}` — this report made **zero model calls**, "
-        "so it cost $0.00 by construction. In the model tier the cost per run is "
-        "`tokens_in/1e6 * price_in + tokens_out/1e6 * price_out` metered per call "
-        "(the Phase-1 meter), and the CI gate blocks a merge whose eval-suite spend "
-        "crosses the budget — spend is a *gated* quantity here, not a surprise.\n"
+        f"Composer tier: `{tier['brain']}`, priced against the "
+        f"`{assistant.settings.price_tier}` list: "
+        f"**${measured.cost_usd:.4f}** for {measured.tokens_in:,} tokens in and "
+        f"{measured.tokens_out:,} out across {measured.runs} runs. Self-hosted "
+        "generation has no per-token invoice, so the honest number here is zero — "
+        "but the tokens are counted either way, which is the difference between a "
+        "cost gate and a comforting sentence. Point the composer at a paid API, "
+        "set `ASSISTANT_PRICE_TIER`, and the same measurement becomes a bill the "
+        "CI gate blocks on before it reaches the invoice.\n"
     )
 
 
@@ -161,12 +256,35 @@ def decisions_section() -> str:
     )
 
 
-def build_portfolio(assistant: Assistant | None = None) -> str:
-    """The whole page, as a string — pure enough to test."""
+def measure(assistant: Assistant | None = None) -> tuple[str, Measured]:
+    """One trial run of the composed service, rendered for both audiences.
+
+    The page and the JSON come from the SAME pass. Running the suite twice —
+    once for the human and once for the gate — would let the two disagree, and
+    the day they disagree is the day you find out which one you actually
+    believed."""
     assistant = assistant or build_assistant(Settings())
     assistant.rag.add(CORPUS)
-    evals_md = eval_section(assistant)
-    redteam_md, contained = redteam_section(assistant)
+
+    meter: dict[str, int] = {}
+    suite = run_evals(assistant, meter)
+    probes = run_probes(assistant)
+
+    runs = [duration_ms(s) for s in assistant.rec.named("agent.run")]
+    tokens_in, tokens_out = meter.get("in", 0), meter.get("out", 0)
+    measured = Measured(
+        faithfulness=suite.overall["faithfulness"],
+        recall=suite.overall["context_recall"],
+        redteam_bypasses=sum(1 for _, contained in probes if not contained),
+        p99_ms=round(percentile(runs, 99), 3),
+        cost_usd=cost_usd(assistant, tokens_in, tokens_out),
+        tokens_in=tokens_in,
+        tokens_out=tokens_out,
+        runs=len(runs),
+        versions=versions_for(assistant),
+    )
+
+    redteam_md, contained = render_probes(probes)
     tier = assistant.tier()
     stamp = dt.date.today().isoformat()
     verdict = "all probes contained" if contained else "CONTAINMENT FAILURE — do not ship"
@@ -176,22 +294,56 @@ def build_portfolio(assistant: Assistant | None = None) -> str:
         f"memory={tier['memory']}, brain={tier['brain']}, tools={tier['tools']} · "
         f"red-team: {verdict}\n\n"
         "One command reproduces every number on this page: `make report` in "
-        "`workshops/assistant/after`. Nothing below is hand-written.\n"
+        "`workshops/assistant/after`. Nothing below is hand-written — and the same "
+        "run writes `evals/report.json`, which is what the merge gate reads, so the "
+        "page a human believes and the numbers CI enforces cannot drift apart.\n"
     )
-    return "\n".join([
-        header, evals_md, redteam_md,
-        latency_section(assistant), cost_section(assistant), decisions_section(),
+    page = "\n".join([
+        header, eval_section(suite), redteam_md,
+        latency_section(assistant), cost_section(assistant, measured),
+        stamps_section(measured), decisions_section(),
     ])
+    return page, measured
+
+
+def stamps_section(measured: Measured) -> str:
+    lines = "\n".join(f"| {key} | `{value}` |" for key, value in measured.versions.items())
+    return (
+        "## Version stamps\n\n"
+        "| what | stamp |\n|---|---|\n" + lines + "\n\n"
+        "Derived from the run, not typed next to it: `prompt` is a hash of the "
+        "prompt builder's own source, `corpus` and `dataset` hash their inputs. "
+        "Every gate in `phase8-deploy/02-ci` refuses a report missing any of "
+        "these — a number whose provenance you cannot state is not evidence.\n"
+    )
+
+
+def build_portfolio(assistant: Assistant | None = None) -> str:
+    """The whole page, as a string — pure enough to test."""
+    return measure(assistant)[0]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="write the capstone portfolio page")
     parser.add_argument("--out", default="PORTFOLIO.md", help="output path")
+    parser.add_argument(
+        "--json", default="evals/report.json",
+        help="where to write the machine-readable report the CI gate reads",
+    )
     args = parser.parse_args()
-    page = build_portfolio()
+    page, measured = measure()
     Path(args.out).write_text(page)
-    print(f"wrote {args.out}")
+    json_path = Path(args.json)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(_dump(measured))
+    print(f"wrote {args.out} and {json_path}")
     return 0 if "CONTAINMENT FAILURE" not in page else 1
+
+
+def _dump(measured: Measured) -> str:
+    """Pretty, sorted, newline-terminated — a report a human can diff between two
+    runs without the diff being about key order."""
+    return json.dumps(asdict(measured), indent=2, sort_keys=True) + "\n"
 
 
 if __name__ == "__main__":

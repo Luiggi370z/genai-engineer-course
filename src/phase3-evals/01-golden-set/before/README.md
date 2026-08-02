@@ -22,6 +22,27 @@ uv run python -m src.dataset   # the report you'd paste into a golden-set PR
 - [ ] `make check` is green (lint, types, fast tests).
 - [ ] `validate()` returns `[]` on the shipped `evals/golden.jsonl` — you found and fixed every planted problem (`test_the_shipped_golden_set_is_clean`).
 - [ ] Defects are still detected when re-planted: `test_near_duplicate_is_detected`, `test_question_copied_out_of_a_chunk_is_detected`, and `test_empty_slice_is_reported` all pass.
+- [ ] `src/milestones.py` is implemented and `tests/test_milestones.py` is green — including `test_a_five_point_move_at_ten_rows_is_not_a_move`, which is the one that changes how you read every score after this.
+
+## Fifty rows, in three sittings
+
+Writing fifty golden rows in one go is the instruction most people abandon —
+not because it is hard, but because nothing tells you anything until the end.
+`src/milestones.py` breaks it into **10 / 25 / 50**, scores each sitting, and
+prints what a score at that sample size is actually allowed to claim.
+
+The milestones are motivation. The interval is the content. **8 of 10 is not
+0.80** — it is 0.80 with a 95% interval of roughly 0.49–0.94, so a mediocre
+system and a good one both produce 8/10 routinely. Ten rows is still far better
+than zero and will find your obvious bugs on the first afternoon; it is simply
+not yet a number you may quote, and `verdict()` says so in the report rather
+than leaving you to remember it.
+
+```bash
+uv run python -c "from src.milestones import Interval, render; print(render(Interval(8, 10)))"
+# overall: 0.80 (95% CI 0.49-0.94, n=10) - smoke test. Enough to find obvious
+# breakage ... Not enough to compare two systems, and not enough to quote
+```
 
 ## Stuck?
 

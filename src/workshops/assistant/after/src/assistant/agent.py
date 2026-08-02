@@ -35,6 +35,11 @@ class AgentResult:
     # tool -> the id of the grant its execution spent, when running under a
     # consuming approval store rather than a plain allow-list
     approval_ids: dict[str, str] = field(default_factory=dict)
+    # Every call that actually ran, with the arguments it ran with. `audit` says
+    # the same thing in prose and is what a human reads; this is what the audit
+    # LOG is built from, because a caller that has to parse "ran: " back out of a
+    # sentence is one line of formatting away from recording nothing.
+    calls: list[Step] = field(default_factory=list)
 
 
 Decider = Callable[[str, list[tuple[Step, Any]]], Step]
@@ -92,6 +97,7 @@ def run(goal: str, decide: Decider, approvals: dict[str, bool] | None = None,
         # step_count off this list; skip the append and a successful multi-tool
         # run reports zero steps.
         result.audit.append(f"ran: {step.tool}")
+        result.calls.append(step)
         state.append((step, out))
     result.text = "stopped: max_steps"
     return result

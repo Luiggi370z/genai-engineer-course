@@ -14,6 +14,22 @@ node_modules/
 dist/
 .vite/
 
+# ...except the release folder at the root, which is the opposite of a build
+# artifact: it is the thing a student downloads, and `verify-dist.sh` exists to
+# ask whether what is COMMITTED there is this commit's release or a stale one.
+# That question needs the files in the repository. `app/dist/` stays ignored —
+# it is vite's scratch output on the way here.
+!/dist/
+
+# `make report` and `make evidence` output: measured evidence belongs to a run,
+# not to the repo. A committed report is a number nobody re-measured; CI
+# regenerates both every time. The evidence/ artifacts are learner-specific by
+# construction — committing one would hand the next reader someone else's proof.
+src/workshops/assistant/*/PORTFOLIO.md
+src/workshops/assistant/*/EVIDENCE.md
+src/workshops/assistant/*/evals/
+src/workshops/assistant/*/evidence/
+
 # Python / uv (lesson build artifacts)
 .venv/
 __pycache__/

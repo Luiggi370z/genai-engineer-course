@@ -12,15 +12,20 @@ import * as esbuild from "esbuild";
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 export async function loadCourseData() {
+  return compile(`export { phases } from "./src/data/phases/index";
+                  export { prerequisites, myths, milestones } from "./src/data/intro";
+                  export { electives } from "./src/data/electives";`);
+}
+
+/** The canonical hardware/price/model tables, for the claims gate. */
+export async function loadReference() {
+  return compile(`export * from "./src/data/reference";`);
+}
+
+async function compile(contents) {
   const entry = path.join(os.tmpdir(), `workbook-data-${process.pid}-${Date.now()}.mjs`);
   await esbuild.build({
-    stdin: {
-      contents: `export { phases } from "./src/data/phases/index";
-                 export { prerequisites, myths, milestones } from "./src/data/intro";
-                 export { electives } from "./src/data/electives";`,
-      resolveDir: appRoot,
-      loader: "ts",
-    },
+    stdin: { contents, resolveDir: appRoot, loader: "ts" },
     bundle: true,
     format: "esm",
     platform: "neutral",

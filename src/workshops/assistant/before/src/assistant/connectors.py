@@ -8,6 +8,26 @@ registry and the hardening wrapper, not in the connector.
 
 Both connectors are stdlib-only (urllib + xml.etree) — no new dependencies for
 one HTTP POST and one RSS parse.
+
+## TODO: raise inward, apologise outward
+
+Look at `send` below: it catches its own `OSError` and returns `{"error": ...}`.
+That makes it a connector nothing can retry, because from the outside a returned
+error dict is a *successful call*. This is how a retry policy ends up decorative
+— present in the code, never once triggered.
+
+Split each connector in two: an inner function that RAISES, and an outer one
+that turns the failure into the friendly shape the tool contract promises. The
+retry wrapper goes between them. The split also puts classification where the
+knowledge is: a 4xx from the Bot API is `Permanent` (the same payload will be
+rejected again), a 5xx or a dead socket is not, and `resilience.py` cannot know
+that but this module can.
+
+Then choose the policies. `read_news` is a GET — retrying costs a little latency
+and nothing else. `send_telegram` is a send, and a timeout does not tell you
+whether the message went out, so retrying is how one alert becomes three.
+
+Reference: ../../after/src/assistant/connectors.py.
 """
 from __future__ import annotations
 
@@ -16,13 +36,29 @@ import urllib.request
 from collections.abc import Callable
 from xml.etree import ElementTree
 
+from assistant.resilience import DEFAULT_POLICY, ONCE, Policy
+
 Sender = Callable[[str, str], dict]
 
+#: Read-only, so retries are free of consequences; the timeout is what actually
+#: protects the request budget.
+NEWS_POLICY = Policy(attempts=DEFAULT_POLICY.attempts, timeout=10.0)
 
-def telegram_sender(bot_token: str, timeout: float = 10.0) -> Sender:
+
+def telegram_sender(
+    bot_token: str, timeout: float = 10.0, policy: Policy = ONCE
+) -> Sender:
     """A send_telegram body that talks to the real Bot API. Same signature and
     return shape as the stub, so the registry entry (and its approval gate) is
-    unchanged."""
+    unchanged.
+
+    TODO 1: `policy` is accepted and ignored. Split the HTTP call out into an
+    inner function that RAISES, wrap that in `resilience.resilient(call, policy)`,
+    and raise `resilience.Permanent` for a 4xx (`urllib.error.HTTPError` with
+    `400 <= code < 500`). Keep the outer `send` returning a dict on failure — the
+    tool contract is "return a value", and a raised exception here would crash the
+    agent loop over one connector's outage.
+    """
 
     def send(chat_id: str, message: str) -> dict:
         if not chat_id or not message:
@@ -67,10 +103,16 @@ def parse_feed(xml_text: str, limit: int = 5) -> str:
     return "Headlines: " + " | ".join(headlines)
 
 
-def news_fetcher(feed_url: str, timeout: float = 10.0) -> Callable[..., str]:
+def news_fetcher(
+    feed_url: str, timeout: float = 10.0, policy: Policy = NEWS_POLICY
+) -> Callable[..., str]:
     """A read_news body that fetches a real, keyless RSS feed. Read-only, so the
     hardening wrapper re-screens whatever comes back — a poisoned headline is
-    contained the same way a poisoned stub is."""
+    contained the same way a poisoned stub is.
+
+    TODO 2: the same split, with a retrying `policy` this time. A GET is safe to
+    repeat, and a feed that was unreachable a moment ago often is not now.
+    """
 
     def fetch(url: str = "") -> str:
         target = url or feed_url

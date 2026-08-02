@@ -46,10 +46,17 @@ project allowed to import a vendor SDK.
 
 ## Deliverables
 
+Three passes. **Minimum** is the walking skeleton — the smallest thing that is
+really this, and a place to stop that is not quitting. **Full** is the version you
+would show someone. **Stretch** is for when the full pass came easily.
+
+### Minimum
 - [ ] A provider is a **config entry, not a code path** — `Runner` is injected, and
       the fast test tier benches four candidates with zero network
 - [ ] Every row reports **tokens, cost and latency**, with cost computed from the
       response's `usage` and never from a pre-flight estimate
+
+### Full
 - [ ] Each reply is **validated against a schema**, and the row reports a success
       rate rather than assuming the call worked
 - [ ] Ranking is by **cost per successful parse** — a test proves a model at half the

@@ -11,6 +11,19 @@ Three small pieces the service composes around its network adapters:
 
 Everything takes an injectable clock/sleep so the tests run in microseconds and
 never actually wait.
+
+## TODO: what is worth retrying
+
+`retry on Exception` is the default everyone writes and it is wrong in two
+directions at once. It retries a `TypeError` three times — the bug is
+deterministic, so all it buys is three times the latency before the same 500 —
+and it retries a 400 from an API that will reject the same payload forever. Worse,
+each pointless attempt holds a connection and a worker while the real incident is
+somewhere else.
+
+So a failure has to be CLASSIFIED before it is retried, and a call that is not
+idempotent has to be able to say so. Reference:
+../../after/src/assistant/resilience.py.
 """
 from __future__ import annotations
 
@@ -23,6 +36,34 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
+#: TODO 1: the failures where the same call, later, could plausibly succeed.
+#: Keep it honest and short — the network, the clock, and the server saying
+#: "later". `ConnectionError` and the socket errors are `OSError` subclasses, so
+#: this is shorter than it looks; include `TimeoutError`, because our own timeout
+#: raises it. Everything NOT in here is a bug or a refusal, and both should
+#: surface on the first attempt, where the stack trace still points at the cause.
+TRANSIENT: tuple[type[BaseException], ...] = ()
+
+
+class Permanent(Exception):
+    """A refusal that will be a refusal next time too.
+
+    An adapter that can read a status code should raise this for a 4xx rather
+    than letting a generic error be retried three times against a server that
+    has already given its final answer."""
+
+
+def is_transient(exc: BaseException) -> bool:
+    """TODO 2: the default classifier.
+
+    True only for `TRANSIENT` failures. `Permanent` must win over the type check,
+    so an adapter can mark a `ConnectionError`-shaped failure as final without
+    inventing a new exception hierarchy — and `deadline.Expired` (import it) is
+    never transient, because the whole point of a deadline is that waiting
+    longer is not an option.
+    """
+    raise NotImplementedError
+
 
 @dataclass(frozen=True)
 class Policy:
@@ -32,9 +73,20 @@ class Policy:
     base_delay: float = 0.2
     max_delay: float = 5.0
     timeout: float | None = 10.0
+    #: Which failures deserve another attempt. Injectable because "transient" is
+    #: protocol-specific — an HTTP adapter knows 429 and 503 are worth retrying
+    #: and 422 is not, and that knowledge belongs to the adapter, not here.
+    retry_if: Callable[[BaseException], bool] = is_transient
 
 
 DEFAULT_POLICY = Policy()
+
+#: TODO 3: the policy for calls that are NOT idempotent — one attempt, still
+#: bounded by the timeout. Retrying is safe when the call is idempotent;
+#: `send_telegram` is not, because a timeout tells you nothing about whether the
+#: server acted. Making that a NAMED policy rather than a comment is the
+#: difference between a rule and a hope.
+ONCE = Policy()
 
 
 def resilient(
@@ -50,7 +102,21 @@ def resilient(
     Backoff is exponential with FULL jitter (delay drawn uniformly from
     [0, base * 2^attempt]) — the variant that empties a thundering herd fastest.
     The timeout runs the call on a worker thread; a call that overruns is
-    abandoned there (Python cannot kill it) and reported as TimeoutError here."""
+    abandoned there (Python cannot kill it) and reported as TimeoutError here.
+
+    TODO 4: three things should stop this loop, and only one of them is "it
+    worked". Make the other two real:
+
+      - the failure is not transient (`policy.retry_if`), so it surfaces on the
+        attempt that produced it rather than on the third identical retry;
+      - the REQUEST's budget is gone. `deadline.check()` before each attempt, so
+        no call is started that we already know we cannot wait for; and
+        `deadline.capped(policy.timeout)` instead of `policy.timeout`, so a call
+        made with four seconds of request left gets four seconds. Skip the
+        backoff sleep when it would run past the deadline — sleeping through the
+        rest of the budget in order to attempt a call that cannot finish is the
+        most expensive possible way to fail.
+    """
 
     def timed(*args: Any, **kwargs: Any) -> Any:
         if policy.timeout is None:

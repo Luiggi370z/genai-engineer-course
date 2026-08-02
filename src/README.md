@@ -1,8 +1,13 @@
 # The GenAI Engineer Workbook — Companion Code
 
 Runnable `before/` and `after/` code for every exercise and workshop in the course.
-`before/` is your starting scaffold (with `TODO`s); `after/` is a working reference —
-open it only when you're stuck.
+`before/` is your starting scaffold (with `TODO`s); `after/` is a working reference.
+
+**Attempt before you read.** Write your version, run `make check`, and open `after/`
+only once it passes or you are genuinely stuck — then diff the two, because the diff
+is the lesson. A solution you have read is indistinguishable, to you, from one you
+could have written, and the whole `before/` tree exists to keep that distinction
+available to you.
 
 ## How each lesson works
 
@@ -114,7 +119,8 @@ The MCP lessons target **SDK v2** — see `phase7-mcp/SDK-V2-MIGRATION.md`.
 - `01-react-from-scratch` — the loop, hard caps, local + hosted
 - `02-tools` — three real tools, docstring-as-interface
 - `03-hitl` — human-in-the-loop with LangGraph interrupt + checkpointer
-- `04-framework-bakeoff` — same agent in LangGraph / Pydantic AI / CrewAI
+- `04-framework-bakeoff` — the same tool-using agent in real LangGraph / Pydantic AI
+  / CrewAI, scored on six dimensions from measurements (and honest about the ties)
 - **Workshop → `workshops/assistant`** (personal assistant)
 
 ### Phase 5 · Agents That Remember & Collaborate
@@ -138,16 +144,24 @@ The MCP lessons target **SDK v2** — see `phase7-mcp/SDK-V2-MIGRATION.md`.
 
 ### Phase 8 · Run It in Production
 - `01-compose` — the capstone stack behind one `docker compose up`: pinned images, healthchecks, health-gated dependencies, one published port — plus structural checks over the parsed YAML
-- `02-ci` — GitHub Actions gating on tests + eval + red-team, with real `make eval` / `make redteam` targets
-- `03-deploy-observe` — deploy, secrets, health, OpenTelemetry spans read offline (OTLP export is one env var)
+- `02-ci` — the merge policy as four independently failing gates (quality, safety, latency, cost) over a version-stamped report, with real `make eval` / `make redteam` / `make latency` / `make cost` targets and seeded regressions proving each gate can block. The repo-root workflow points the same CLI at a report generated from the capstone **image** on every push — `make gate` in `workshops/assistant/after` does it locally
+- `03-deploy-observe` — OpenTelemetry spans read offline (OTLP export is one env var), plus the release lane: immutable SHA tags, a manifest that refuses a pasted key, four post-deploy smoke probes (including `/health`'s commit against the one just shipped), a rollback that halts rather than lying, and a verified SQLite backup. The judgement is unit-tested Python; `deploy/` is a Fly.io reference, gated behind `DEPLOY_LANE=fly` and not live-provisioned
 - `04-cost-latency` — exact + semantic cache, a tier router with a ceiling, a P99 budget gate
 - **Workshop → `workshops/assistant`** (deployed stack + capstone service)
 
-The slow lane: `./verify-e2e.sh` (needs Docker) boots the composed stack and proves
-it end to end — tier report, grounded answer, abstention, injection containment,
-approval gating, an MCP call over the wire, spans recorded, and (via the
-observability overlay) the same spans arriving at an otel-collector outside the
-process. `verify-lessons.sh` stays offline and never runs it.
+The slow lane: `./verify-e2e.sh` (needs Docker) boots the composed stack under the
+**secure profile** — every request carries a Bearer JWT — and proves it end to end:
+tier report, an unauthenticated request refused, grounded answer, abstention,
+injection containment, approval gating bound to the approving subject, an MCP call
+over the wire, two authenticated callers whose memories never cross, spans recorded,
+and (via the observability overlay) the same spans arriving at an otel-collector
+outside the process. `verify-lessons.sh` stays offline and never runs it.
+
+A full pass is about twenty-five minutes, so `verify-e2e.sh` also takes `--list`,
+`--from N`, `--only N` and `--no-build` for the fix-and-re-prove loop. The checks
+share one corpus, outbox and set of approvals on purpose, so a resumed run only
+means something against volumes a full run has already filled; the unqualified
+`./verify-e2e.sh` is the claim.
 
 ### Phase 9 · The GenAI Mindset
 - `drill-deck` — the interview question bank as flashcards

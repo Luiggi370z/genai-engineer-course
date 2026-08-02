@@ -12,6 +12,20 @@ export type Block =
   | { kind: "code"; title?: string; code: string }
   | { kind: "callout"; tone: CalloutTone; title: string; text: string }
   | { kind: "table"; headers: string[]; rows: string[][] }
+  /**
+   * Where the numbers immediately above came from, and when someone last looked.
+   *
+   * Its own block kind rather than a field on `table`, because the claims that
+   * rot fastest are not always in tables — a sentence about how many MCP servers
+   * exist is exactly as perishable as a price row. Placing it after the block it
+   * backs keeps the citation next to the claim, which is the only place a reader
+   * will accept one.
+   *
+   * `verifiedOn` is the date, not a promise of freshness. A reader who can see
+   * that a price was checked eleven months ago can discount it; a reader looking
+   * at an undated number cannot, and will quote it.
+   */
+  | { kind: "sources"; verifiedOn: string; items: { label: string; url: string }[] }
   | { kind: "flow"; title?: string; shape?: FlowShape; nodes: FlowNode[] }
   | {
       kind: "deepdive";
@@ -82,6 +96,18 @@ export interface Milestone {
 }
 
 /**
+ * One thing the course deliberately does not teach, and where to go for it.
+ * Stated up front because an unstated scope reads as a claim: a reader who
+ * finishes nine phases without ever meeting backpropagation should have known
+ * that on day one, not inferred it from an absence.
+ */
+export interface OutOfScope {
+  topic: string;
+  why: string;
+  next: string;
+}
+
+/**
  * Objective ids, the join that makes constructive alignment checkable.
  *
  * A phase's objectives are the spine: concepts `teaches` them, exercises and
@@ -121,6 +147,34 @@ export interface Example {
  */
 export type Rung = "faded" | "independent";
 
+/**
+ * How far up the mastery ladder a task actually carries you.
+ *
+ * `Rung` says how much scaffolding a task removes. This says something
+ * different and easier to get wrong: what the finished work *demonstrates*. A
+ * blank-editor exercise can still only prove you can build a thing in isolation,
+ * and a heavily-scaffolded workshop can prove you kept a system running under
+ * load. The two axes are independent, and conflating them is how a syllabus ends
+ * up promising "operate" and assessing "implement".
+ *
+ * - `understand` — you can explain it and answer a question about it. Proven by
+ *   a checkpoint or a written argument, not by a repo. A task at this level is
+ *   rare here on purpose: reading is not the product.
+ * - `implement` — you built the thing, in isolation, and its tests are green.
+ *   One lesson directory, no other moving parts.
+ * - `integrate` — you made it work *with the rest of the system*, across a seam
+ *   you do not fully control. The failures at this level are the ones that do
+ *   not reproduce in a unit test.
+ * - `operate` — you ran it under adverse conditions and have numbers: deployed,
+ *   gated, traced, attacked, budgeted, or recovered. This is the only level that
+ *   produces evidence somebody else would accept.
+ *
+ * The alignment gate reads this. An objective whose Bloom verb demands
+ * `operate` and whose only assessment proves `implement` is the mismatch it
+ * exists to catch — the course promising a level it never tests.
+ */
+export type Mastery = "understand" | "implement" | "integrate" | "operate";
+
 export interface Exercise {
   id: string;
   title: string;
@@ -133,6 +187,12 @@ export interface Exercise {
    * hand back the scaffold the blank editor exists to remove.
    */
   rung: Rung;
+  /**
+   * What finishing this actually demonstrates. Required, so a new exercise
+   * cannot quietly inherit a level it does not earn, and read by the alignment
+   * gate against the Bloom verb of every objective it assesses.
+   */
+  proves: Mastery;
   /** Objectives this exercise tests. Each must be taught by a card in the same phase. */
   assesses: ObjectiveRef[];
   /**
@@ -152,16 +212,38 @@ export interface Exercise {
   code?: string;
 }
 
+/**
+ * Which pass of the workshop a deliverable belongs to.
+ *
+ * `minimum` is the walking skeleton — the smallest set that makes the thing real
+ * end to end. `full` is the version you would show someone. `stretch` is the
+ * third tier and lives in its own field, because those are prompts rather than
+ * checkboxes and giving them progress ids would let a workshop read 60% done
+ * when it is finished.
+ *
+ * The split exists because an undifferentiated list of twenty-three deliverables
+ * reads as one indivisible obligation, and the student who cannot fit all of it
+ * this week does none of it. A named minimum is a place to stop that is not
+ * quitting.
+ */
+export type DeliverableTier = "minimum" | "full";
+
+export interface Deliverable extends Checkable {
+  tier: DeliverableTier;
+}
+
 export interface Workshop {
   id: string;
   title: string;
   subtitle: string;
   repo: string;
+  /** What finishing the workshop demonstrates. See `Mastery`. */
+  proves: Mastery;
   /** Objectives the workshop puts together. A capstone should cover most of the phase. */
   assesses: ObjectiveRef[];
   needs?: ObjectiveRef[];
   blocks: Block[];
-  deliverables: Checkable[];
+  deliverables: Deliverable[];
   stretch?: string[];
 }
 
@@ -169,6 +251,36 @@ export interface QuestionAnswer {
   id: string;
   q: string;
   a: string;
+}
+
+/**
+ * The four things a design answer has to contain before it counts as a defense.
+ *
+ * They are the difference between describing a system and defending one. A
+ * description says what you built; a defense says what else you could have built
+ * (`alternatives`), what ruled the others out (`constraints`), what makes you
+ * believe the choice worked (`evidence`), and where it breaks (`failure-modes`).
+ * Interviewers probe in roughly that order, and the last one is where most
+ * candidates stop — which is exactly why it is a named element here rather than
+ * a hoped-for bonus.
+ */
+export type DefenseElement = "alternatives" | "constraints" | "evidence" | "failure-modes";
+
+/**
+ * A spoken checkpoint, with the rubric its answer has to satisfy.
+ *
+ * `demands` is shown **before** the answer opens, because a bar you discover
+ * afterwards is a bar you grade yourself against, and everyone passes that one.
+ *
+ * Two or more elements per question, not four. Four on every question would make
+ * the rubric noise — "name the alternatives" does not apply to every prompt, and
+ * a rubric that always says the same thing stops being read by the third card.
+ * The coverage requirement lives one level up instead: the checker asserts every
+ * phase's checkpoint set exercises all four across its questions, so no phase can
+ * let you off the failure-modes hook.
+ */
+export interface Defense extends QuestionAnswer {
+  demands: DefenseElement[];
 }
 
 export interface QuestionGroup {
@@ -236,7 +348,7 @@ export interface PhaseContent {
   example?: Example;
   exercises: Exercise[];
   workshop?: Workshop;
-  checkpoint?: QuestionAnswer[];
+  checkpoint?: Defense[];
   qbank?: QuestionGroup[];
   resources: Resource[];
 }

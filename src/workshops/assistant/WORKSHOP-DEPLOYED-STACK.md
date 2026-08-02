@@ -9,14 +9,27 @@ Two modules, in this order, because the second one is only safe once the first e
 ## Architecture
 
 ```
-                          ┌── traced_registry(REGISTRY) ── every tool wrapped
-                          │      tool.name · tool.requires_approval
-goal ──► traced_run(run) ─┤      no tool edited, none can forget
-     agent.run root span  │
-       steps · paused     └── spans ──► time_by_tool · slowest_tool
-                                        gated_tool_calls  (safety report)
-                                              │
-                                              ▼
+assistant.request              service.name on a Resource · request.id · http.route
+├── auth.verify                auth.mode · auth.accepted · why it was refused
+└── assistant.pipeline         llm.model_name · llm.prompt_template.version (DERIVED)
+    ├── guardrail.screen       guardrail.blocked · reason
+    ├── memory.recall          enduser.id · how many memories came back
+    ├── rag.search             documents.count vs documents.kept ← the security signal
+    │                          retrieval.sources: which documents actually answered
+    ├── agent.run ─────────┬── tool.read_emails    traced_registry: no tool edited,
+    │   steps · paused     └── tool.send_telegram  none can forget
+    ├── llm.compose            token_count.total · cost.usd (the same meter CI gates)
+    └── guardrail.output       request.abandoned, when the caller stopped listening
+
+one budget per request ──► deadline + "caller left", read at every seam
+      504 out of time · 499 nobody there · each call's timeout capped by what's left
+
+mutations ──► Idempotency-Key ──► the ORIGINAL answer replayed, key released on failure
+irreversible ──► outbox: pending BEFORE the call ──► sent | failed ──► GET /outbox
+
+spans ──► time_by_tool · slowest_tool · gated_tool_calls  (safety report)
+              │
+              ▼
 goal ──► cached_run(goal, run, cache) ──► AnswerCache
               look · run · OFFER              refuses: paused runs,
                                               side-effecting runs, step-cap
@@ -25,12 +38,44 @@ goal ──► cached_run(goal, run, cache) ──► AnswerCache
 
 ## The seam
 
-`before/src/assistant/observe.py` — `traced_tool` / `traced_registry`, `traced_run`,
-and the readers (`tool_calls`, `time_by_tool`, `slowest_tool`, `failed_spans`,
-`gated_tool_calls`). The provider wiring and the attribute names are given.
+`before/src/assistant/observe.py` — `recorder` (the Resource), `request_scope`,
+`stage`, `traced_tool` / `traced_registry`, `traced_run`, and the readers
+(`tool_calls`, `time_by_tool`, `slowest_tool`, `failed_spans`, `children_of`,
+`descendants_of`, `one_trace`, `gated_tool_calls`). The attribute names are given —
+use them rather than inventing your own, or your trace is legible only to you.
+`streaming_root` / `within` / `child_of` / `mark` are given too, and worth reading
+before you use them: they exist because "the current span" is a ContextVar, and a
+generator that yields between spans cannot rely on one.
+
+`before/src/assistant/provenance.py` — the derived stamps (`prompt_version`,
+`corpus_version`, `dataset_version`) shared by the spans and the CI report.
+
+`before/src/assistant/usage.py` — one token-and-cost meter, used by the compose span
+and by the cost gate.
+
+`before/src/assistant/core.py` — `_root_attributes`, `_usage_attributes`, `pipeline`,
+`_composed`, and a span per stage inside `_gather` and `ingest`.
 
 `before/src/assistant/cache.py` — `answer_key`, `is_cacheable`, `AnswerCache.get` /
 `offer`, and `cached_run`.
+
+`before/src/assistant/rag.py` — `Chunk.id` and `chunk_document`: the two decisions
+that make a corpus operable. `before/src/assistant/adapters.py` — `InMemoryRag.add`
+and `.delete`, `QdrantStore.add`, the measured embedding dimension, and the two MCP
+policies (discovery may retry, invocation may not).
+
+`before/src/assistant/deadline.py` — `Budget`, the ContextVar, and `capped`: one
+answer to "is this still worth doing?" for both the clock and the caller.
+`before/src/assistant/resilience.py` — `TRANSIENT`, `is_transient`, `ONCE`, and the
+three things that stop a retry loop. `before/src/assistant/connectors.py` — the
+raise-inward/apologise-outward split that makes a retry policy real.
+
+`before/src/assistant/idempotency.py` — `recall` / `release` / `store` / `run`: a
+replay returns the original answer, and a failure stays retryable.
+`before/src/assistant/outbox.py` — `reserve` / `settle` / `pending` and
+`recorded_registry`: the intent is committed before the effect.
+`before/src/assistant/api.py` — the request budget middleware, the 504/499 split,
+the `once` helper on every mutating route, and `GET /outbox`.
 
 ## Why the tools are wrapped, not edited
 
@@ -54,6 +99,105 @@ decision.
 
 ## Deliverables
 
+Three passes. **Minimum** is the walking skeleton — the smallest thing that is
+really this, and a place to stop that is not quitting. **Full** is the version you
+would show someone. **Stretch** is for when the full pass came easily.
+
+This is the longest list in the course, and reading it end to end is the fastest
+way to talk yourself out of starting. So the **minimum** is three things, and they
+are the three at the bottom of the capstone list below:
+
+1. the stack comes up with one command and zero API keys;
+2. CI runs tests, a smoke eval and the red-team suite as required checks;
+3. it is deployed somewhere real, with secrets, a health check and a rollback path.
+
+Ship those and you have a deployed, gated system — the thing the phase is named
+after. Everything else on this page is the **full** pass: the observability,
+reliability and operability work that turns a running service into one you can
+debug at 3 a.m. Take it in any order; each item is independently green-able.
+
+- [ ] One request is **one trace**: a root span with a child per stage — auth, screen,
+      memory, retrieval, the agent run, compose, the output gate — and `one_trace`
+      asserts it, because a stage that opens its span outside the request's context
+      still records, just somewhere nobody will look
+- [ ] The service has an **identity**: `service.name` on a `Resource`, not just a
+      tracer name. Without it the SDK ships `unknown_service` and the filter that
+      should narrow to one service narrows to nothing
+- [ ] The root says **which system answered** — model, and a prompt version derived by
+      hashing `grounded_prompt`'s own source rather than typed next to it — and the
+      same derivation stamps the CI report, so a trace and the report agree by
+      construction
+- [ ] `rag.search` records **hits and kept**, not just one of them: the gap is how many
+      documents the screen threw away, and one number cannot show a gap — plus
+      `retrieval.sources`, which turns "retrieval was slow" into "the slow ones all hit
+      the same document"
+- [ ] Re-ingesting a document **updates it**. Chunk ids derive from
+      `(tenant, source, ordinal)`, so the loader can be re-run — after a crash, after a
+      config change, on a cron — without the corpus growing a copy each time. A test
+      ingests the same source three times and asserts one chunk survives
+- [ ] An **edit keeps the id and changes the version**. Content is deliberately not in
+      the id: hash the text in and every edit shelves the old paragraph beside the new
+      one, and retrieval cites whichever ranked higher
+- [ ] Chunk **offsets are checkable**: `body[start:end] == chunk.text`, asserted. A
+      citation with a character range that does not hold is a lie with a number in it
+- [ ] `DELETE /corpus/{source}` **removes every chunk of one source, tenant-scoped**,
+      and leaves an audit row. A corpus you cannot delete from will eventually hold
+      something you are not allowed to keep; a delete that crosses tenants is a
+      denial-of-service with a REST interface
+- [ ] `GET /evidence/{chunk_id}` **resolves a citation back to its text**, and 404s once
+      the source is forgotten. That round trip is the difference between a citation and
+      a decoration
+- [ ] A **redacted** chunk keeps its source, version and offsets — otherwise every
+      document containing an email address becomes uncitable, which is a quiet incentive
+      to screen less
+- [ ] `ASSISTANT_EMBED_MODEL` swaps the hash vector for **real embeddings**, and the
+      collection's dimension is **measured from the injected embedder**, not declared. A
+      hardcoded `64` is a 400 from Qdrant on the first write after the deploy
+- [ ] A failure is **classified before it is retried**: `TypeError` and a 4xx surface on
+      the first attempt, a dead socket gets another go. `retry on Exception` buys three
+      times the latency before the same 500, with the traceback pointing at the third
+      identical retry instead of at the cause
+- [ ] `send_telegram` retries **exactly zero times** (`ONCE`), and so does every MCP tool
+      call. A timeout tells you nothing about whether the server acted, and nothing in
+      the MCP protocol says whether calling a discovered tool twice charges a card twice
+- [ ] Each connector **raises inward and apologises outward** — a connector that catches
+      its own `OSError` and returns `{"error": ...}` is a connector nothing can retry,
+      because from the outside a returned error dict is a successful call. That is how a
+      retry policy ends up decorative
+- [ ] One **budget per request** (`REQUEST_DEADLINE_SECONDS`), read at every seam, with
+      `deadline.capped` shrinking each call's timeout to what is left. Without it every
+      layer's timeout composes by *addition* and the total is a number nobody has
+      computed
+- [ ] A caller who **left** stops the work: the disconnect is watched at the HTTP edge
+      and checked per streamed frame, because a long generation cannot be stopped
+      anywhere else. Under load this is the failure that compounds
+- [ ] **504 for a deadline, 499 for a disconnect** — a 504 is an alert, a 499 is
+      somebody closing a tab, and conflating them fills a dashboard with incidents that
+      are really just people leaving
+- [ ] **Every** mutating route is idempotent, not just `/approve`, and a replay returns
+      the **original answer**. `{"replayed": true}` avoids the double effect and still
+      breaks the client, which asked a question and got a receipt
+- [ ] A **failed** operation releases its key, so the retry the client is about to send
+      actually runs. Recording the key up front turns one transient failure into a
+      permanent one, silently
+- [ ] Keys are namespaced by **subject and operation**: they are client-chosen, "retry-1"
+      is what everyone picks, and one flat namespace lets a retried ingest swallow an
+      approval
+- [ ] Irreversible intent is **durable before the effect** — a `pending` outbox row
+      committed before the call, settled after, and `GET /outbox` lists what never
+      settled. A crash mid-send should leave a question, not silence
+- [ ] `llm.compose` carries **tokens and `cost.usd`** from the same meter `report.py`
+      totals for the cost gate — two meters would be two answers to "what did last week
+      cost"
+- [ ] One **request id** on the span, in the response body and in the `x-request-id`
+      header, honouring an inbound one, so a user quoting an id from an error message
+      resolves to a trace without joining on timestamps
+- [ ] A refused request is **visible**: a 401 leaves an `auth.verify` span with a
+      reason and no pipeline beneath it; a blocked question leaves a screen span and no
+      `llm.compose` at all — the cheapest possible proof the block happened before the
+      spend
+- [ ] Streaming produces the **same tree** as the batch path, and stays streaming — a
+      test fails if the metering buffers the generator to make the token count tidier
 - [ ] Every tool is traced by **wrapping the registry** — a test proves a newly-added
       tool is instrumented without its author doing anything
 - [ ] A failing tool is marked **ERROR on its span and still raises** — the trace
@@ -105,25 +249,48 @@ a dead adapter from becoming a dead service. Together they wire every layer you
 built:
 
 ```
-request ─► guardrails.screen ─► agent.run (traced) ─► tools (read-only output
+/ingest  ─► screen ────────────► RAG  (refused rows are audited and counted back
+           (before it is stored)       to the caller; PII never reaches disk)
+
+request ─► screen ────────────► agent.run (traced) ─► tools (read-only output
            (input)                │                    re-screened; irreversible
                                   │                    ones gated by /approve)
-                                  ├─► RAG   (in-memory BM25  | Qdrant)
+                                  ├─► RAG   (in-memory BM25  | Qdrant + embeddings)
+                                  │          chunks: text + source + version + span
                                   ├─► memory (in-process     | SQLite)
                                   └─► spans  (in-memory      | + OTLP)
            guardrails.output_ok ◄─ answer
 ```
 
+One `screen` object serves all four arrows, injected by the composition root, so
+`ASSISTANT_GUARD_MODEL` hardens every untrusted channel at once instead of the
+one someone remembered.
+
 Offline and deterministic by default — the fast tests drive the real FastAPI app
 with a TestClient and no network. Each real adapter turns on with one env var
-(`settings.py`): `QDRANT_URL`, `OLLAMA_HOST`, `MCP_SERVER`, `ASSISTANT_DB`,
-`OTEL_EXPORTER_OTLP_ENDPOINT`, plus three optional hardening/connector vars —
-`ASSISTANT_JWT_SECRET` (Bearer JWT on every mutating endpoint, `auth.py`),
-`TELEGRAM_BOT_TOKEN` and `NEWS_FEED_URL` (real connector bodies, `connectors.py`;
-the approval gate and output re-screen apply unchanged). `adapters.py` holds the
-real implementations, `sqlite_memory.py` is the memory store that survives a
-restart, and `mcp_server.py` is a small real MCP server the assistant discovers
-tools from.
+(`settings.py`): `QDRANT_URL`, `ASSISTANT_EMBED_MODEL` (real embeddings instead of
+the deterministic hash vector — it matches on shared vocabulary, so
+"reimbursement" will not find a page about "refunds"), `OLLAMA_HOST`,
+`MCP_SERVER`, `ASSISTANT_DB`,
+`OTEL_EXPORTER_OTLP_ENDPOINT`, plus the optional hardening/connector vars —
+`ASSISTANT_JWT_SECRET` **or** `ASSISTANT_JWKS_URL` (Bearer JWT on every mutating
+endpoint, `auth.py`; the first verifies HS256 against a shared secret, the second
+verifies RS256 against an issuer's published keys), `ASSISTANT_JWT_ISSUER` and
+`ASSISTANT_JWT_LEEWAY` to tighten it, `ASSISTANT_GUARD_MODEL` (a local model as a
+second opinion on every untrusted string — it may add a block, never clear one,
+and fails open to the deterministic verdict; `guard.py`), and
+`TELEGRAM_BOT_TOKEN` / `NEWS_FEED_URL`
+(real connector bodies, `connectors.py`; the approval gate and output re-screen
+apply unchanged). `adapters.py` holds the real implementations,
+`sqlite_memory.py` is the memory store that survives a restart, and
+`mcp_server.py` is a small real MCP server the assistant discovers tools from.
+
+`auth.py` is the resource server: it checks whatever token arrives. `oauth.py` is
+the other half — authorization code + PKCE, discovery, exact redirect matching —
+because "we support OAuth" is easy to claim and easy to get subtly wrong. The two
+are exercised together by `phase8-deploy/01-compose`'s OAuth overlay, which puts
+a real Keycloak in front of the assistant and swaps the shared secret for JWKS
+without the service code noticing.
 
 The HTTP surface is `/health`, `/ingest`, `/ask`, `/ask/stream` (the same answer
 as server-sent events, chunk by chunk), and `/approve`. Grounded answers carry
@@ -132,10 +299,12 @@ labels with the same `[c#]` ids.
 
 The `Dockerfile` builds one image that runs as both the assistant API and the MCP
 server; `phase8-deploy/01-compose` deploys it next to pinned Qdrant and Ollama, and
-`src/verify-e2e.sh` proves the composed stack end to end: boot on healthchecks,
-tier report, grounded answer, approval containment, an MCP call over the wire,
-spans left behind — and, via the `docker-compose.observability.yml` overlay, the
-same spans arriving at a real otel-collector **outside the process**.
+`src/verify-e2e.sh` proves the composed stack end to end, under the secure
+profile so every request is authenticated: boot on healthchecks, tier report, an
+unauthenticated request refused, grounded answer, approval containment bound to
+the approving subject, an MCP call over the wire, two callers whose memories never
+cross, spans left behind — and, via the `docker-compose.observability.yml` overlay,
+the same spans arriving at a real otel-collector **outside the process**.
 
 ### Capstone deliverables
 
@@ -143,11 +312,25 @@ same spans arriving at a real otel-collector **outside the process**.
       hardened tool output, gated tools behind `/approve`, RAG contexts, memory
       writes, spans — and the fast tests prove each seam offline
 - [ ] `/ask/stream` streams the same gated pipeline as SSE, grounded answers carry
-      structured citations, and the optional JWT gate rejects missing/expired/
-      wrong-audience/wrong-scope tokens (all proven offline in `tests/`)
-- [ ] Security depth holds offline: poisoned retrieved documents are dropped
+      structured citations, and the JWT gate rejects missing, expired,
+      **never-expiring**, subject-less, wrong-audience, wrong-issuer and
+      wrong-scope tokens — in both the shared-secret and JWKS lanes, and against
+      an algorithm-confusion attempt (all proven offline in `tests/test_auth.py`)
+- [ ] The token-minting half is real too: PKCE with `S256`, a `state` compared in
+      constant time, and a redirect URI that must match exactly
+      (`tests/test_oauth.py`; run it against Keycloak with the OAuth overlay)
+- [ ] The screen reads two surfaces before it decides — the input **expanded**
+      (base64, percent-encoding, HTML entities) and **squashed** (NFKC, invisible
+      characters, leet folding, separator removal) — with controls proving
+      benign prose still gets through (`tests/test_guardrails.py`), and the
+      optional guard model can only ever add a block (`tests/test_guard.py`)
+- [ ] Security depth holds offline: a poisoned document is refused **at ingest**
+      so it is never stored, poisoned retrieved documents are still dropped
       before composition, tenants cannot cross-read documents or memories, every
-      approval and tool run lands in the persistent audit log, and a replayed
+      approval and tool run lands in the persistent audit log — every row bound
+      to the same request id, trace id, subject, approval id, canonical args
+      hash and outcome the spans carry, so "what did this trace do" is a query
+      and not a regex over prose — and a replayed
       approval never fires twice (`tests/test_security.py`,
       `tests/test_reliability.py`; threat model in `THREAT-MODEL.md`, incident
       response in `RUNBOOK.md`)
@@ -157,17 +340,40 @@ same spans arriving at a real otel-collector **outside the process**.
       against `mcp_server.py`, in-memory in the integration lane, over HTTP in the
       composed stack)
 - [ ] `docker compose up --build` in `phase8-deploy/01-compose/after` reaches
-      healthy, and `./verify-e2e.sh` passes all eleven checks — including the
-      operate tier: spans observed at a real collector outside the process,
-      degraded-but-honest answers with Qdrant stopped, and state that survives a
-      restart (grounded answers, audit rows, memories)
+      healthy, the `docker-compose.secure.yml` overlay turns the gate on, and
+      `./verify-e2e.sh` passes all fifteen checks — including the operate tier:
+      authenticated requests only, a citation that resolves back to its text and a
+      source that can be deleted, per-subject memory isolation proven over HTTP,
+      spans observed at a real collector outside the process, degraded-but-honest
+      answers with Qdrant stopped, and state that survives a restart (grounded
+      answers, audit rows, memories)
 - [ ] `make report` writes `PORTFOLIO.md` — eval scores per slice, live red-team
       containment, latency percentiles read off the spans, the cost story and the
       ADR list, every number measured by `src/assistant/report.py` and the
       generator itself tested (a breach cannot pass silently)
+- [ ] The SAME run writes `evals/report.json`, version-stamped with values
+      derived from what ran (the `prompt` stamp is a hash of the prompt builder's
+      source, so editing the prompt and keeping the label is not possible), and
+      `make gate` puts the four merge gates from `phase8-deploy/02-ci` in front
+      of it. The root workflow's `evidence` job does the same thing against the
+      **image** built from the current commit — a gate reading a committed report
+      only ever checks that somebody remembered to edit a file
+- [ ] The release lane is code, not a wiki page
+      (`phase8-deploy/03-deploy-observe/src/release.py` + `deploy/`): only commit
+      SHAs are published and a dirty tree is refused, the manifest names its
+      secrets and a pasted key fails the deploy, four smoke probes run after it
+      — including `/health`'s `version` against the SHA just shipped, which is
+      the only one that catches a half-finished rollout still serving a healthy
+      old machine — and the rollback returns `halt` rather than pretending, when
+      the only thing behind you is a moving tag
+- [ ] Backup and restore are scripted and *proven*: SQLite's online backup rather
+      than `cp` (the test races a writer against it), row counts verified in the
+      same script that takes the copy, retention by name, and the writer stopped
+      before a restore
 - [ ] The design is documented like a system, not a homework: diagrams in
       `ARCHITECTURE.md`, decisions with alternatives and costs in `adr/`, threats
-      in `THREAT-MODEL.md`, incidents and backup/restore in `RUNBOOK.md`
+      in `THREAT-MODEL.md`, incidents, deploy failures and backup/restore in
+      `RUNBOOK.md`
 
 ## Stretch goals
 
@@ -175,17 +381,19 @@ same spans arriving at a real otel-collector **outside the process**.
   leave the process; swap its debug exporter for an `otlp` exporter at a local
   Phoenix or a Langfuse project and look at the actual tree. Change **nothing** in
   `observe.py` — if you have to, your instrumentation is not portable yet.
-- Put cost on the spans. Bring the Phase-1 meter in, set `cost.usd` per model call,
-  and report spend per goal. Then find the single most expensive request you have ever
-  made and explain, from the trace alone, why it cost that.
+- Find the single most expensive request you have ever made and explain, from the
+  trace alone, why it cost that. `cost.usd` is already on `llm.compose`; the skill is
+  reading a tree back.
 - Add a **semantic** layer to the cache (`phase8-deploy/04-cost-latency`) and sweep the
   threshold on your own traffic. Report the wrong-reuse count, not just the hit rate.
 - Gate the deploy on the tail: fail CI when P99 across your golden set exceeds the
   budget, using the guard from `03-deploy-observe`.
 
-Implement `observe.py` and `cache.py`. Reference and tests:
-`after/src/assistant/observe.py`, `after/src/assistant/cache.py`,
-`after/tests/test_observe.py`, `after/tests/test_cache.py`.
+Implement `observe.py`, `provenance.py`, `usage.py`, the span seams in `core.py`,
+and `cache.py`. Reference and tests: `after/src/assistant/observe.py`,
+`after/src/assistant/cache.py`, `after/tests/test_observe.py` (the loop),
+`after/tests/test_tracing.py` (the whole request), `after/tests/test_cache.py`.
+Decision record: [`adr/0011`](adr/0011-one-trace-per-request-and-stamps-that-derive.md).
 
 **Measure before you optimize, and report the pair.** A cache that halves your bill and
 loses two points on the Phase-3 gate is not a win, it is an undeclared quality cut. The

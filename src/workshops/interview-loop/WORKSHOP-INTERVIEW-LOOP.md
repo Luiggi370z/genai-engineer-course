@@ -78,19 +78,25 @@ in an eval.
 
 ## Deliverables
 
+Three passes. **Minimum** is the walking skeleton — the smallest thing that is
+really this, and a place to stop that is not quitting. **Full** is the version you
+would show someone. **Stretch** is for when the full pass came easily.
+
+### Minimum
 - [ ] A **written weekly schedule** with the drill, mock and metrics slots on specific
       days at specific times, and a named trigger for each — the thing that already
       happens daily that the habit attaches to
-- [ ] A **spaced-repetition list** with real entries in it, proving you drilled long
-      enough to fumble something twice
 - [ ] **Three recorded design mocks**, each scored on the rubric, with the scores
       trending — the trend is the deliverable, not the third score
+- [ ] A **resume where every bullet carries a number**, and nothing survives without one
+
+### Full
+- [ ] A **spaced-repetition list** with real entries in it, proving you drilled long
+      enough to fumble something twice
 - [ ] Every rubric row scoring 0 or 1 has a **named drill** attached, so a weakness
       becomes a task rather than an observation
 - [ ] A **metrics sheet** where every claim traces to a file, test or trace in one of
       your own repos, and any claim that cannot is deleted
-- [ ] A **resume where every bullet carries a number** from that sheet, and nothing
-      survives without one
 - [ ] The **funnel, with at least 20 applications behind it**, your leaking stage
       named, and exactly one fix applied and dated
 - [ ] A **learning system that outlives the course**: what you skim weekly, the

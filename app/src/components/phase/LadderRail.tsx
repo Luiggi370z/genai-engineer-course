@@ -1,9 +1,19 @@
-import type { Exercise } from "../../data/types";
+import type { Exercise, Mastery } from "../../data/types";
 
 interface LadderRailProps {
   exercises: Exercise[];
   accent: string;
 }
+
+/** Ordered, so "the highest rung this phase reaches" is a max rather than a vote. */
+const MASTERY: Mastery[] = ["understand", "implement", "integrate", "operate"];
+
+const MEANS: Record<Mastery, string> = {
+  understand: "you can explain it and defend the explanation",
+  implement: "you built it, in isolation, and its tests are green",
+  integrate: "you made it work across a seam you don’t control",
+  operate: "you ran it under conditions that could hurt it, and have the numbers",
+};
 
 /**
  * Names the three rungs and says where each one lives in *this* phase.
@@ -16,6 +26,10 @@ interface LadderRailProps {
 export function LadderRail({ exercises, accent }: LadderRailProps) {
   const faded = exercises.filter((e) => e.rung === "faded").length;
   const independent = exercises.filter((e) => e.rung === "independent").length;
+  const top = exercises.reduce<Mastery>(
+    (best, e) => (MASTERY.indexOf(e.proves) > MASTERY.indexOf(best) ? e.proves : best),
+    "understand",
+  );
 
   const rungs = [
     {
@@ -63,6 +77,19 @@ export function LadderRail({ exercises, accent }: LadderRailProps) {
             </p>
           </div>
         ))}
+      </div>
+      <div className="border-t border-line/60 px-4 py-2.5">
+        <p className="text-[12px] leading-[1.6] text-ink/70">
+          <span className="font-semibold text-ink">A second, independent axis.</span> The rungs
+          above say how much scaffolding a task removes. Each exercise also carries a{" "}
+          <span className="font-mono text-[11px] text-ink/85">proves</span> chip saying what
+          finishing it <em>demonstrates</em> — and the two come apart: a blank-editor task can still
+          only prove you can build a thing in isolation. The highest this phase reaches is{" "}
+          <span className="font-semibold" style={{ color: accent }}>
+            {top}
+          </span>
+          , meaning {MEANS[top]}.
+        </p>
       </div>
     </div>
   );

@@ -210,7 +210,10 @@ export function App() {
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <div className="flex items-center gap-3 border-b border-line bg-card px-4 py-3 md:hidden">
+          {/* A `header` rather than a `div`: the phase title in here is the only
+              content on a phone that would otherwise sit outside every landmark,
+              which leaves a screen reader jumping by region unable to reach it. */}
+          <header className="flex items-center gap-3 border-b border-line bg-card px-4 py-3 md:hidden">
             <button
               ref={menuButtonRef}
               type="button"
@@ -237,7 +240,7 @@ export function App() {
             >
               <HugeiconsIcon icon={theme === "dark" ? Sun03Icon : Moon02Icon} size={16} />
             </button>
-          </div>
+          </header>
 
           <main
             id="main-scroll"

@@ -77,6 +77,9 @@ export function audit({ phases, prerequisites = [], electives = [], repoExists =
         fail("repo-exists", item.id, `${what} points at src/${item.repo}, which does not exist`);
       }
     }
+
+    checkDefenses(phase, fail);
+    if (phase.workshop) checkTiers(phase.workshop, fail);
   }
 
   for (const elective of electives) {
@@ -103,8 +106,110 @@ export function audit({ phases, prerequisites = [], electives = [], repoExists =
         phases.reduce((n, p) => n + (p.resources ?? []).length, 0) +
         electives.reduce((n, e) => n + (e.resources ?? []).length, 0),
       electives: electives.length,
+      defenses: phases.reduce((n, p) => n + (p.checkpoint ?? []).length, 0),
     },
   };
+}
+
+export const DEFENSE_ELEMENTS = ["alternatives", "constraints", "evidence", "failure-modes"];
+
+export const TIERS = ["minimum", "full"];
+
+/**
+ * The minimum has to be a real minimum, and it has to be reachable.
+ *
+ * An undifferentiated list of twenty-three deliverables reads as one indivisible
+ * obligation, and the student who cannot fit all of it this week does none of it.
+ * So: at least two `minimum` items, or there is no skeleton to walk; at least one
+ * `full`, or the tiering is decoration; and `minimum` capped at half the list,
+ * because a "minimum" that is most of the workshop is the same undifferentiated
+ * list with a reassuring label on it.
+ */
+function checkTiers(workshop, fail) {
+  const items = workshop.deliverables ?? [];
+  for (const d of items) {
+    if (!TIERS.includes(d.tier)) {
+      fail("deliverable-tier", d.id, `tier is "${d.tier}", not minimum or full`);
+    }
+  }
+  const minimum = items.filter((d) => d.tier === "minimum").length;
+  const full = items.filter((d) => d.tier === "full").length;
+  if (!items.length) return;
+  if (minimum < 2) {
+    fail(
+      "workshop-tiers",
+      workshop.id,
+      `only ${minimum} minimum deliverable(s) — that is not a walking skeleton`,
+    );
+  }
+  if (full < 1) {
+    fail(
+      "workshop-tiers",
+      workshop.id,
+      "every deliverable is minimum, so the tiering says nothing",
+    );
+  }
+  if (minimum * 2 > items.length) {
+    fail(
+      "workshop-tiers",
+      workshop.id,
+      `${minimum} of ${items.length} deliverables are "minimum" — a minimum that is ` +
+        "most of the workshop is the full list wearing a reassuring label",
+    );
+  }
+  if (!(workshop.stretch ?? []).length) {
+    fail(
+      "workshop-tiers",
+      workshop.id,
+      "no stretch tier — nothing for the student this came easily to",
+    );
+  }
+}
+
+/**
+ * The checkpoint rubric: what a spoken answer has to contain to be a defense.
+ *
+ * Two rules, and the split between them is the point. Per question, at least two
+ * elements — one is an explanation, and an explanation is what a candidate gives
+ * when they have only ever read about the system. Per phase, all four across the
+ * set — because the element everyone omits is `failure-modes`, and a phase whose
+ * checkpoints never ask for it lets the student practise the omission.
+ *
+ * Not four per question, deliberately. A rubric that says the same thing on every
+ * card is a rubric nobody reads by the third one, and "name the alternatives" is
+ * genuinely not a fair demand of every prompt.
+ */
+function checkDefenses(phase, fail) {
+  const covered = new Set();
+  for (const q of phase.checkpoint ?? []) {
+    const demands = q.demands ?? [];
+    const unknown = demands.filter((d) => !DEFENSE_ELEMENTS.includes(d));
+    if (unknown.length) {
+      fail("defense-elements", q.id, `demands unknown element(s): ${unknown.join(", ")}`);
+    }
+    if (new Set(demands).size !== demands.length) {
+      fail("defense-elements", q.id, "demands the same element twice");
+    }
+    if (new Set(demands).size < 2) {
+      fail(
+        "defense-rubric",
+        q.id,
+        "a checkpoint has to demand at least two of alternatives / constraints / " +
+          "evidence / failure-modes — one is an explanation, not a defense",
+      );
+    }
+    for (const d of demands) covered.add(d);
+  }
+  if (!(phase.checkpoint ?? []).length) return;
+  const missing = DEFENSE_ELEMENTS.filter((d) => !covered.has(d));
+  if (missing.length) {
+    fail(
+      "defense-coverage",
+      phase.id,
+      `no checkpoint in this phase demands ${missing.join(" or ")} — the student ` +
+        "can finish it having never been asked for that half of a design answer",
+    );
+  }
 }
 
 /**

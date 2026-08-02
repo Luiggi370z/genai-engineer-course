@@ -11,6 +11,28 @@ Three small pieces the service composes around its network adapters:
 
 Everything takes an injectable clock/sleep so the tests run in microseconds and
 never actually wait.
+
+## What is worth retrying
+
+`retry on Exception` is the default everyone writes and it is wrong in two
+directions at once. It retries a `TypeError` three times — the bug is
+deterministic, so all it buys is three times the latency before the same 500 —
+and it retries a 400 from an API that will reject the same payload forever. Worse,
+each pointless attempt holds a connection and a worker while the real incident is
+somewhere else.
+
+So a failure is classified before it is retried. `TRANSIENT` is the honest list:
+the network, the clock, and the server saying "later". Everything else is a bug or
+a refusal, and both should surface on the first attempt, where the stack trace
+still points at the cause.
+
+## What is worth retrying ONCE
+
+Retrying is safe when the call is idempotent. `send_telegram` is not: a retry
+after a timeout may deliver a second message, because a timeout tells you nothing
+about whether the server acted. `ONCE` exists for that case, and side-effecting
+adapters use it — the timeout still applies, the retries do not. Making that a
+named policy rather than a comment is the difference between a rule and a hope.
 """
 from __future__ import annotations
 
@@ -23,6 +45,30 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
+from assistant import deadline
+
+#: Failures where the same call, later, could plausibly succeed. `ConnectionError`
+#: and the socket errors are `OSError` subclasses, so this is shorter than it
+#: looks; `TimeoutError` is listed because our own timeout raises it.
+TRANSIENT: tuple[type[BaseException], ...] = (OSError, TimeoutError)
+
+
+class Permanent(Exception):
+    """A refusal that will be a refusal next time too.
+
+    An adapter that can read a status code should raise this for a 4xx rather
+    than letting a generic error be retried three times against a server that
+    has already given its final answer."""
+
+
+def is_transient(exc: BaseException) -> bool:
+    """The default classifier. `Permanent` wins over the type check, so an
+    adapter can mark a `ConnectionError`-shaped failure as final without having
+    to invent a new exception hierarchy."""
+    if isinstance(exc, deadline.Expired | Permanent):
+        return False
+    return isinstance(exc, TRANSIENT)
+
 
 @dataclass(frozen=True)
 class Policy:
@@ -32,9 +78,18 @@ class Policy:
     base_delay: float = 0.2
     max_delay: float = 5.0
     timeout: float | None = 10.0
+    #: Which failures deserve another attempt. Injectable because "transient" is
+    #: protocol-specific — an HTTP adapter knows 429 and 503 are worth retrying
+    #: and 422 is not, and that knowledge belongs to the adapter, not here.
+    retry_if: Callable[[BaseException], bool] = is_transient
 
 
 DEFAULT_POLICY = Policy()
+
+#: For calls that are NOT idempotent. One attempt, still bounded by the timeout:
+#: a send that may or may not have happened must not be turned into a send that
+#: definitely happened twice.
+ONCE = Policy(attempts=1)
 
 
 def resilient(
@@ -50,10 +105,20 @@ def resilient(
     Backoff is exponential with FULL jitter (delay drawn uniformly from
     [0, base * 2^attempt]) — the variant that empties a thundering herd fastest.
     The timeout runs the call on a worker thread; a call that overruns is
-    abandoned there (Python cannot kill it) and reported as TimeoutError here."""
+    abandoned there (Python cannot kill it) and reported as TimeoutError here.
+
+    Three things stop a retry loop, and only one of them is "it worked": the
+    failure is not transient (`policy.retry_if`), the attempts are used up, or
+    the REQUEST's budget is gone (deadline.py). That last one is the difference
+    between a service whose timeouts add up and one whose timeouts hold: a call
+    with 4 seconds of request budget left gets a 4-second timeout no matter what
+    its own policy says."""
 
     def timed(*args: Any, **kwargs: Any) -> Any:
-        if policy.timeout is None:
+        # The tighter of the two clocks. A per-call timeout that outlives the
+        # request it serves is not a timeout, it is a suggestion.
+        limit = deadline.capped(policy.timeout)
+        if limit is None:
             return fn(*args, **kwargs)
         # NOT a `with` block: the context manager's __exit__ is shutdown(wait=True),
         # which would block right here until the abandoned call finished — turning
@@ -64,23 +129,38 @@ def resilient(
         try:
             future = pool.submit(fn, *args, **kwargs)
             try:
-                return future.result(timeout=policy.timeout)
+                return future.result(timeout=limit)
             except FutureTimeout:
                 raise TimeoutError(
-                    f"{getattr(fn, '__name__', 'call')} exceeded {policy.timeout}s"
+                    f"{getattr(fn, '__name__', 'call')} exceeded {limit:.3g}s"
                 ) from None
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         for attempt in range(policy.attempts):
+            # Checked BEFORE the attempt: starting a call we already know we
+            # cannot wait for burns a connection to produce a result nobody
+            # reads. On the first pass this also refuses work for a caller who
+            # gave up while an earlier stage was running.
+            deadline.check()
             try:
                 return timed(*args, **kwargs)
-            except Exception:
-                if attempt == policy.attempts - 1:
+            except Exception as exc:
+                last = attempt == policy.attempts - 1
+                # Order matters: a permanent failure must surface on attempt one,
+                # with the stack trace still pointing at the cause rather than at
+                # the third identical retry of it.
+                if last or not policy.retry_if(exc):
                     raise
                 ceiling = min(policy.max_delay, policy.base_delay * (2**attempt))
-                sleep(ceiling * rng())
+                delay = ceiling * rng()
+                left = deadline.remaining()
+                if left is not None and delay >= left:
+                    # Sleeping past the deadline to attempt a call that cannot
+                    # finish is the most expensive possible way to fail.
+                    raise
+                sleep(delay)
         raise AssertionError("unreachable")  # pragma: no cover
 
     return wrapped

@@ -18,7 +18,7 @@ FAITHFULNESS_BAR = 0.85
 CONTEXT_RECALL_BAR = 0.80
 
 
-def local_judge(model: str = "qwen3.6:27b"):
+def local_judge(model: str = "qwen3-coder:30b"):
     """A FREE judge on Ollama. Validate it against a hosted judge once, then reuse."""
     from langchain_openai import ChatOpenAI
     from ragas.llms import LangchainLLMWrapper

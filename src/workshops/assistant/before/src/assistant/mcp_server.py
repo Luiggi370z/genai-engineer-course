@@ -19,10 +19,33 @@ _FACTS = {
 
 
 def _lookup_fact(topic: str) -> dict:
-    key = topic.strip().lower()
-    if key in _FACTS:
-        return {"topic": key, "fact": _FACTS[key]}
-    return {"error": f"no fact for {topic!r}", "known": sorted(_FACTS)}
+    """Find a fact by topic, tolerating how the caller phrased it.
+
+    An exact-key lookup only works when the caller already knows the keys, which
+    a planner filling this argument from a user's sentence does not. Matching on
+    the fraction of a topic's own words that appear in the request keeps it
+    deterministic while accepting "the refund window policy" for "refund window".
+    """
+    words = _normalise(topic)
+    if not words:
+        return {"error": "no topic given", "known": sorted(_FACTS)}
+    scored = [
+        (len(_normalise(key) & words) / len(_normalise(key)), key) for key in sorted(_FACTS)
+    ]
+    score, best = max(scored)
+    if score < 1.0:  # every word of the topic must be present — no near-misses
+        return {"error": f"no fact for {topic!r}", "known": sorted(_FACTS)}
+    return {"topic": best, "fact": _FACTS[best]}
+
+
+def _normalise(text: str) -> set[str]:
+    """Words, with plurals folded, so "support hour" finds "support hours".
+    Both sides go through this, so the server never has to know how the caller
+    happened to phrase things."""
+    return {
+        word[:-1] if len(word) > 3 and word.endswith("s") else word
+        for word in text.lower().replace("_", " ").split()
+    }
 
 
 def build_server() -> Any:
@@ -59,4 +82,15 @@ def build_server() -> Any:
 
 
 if __name__ == "__main__":
-    build_server().run()
+    import os
+    import sys
+
+    if "--http" in sys.argv:
+        # The composed stack (phase8 lesson 1): serve streamable HTTP at /mcp.
+        build_server().run(
+            transport="streamable-http",
+            host="0.0.0.0",  # noqa: S104 — inside a container, the port stays on the compose network
+            port=int(os.getenv("PORT", "8080")),
+        )
+    else:
+        build_server().run()  # stdio, for a desktop host

@@ -13,6 +13,9 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
     "isolatedModules": true,
+    // So `./progress.ts` resolves in both Vite and bare Node. The manifest logic is
+    // tested by `node --test`, which strips types but will not guess extensions.
+    "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true

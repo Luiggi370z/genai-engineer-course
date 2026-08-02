@@ -4,9 +4,12 @@ tool BODY while the approval gate and hardening stay exactly where they were."""
 
 import io
 import json
+import urllib.error
+from email.message import Message
 
 import assistant.connectors as connectors
 from assistant.connectors import news_fetcher, parse_feed, telegram_sender
+from assistant.resilience import Policy
 from assistant.service import build_assistant
 from assistant.settings import Settings
 
@@ -80,6 +83,86 @@ def test_the_news_fetcher_returns_parsed_headlines(monkeypatch):
         lambda url, timeout=0: FakeResponse(RSS.encode()),
     )
     assert "shrinking" in news_fetcher("https://example.com/feed.xml")()
+
+
+# --- what gets retried, and what deliberately does not --------------------------
+
+
+def counting_urlopen(monkeypatch, behaviour):
+    """Swap urlopen for `behaviour` and count how many times it was called."""
+    calls: list[int] = []
+
+    def fake(target, timeout=0):
+        calls.append(1)
+        return behaviour(len(calls))
+
+    monkeypatch.setattr(connectors.urllib.request, "urlopen", fake)
+    return calls
+
+
+def test_a_flaky_feed_is_retried_because_a_read_costs_nothing_to_repeat(monkeypatch):
+    def flaky(n):
+        if n == 1:
+            raise OSError("connection reset")
+        return FakeResponse(RSS.encode())
+
+    calls = counting_urlopen(monkeypatch, flaky)
+    fetcher = news_fetcher("https://example.com/f.xml",
+                           policy=Policy(attempts=3, base_delay=0, timeout=None))
+    assert "shrinking" in fetcher()
+    assert len(calls) == 2, "the second attempt is what produced the answer"
+
+
+def test_a_send_is_never_retried_because_a_timeout_is_not_a_no(monkeypatch):
+    """The default policy for send_telegram is ONCE. A timeout tells you nothing
+    about whether the Bot API delivered the message, so trying again is how one
+    outage alert becomes three."""
+    def always_fails(n):
+        raise OSError("read timed out")
+
+    calls = counting_urlopen(monkeypatch, always_fails)
+    result = telegram_sender("TOKEN123")("team-chat", "the site is down")
+    assert len(calls) == 1, "a possibly-delivered message must not be sent again"
+    assert "unreachable" in result["error"]
+
+
+def test_a_4xx_is_not_retried_even_when_retries_are_allowed(monkeypatch):
+    """The Bot API has already given its final answer. Asking twice more
+    produces the same rejection, more slowly, holding a connection each time."""
+    def refused(n):
+        raise urllib.error.HTTPError(
+            "https://api.telegram.org", 400, "Bad Request", Message(), None
+        )
+
+    calls = counting_urlopen(monkeypatch, refused)
+    sender = telegram_sender("TOKEN123",
+                             policy=Policy(attempts=3, base_delay=0, timeout=None))
+    assert "refused" in sender("team-chat", "hello")["error"]
+    assert len(calls) == 1
+
+
+def test_a_5xx_is_retried_because_later_is_a_real_possibility(monkeypatch):
+    def wobbly(n):
+        if n == 1:
+            raise urllib.error.HTTPError(
+                "https://api.telegram.org", 503, "Unavailable", Message(), None
+            )
+        return FakeResponse(b'{"ok": true}')
+
+    calls = counting_urlopen(monkeypatch, wobbly)
+    sender = telegram_sender("TOKEN123",
+                             policy=Policy(attempts=3, base_delay=0, timeout=None))
+    assert sender("team-chat", "hello") == {"sent": True, "chat_id": "team-chat"}
+    assert len(calls) == 2
+
+
+def test_a_connector_never_raises_into_the_agent_loop(monkeypatch):
+    """The tool contract is "return a value". An outage in one connector must
+    not take down the request that happened to use it — the outbox row and the
+    span record the failure; the caller gets a sentence."""
+    counting_urlopen(monkeypatch, lambda n: (_ for _ in ()).throw(OSError("down")))
+    assert "unreachable" in telegram_sender("T")("chat", "hi")["error"]
+    assert "unreachable" in news_fetcher("https://example.com/f.xml")().lower()
 
 
 def test_env_gated_connectors_swap_the_body_but_keep_the_gate():

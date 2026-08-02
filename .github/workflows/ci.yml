@@ -28,9 +28,23 @@ jobs:
       - uses: actions/checkout@v5
       - run: python3 src/verify-parity.py
 
+  dist:
+    # the committed release is this commit's release, not a stale one. A minified
+    # bundle looks equally plausible whatever it was built from, so nothing short
+    # of the stamp in dist/BUILD.json can tell — which is how a release ships
+    # three-week-old content and nobody notices.
+    runs-on: ubuntu-latest
+    steps:
+      # Needs the tree objects the stamp names, so no shallow clone.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - run: ./verify-dist.sh
+
   gates:
-    # the phase 8.2 merge gates over the committed, version-stamped report —
-    # plus proof that every seeded regression blocks
+    # the phase 8.2 merge gates as a LESSON: the policy runs over the committed
+    # fixture report, and every seeded regression must block — proof that a gate
+    # which cannot fail is decoration. The real numbers are gated by `evidence`.
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -43,13 +57,77 @@ jobs:
       - run: make latency
       - run: make cost
       - run: make prove-gates
+
+  evidence:
+    # The gate that would actually catch a regression: build the capstone IMAGE
+    # from this commit, run the assistant on trial inside it, and block the merge
+    # on the numbers that run produced. A gate over a committed report only ever
+    # checks that somebody remembered to edit a file.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - run: docker build -t capstone:ci .
+        working-directory: src/workshops/assistant/after
+      # Inside the image, so the evidence describes the artifact that ships
+      # rather than a virtualenv that only exists on this runner.
+      - run: |
+          mkdir -p evidence
+          docker run --rm -v "$PWD/evidence:/out" capstone:ci \
+            python -m assistant.report --out /out/PORTFOLIO.md --json /out/report.json
+          cat evidence/report.json
+      # Four steps rather than one loop: a quality regression, a safety bypass, a
+      # latency blowout and a cost blowout are different incidents, and the log
+      # should name which one happened even when several did.
+      - name: quality gate
+        run: uv run python src/gate.py --quality "$GITHUB_WORKSPACE/evidence/report.json"
+        working-directory: src/phase8-deploy/02-ci/after
+      - name: safety gate
+        if: '!cancelled()'
+        run: uv run python src/gate.py --safety "$GITHUB_WORKSPACE/evidence/report.json"
+        working-directory: src/phase8-deploy/02-ci/after
+      - name: latency gate
+        if: '!cancelled()'
+        run: uv run python src/gate.py --latency "$GITHUB_WORKSPACE/evidence/report.json"
+        working-directory: src/phase8-deploy/02-ci/after
+      - name: cost gate
+        if: '!cancelled()'
+        run: uv run python src/gate.py --cost "$GITHUB_WORKSPACE/evidence/report.json"
+        working-directory: src/phase8-deploy/02-ci/after
+      # The three vulnerabilities this codebase shipped, seeded back in. Each
+      # regression test must pass against the current code and fail against its
+      # defect — so the guarantee CI protects is "these cannot come back
+      # unnoticed", not "somebody wrote a test named after them once".
+      - name: defect lab
+        if: '!cancelled()'
+        run: make defect-lab
+        working-directory: src/workshops/assistant/after
+      # The course-wide log, folding in the defect-lab stamp the previous step
+      # left behind. Deliberately not a gate: most claims are learner-generated
+      # and read unproven on a clean checkout, which is the honest answer rather
+      # than a regression. Its own gate lives in the fast tests, where
+      # test_evidence.py checks that every command the page prints still names a
+      # lesson and a make target that exist.
+      - name: evidence log
+        if: '!cancelled()'
+        run: |
+          PYTHONPATH=src uv run python -m assistant.evidence \
+            --out "$GITHUB_WORKSPACE/evidence/EVIDENCE.md" \
+            --json "$GITHUB_WORKSPACE/evidence/manifest.json"
+        working-directory: src/workshops/assistant/after
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: eval-report
-          path: src/phase8-deploy/02-ci/after/evals/report.json
+          name: capstone-evidence
+          path: evidence/
 
   app:
-    # the workbook: typecheck + data alignment/integrity/density checks + build
+    # the workbook: typecheck + data alignment/integrity/density/claims checks +
+    # build, then axe and the keyboard journey against the built page.
+    #
+    # `check-claims` reaches outside app/ on purpose: it compares the canonical
+    # tables in app/src/data/reference.ts against the two READMEs and the PRICE
+    # dicts in the Python lessons, which is where the copies had already drifted.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -66,6 +144,10 @@ jobs:
       - run: pnpm test
         working-directory: app
       - run: pnpm build
+        working-directory: app
+      # After the build on purpose: this one mounts dist/course.html, the artifact
+      # a student actually opens, not a component rendered in isolation.
+      - run: pnpm check-a11y
         working-directory: app
 
   compose-build:

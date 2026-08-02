@@ -1,12 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { goToSection, useActiveSection } from "./useActiveSection";
 
 export interface TocEntry {
   id: string;
   label: string;
 }
-
-/** The app's scroll container, per `App.tsx` — the window never scrolls. */
-const SCROLL_ROOT = "main-scroll";
 
 interface Thumb {
   /** Pixels within the rail's own track — the same space the entries occupy. */
@@ -34,56 +32,9 @@ interface Thumb {
  * measure or float over the text, and a table of contents is not worth either.
  */
 export function PhaseToc({ entries, accent }: { entries: TocEntry[]; accent: string }) {
-  const [active, setActive] = useState<string | null>(entries[0]?.id ?? null);
+  const active = useActiveSection(entries);
   const [thumb, setThumb] = useState<Thumb>({ top: 0, height: 0 });
   const listRef = useRef<HTMLUListElement>(null);
-
-  useEffect(() => {
-    const root = document.getElementById(SCROLL_ROOT);
-    if (!root) return;
-    const sections = entries
-      .map((entry) => document.getElementById(entry.id))
-      .filter((el): el is HTMLElement => el !== null);
-    if (sections.length === 0) return;
-
-    // A section becomes current when its heading reaches reading position — the top
-    // fifth of the viewport — rather than when it first peeks in from the bottom.
-    const BAND = 0.2;
-
-    const syncActive = () => {
-      const bandBottom = root.getBoundingClientRect().top + root.clientHeight * BAND;
-      let current: string | undefined;
-      for (const section of sections) {
-        if (section.getBoundingClientRect().top <= bandBottom) current = section.id;
-      }
-      // Before the first heading crosses, the first section is still what is being
-      // read; past the last one, `current` simply stops moving.
-      setActive(current ?? sections[0]?.id ?? null);
-    };
-
-    const observer = new IntersectionObserver(syncActive, {
-      root,
-      rootMargin: `0px 0px -${(1 - BAND) * 100}% 0px`,
-    });
-    for (const section of sections) observer.observe(section);
-
-    let frame = 0;
-    const onScroll = () => {
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        syncActive();
-      });
-    };
-
-    onScroll();
-    root.addEventListener("scroll", onScroll, { passive: true });
-    return () => {
-      observer.disconnect();
-      root.removeEventListener("scroll", onScroll);
-      if (frame) cancelAnimationFrame(frame);
-    };
-  }, [entries]);
 
   // Measured rather than computed: the thumb covers the active row, so it cannot
   // drift out of step with the highlight. Layout effect because it reads geometry —
@@ -108,7 +59,7 @@ export function PhaseToc({ entries, accent }: { entries: TocEntry[]; accent: str
 
   return (
     <nav aria-label="On this page" className="text-[11.5px]">
-      <div className="mb-2.5 font-mono text-[9.5px] uppercase tracking-[0.16em] text-graphite">
+      <div className="mb-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
         On this page
       </div>
       <div className="relative pl-3.5">
@@ -127,7 +78,7 @@ export function PhaseToc({ entries, accent }: { entries: TocEntry[]; accent: str
                   // Keeps the URL clean — the app has no hash routing, so a lingering
                   // fragment would only be a trap on reload.
                   event.preventDefault();
-                  document.getElementById(entry.id)?.scrollIntoView({ behavior: "smooth" });
+                  goToSection(entry.id);
                 }}
                 className="block leading-snug transition-colors"
                 style={

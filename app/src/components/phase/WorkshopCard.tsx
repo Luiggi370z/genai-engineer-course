@@ -11,8 +11,22 @@ interface WorkshopCardProps {
   accent: string;
 }
 
+const TIER = {
+  minimum: {
+    heading: "Minimum — the walking skeleton",
+    blurb:
+      "The smallest version that is really the thing. If this week is the week it does not fit, ship these and stop here; that is a stopping point, not quitting.",
+  },
+  full: {
+    heading: "Full — the version you show people",
+    blurb: "Everything above, plus the parts that make it defensible rather than demoable.",
+  },
+} as const;
+
 export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopCardProps) {
   const shipped = workshop.deliverables.filter((d) => progress[d.id]).length;
+  const minimum = workshop.deliverables.filter((d) => d.tier === "minimum");
+  const done = minimum.every((d) => progress[d.id]);
 
   return (
     <div className="mt-12">
@@ -35,32 +49,49 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
             <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[10.5px] text-white/90">
               {shipped}/{workshop.deliverables.length} deliverables
             </span>
+            {/* The milestone worth celebrating, and the one a flat progress bar hides. */}
+            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[10.5px] text-white/90">
+              {done
+                ? "minimum shipped"
+                : `minimum: ${minimum.filter((d) => progress[d.id]).length}/${minimum.length}`}
+            </span>
           </div>
         </div>
         <div className="bg-card px-5 py-4">
           <BlockList blocks={workshop.blocks} accent={accent} />
-          <div
-            className="mt-5 mb-2 font-mono text-[10.5px] uppercase tracking-[0.14em]"
-            style={{ color: accent }}
-          >
-            Acceptance criteria — check them off as you ship
-          </div>
-          <div className="divide-y divide-line/50 rounded-lg border border-line py-1">
-            {workshop.deliverables.map((d) => (
-              <CheckItem
-                key={d.id}
-                id={d.id}
-                text={d.text}
-                checked={!!progress[d.id]}
-                onToggle={onToggle}
-                accent={accent}
-              />
-            ))}
-          </div>
+          {(["minimum", "full"] as const).map((tier) => {
+            const items = workshop.deliverables.filter((d) => d.tier === tier);
+            if (!items.length) return null;
+            return (
+              <div key={tier}>
+                <div
+                  className="mt-5 font-mono text-[10.5px] uppercase tracking-[0.14em]"
+                  style={{ color: accent }}
+                >
+                  {TIER[tier].heading}
+                </div>
+                <p className="mt-1 mb-2 max-w-[68ch] text-[12.5px] leading-relaxed text-graphite">
+                  {TIER[tier].blurb}
+                </p>
+                <div className="divide-y divide-line/50 rounded-lg border border-line py-1">
+                  {items.map((d) => (
+                    <CheckItem
+                      key={d.id}
+                      id={d.id}
+                      text={d.text}
+                      checked={!!progress[d.id]}
+                      onToggle={onToggle}
+                      accent={accent}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
           {workshop.stretch && (
             <div className="mt-4">
               <div className="mb-2 font-mono text-[10.5px] uppercase tracking-[0.14em] text-graphite">
-                Stretch goals
+                Stretch — only if the full pass came easily
               </div>
               <ul className="space-y-1.5">
                 {workshop.stretch.map((goal, i) => (

@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The GenAI Engineer Workbook — interactive course app. Builds to a single self-contained course.html.",
+  "description": "The GenAI Engineer Workbook \u2014 interactive course app. Builds to a single self-contained course.html.",
   "packageManager": "pnpm@11.0.8",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && pnpm check-alignment && pnpm check-integrity && pnpm check-density && vite build",
+    "build": "tsc --noEmit && pnpm check-alignment && pnpm check-integrity && pnpm check-density && pnpm check-claims && vite build",
     "preview": "vite preview",
     "lint": "biome check src scripts",
     "format": "biome check --write src scripts",
@@ -18,7 +18,9 @@
     "check-alignment": "node scripts/check-alignment.mjs",
     "check-integrity": "node scripts/check-integrity.mjs",
     "check-density": "node scripts/check-density.mjs",
-    "ship": "pnpm build && mkdir -p ../dist && cp dist/course.html ../dist/course.html && cp ../release/README.md ../dist/README.md"
+    "check-a11y": "node scripts/check-a11y.mjs",
+    "verify": "pnpm build && pnpm test && pnpm check-a11y",
+    "check-claims": "node scripts/check-claims.mjs"
   },
   "dependencies": {
     "@hugeicons/core-free-icons": "^4.2.3",
@@ -32,7 +34,9 @@
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",
+    "axe-core": "^4.12.1",
     "esbuild": "^0.28.1",
+    "jsdom": "^30.0.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^8.2.0",

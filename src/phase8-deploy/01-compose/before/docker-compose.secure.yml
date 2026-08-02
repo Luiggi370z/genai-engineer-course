@@ -1,0 +1,33 @@
+# The SECURE profile, first draft — the overlay you would run when the stack is
+# reachable by anything other than you:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.secure.yml up --build
+#
+# Right now it is security theatre, and your checks in src/health.py must say so:
+#
+#   - the secret is committed        -> a default credential is a published credential
+#   - rate limit / concurrency are   -> a control that exists only as a comment
+#     commented out                     does not exist
+#   - the port is still on 0.0.0.0   -> "internal only" enforced by intent, not by
+#                                       the kernel
+#
+# Write TODO 7 and TODO 8 first, watch them fail on this file, then fix this file
+# until they pass. The reference overlay is in ../after/docker-compose.secure.yml.
+#
+# One trap worth meeting before it bites you: Compose MERGES sequences across
+# overlay files. Narrowing the binding to `127.0.0.1:8000:8000` here does not
+# replace the base file's `8000:8000`, it adds to it — the service tries to
+# publish both, the second bind loses the port to the first, and the whole
+# profile fails to start on a stack where nothing else wants port 8000. `ports:
+# !override` replaces the list. Every hardening overlay that narrows a list
+# rather than adding to one needs it.
+services:
+  assistant:
+    environment:
+      ASSISTANT_JWT_SECRET: dev-secret-change-me
+      ASSISTANT_JWT_AUDIENCE: assistant
+      # RATE_LIMIT_RPS: "5"
+      # RATE_LIMIT_BURST: "10"
+      # MAX_CONCURRENCY: "4"
+    ports:
+      - "8000:8000"

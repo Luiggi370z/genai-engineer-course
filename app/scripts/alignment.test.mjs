@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { audit, sieve } from "./lib/alignment.mjs";
+import { audit, LEVEL_OF, MASTERY_FLOOR, sieve } from "./lib/alignment.mjs";
 
 /**
  * A minimal phase that satisfies every rule; tests mutate one field at a time.
@@ -26,12 +26,21 @@ const aligned = (over = {}) => ({
   objectives: [{ id: "px-o1", text: "**Implement** the thing" }],
   concepts: [{ id: "px-c1", title: "The thing", teaches: ["px-o1"], blocks: [] }],
   exercises: [
-    { id: "px-e1", title: "Do it", task: "t", rung: "faded", assesses: ["px-o1"], solution: [] },
+    {
+      id: "px-e1",
+      title: "Do it",
+      task: "t",
+      rung: "faded",
+      proves: "implement",
+      assesses: ["px-o1"],
+      solution: [],
+    },
     {
       id: "px-e2",
       title: "From scratch",
       task: "t",
       rung: "independent",
+      proves: "implement",
       assesses: ["px-o1"],
       solution: [],
     },
@@ -41,6 +50,7 @@ const aligned = (over = {}) => ({
     title: "W",
     subtitle: "s",
     repo: "workshops/assistant",
+    proves: "implement",
     assesses: ["px-o1"],
     blocks: [],
     deliverables: [{ id: "px-w-d1", text: "d" }],
@@ -63,6 +73,7 @@ const at = (num, id, over = {}) =>
         title: "e",
         task: "t",
         rung: "faded",
+        proves: "implement",
         assesses: [`${id}-o1`],
         solution: [],
       },
@@ -71,6 +82,7 @@ const at = (num, id, over = {}) =>
         title: "b",
         task: "t",
         rung: "independent",
+        proves: "implement",
         assesses: [`${id}-o1`],
         solution: [],
       },
@@ -80,6 +92,7 @@ const at = (num, id, over = {}) =>
       title: "W",
       subtitle: "s",
       repo: "workshops/assistant",
+      proves: "implement",
       assesses: [`${id}-o1`],
       blocks: [],
       deliverables: [{ id: `${id}-w-d1`, text: "d" }],
@@ -104,7 +117,14 @@ test("an exercise testing an untaught skill fails — the whole point", () => {
       { id: "px-o2", text: "**Diagnose** the other thing" },
     ],
     exercises: [
-      { id: "px-e1", title: "Do it", task: "t", assesses: ["px-o1", "px-o2"], solution: [] },
+      {
+        id: "px-e1",
+        title: "Do it",
+        task: "t",
+        proves: "implement",
+        assesses: ["px-o1", "px-o2"],
+        solution: [],
+      },
     ],
   });
   const found = rules([phase]);
@@ -132,12 +152,21 @@ test("an understand-level objective may lean on the checkpoint instead", () => {
     ],
     concepts: [{ id: "px-c1", title: "c", teaches: ["px-o1", "px-o2"], blocks: [] }],
     exercises: [
-      { id: "px-e1", title: "e", task: "t", rung: "faded", assesses: ["px-o2"], solution: [] },
+      {
+        id: "px-e1",
+        title: "e",
+        task: "t",
+        rung: "faded",
+        proves: "implement",
+        assesses: ["px-o2"],
+        solution: [],
+      },
       {
         id: "px-e2",
         title: "b",
         task: "t",
         rung: "independent",
+        proves: "implement",
         assesses: ["px-o2"],
         solution: [],
       },
@@ -250,7 +279,15 @@ test("a phase without a workshop is flagged", () => {
 test("a phase whose hardest task still ships a scaffold is flagged", () => {
   const phase = aligned({
     exercises: [
-      { id: "px-e1", title: "e", task: "t", rung: "faded", assesses: ["px-o1"], solution: [] },
+      {
+        id: "px-e1",
+        title: "e",
+        task: "t",
+        rung: "faded",
+        proves: "implement",
+        assesses: ["px-o1"],
+        solution: [],
+      },
     ],
   });
   assert.ok(
@@ -267,6 +304,7 @@ test("an independent task may not hand back a reference implementation or a repo
         title: "e",
         task: "t",
         rung: "independent",
+        proves: "implement",
         assesses: ["px-o1"],
         solution: [],
         code: "print('here you go')",
@@ -282,6 +320,7 @@ test("an independent task may not hand back a reference implementation or a repo
         title: "e",
         task: "t",
         rung: "independent",
+        proves: "implement",
         repo: "workshops/assistant",
         assesses: ["px-o1"],
         solution: [],
@@ -337,6 +376,95 @@ test("three checks from one earlier phase is blocked practice, not interleaved",
     !mixed.includes("recall-spread"),
     "phase 2 is exempt — only phase 1 exists for it to draw from",
   );
+});
+
+/** One faded exercise assessing `px-o1`, at whatever mastery a test needs. */
+const provingTasks = (proves) => ({
+  exercises: [
+    {
+      id: "px-e1",
+      title: "e",
+      task: "t",
+      rung: "faded",
+      proves,
+      assesses: ["px-o1"],
+      solution: [],
+    },
+    {
+      id: "px-e2",
+      title: "b",
+      task: "t",
+      rung: "independent",
+      proves,
+      assesses: ["px-o1"],
+      solution: [],
+    },
+  ],
+  workshop: {
+    id: "px-w",
+    title: "W",
+    subtitle: "s",
+    repo: "workshops/assistant",
+    proves,
+    assesses: ["px-o1"],
+    blocks: [],
+    deliverables: [{ id: "px-w-d1", text: "d" }],
+  },
+});
+
+test("an objective promising more than its tasks prove fails the mastery floor", () => {
+  const overclaimed = aligned({
+    objectives: [{ id: "px-o1", text: "**Deploy** the thing to a real host" }],
+    ...provingTasks("implement"),
+  });
+  assert.ok(
+    rules([overclaimed]).includes("mastery-floor"),
+    '"Deploy" promises operate; a task that only proves implement does not get there',
+  );
+});
+
+test("a task above its objective's floor is fine — an objective is a minimum", () => {
+  const exceeded = aligned({
+    objectives: [{ id: "px-o1", text: "**Explain** the thing" }],
+    ...provingTasks("operate"),
+  });
+  assert.ok(
+    !rules([exceeded]).includes("mastery-floor"),
+    "a workshop routinely exceeds the objective it assesses; that is not a defect",
+  );
+});
+
+test("every ladder rung is ordered, so integrate does not satisfy operate", () => {
+  const near = aligned({
+    objectives: [{ id: "px-o1", text: "**Instrument** the thing" }],
+    ...provingTasks("integrate"),
+  });
+  assert.ok(rules([near]).includes("mastery-floor"), "one rung short is still short");
+
+  const met = aligned({
+    objectives: [{ id: "px-o1", text: "**Instrument** the thing" }],
+    ...provingTasks("operate"),
+  });
+  assert.deepEqual(rules([met]), []);
+});
+
+test("a task must declare a mastery level, and it must be a real one", () => {
+  const undeclared = aligned(provingTasks(undefined));
+  assert.ok(rules([undeclared]).includes("mastery-declared"));
+
+  const invented = aligned(provingTasks("mastered"));
+  assert.ok(
+    rules([invented]).includes("mastery-declared"),
+    "a level outside the ladder cannot be compared, so it cannot be trusted",
+  );
+});
+
+test("every Bloom verb has a mastery floor — an unclassified one must not pass silently", () => {
+  // The regression this guards: adding a verb to BLOOM and forgetting
+  // MASTERY_FLOOR would make every objective using it exempt from the gate.
+  for (const verb of LEVEL_OF.keys()) {
+    assert.ok(MASTERY_FLOOR[verb], `"${verb}" is in the Bloom vocabulary with no mastery floor`);
+  }
 });
 
 test("a known gap silences its own violation and nothing else", () => {

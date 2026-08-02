@@ -9,17 +9,25 @@ TestClient and no network.
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from assistant import auth
+from assistant import audit_log, auth, deadline, observe
+from assistant.observe import stage
+from assistant.provenance import build_version
 from assistant.resilience import ConcurrencyCap, TokenBucket
 from assistant.service import build_assistant
 from assistant.settings import Settings
+
+#: How often the disconnect watcher asks. Short enough that a long stream stops
+#: promptly, long enough that an idle connection is not a busy-loop.
+DISCONNECT_POLL_SECONDS = 0.25
 
 
 class AskBody(BaseModel):
@@ -27,7 +35,10 @@ class AskBody(BaseModel):
 
 
 class IngestBody(BaseModel):
-    docs: list[str]
+    # A document is prose, or prose with a name. The name is what a citation
+    # points at and what DELETE /corpus/{source} removes, so a caller that has
+    # one should be able to say it — and a caller that does not is not blocked.
+    docs: list[str | dict[str, str]]
 
 
 class ApproveBody(BaseModel):
@@ -68,19 +79,121 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     cap.leave()
         return await call_next(request)
 
+    @app.middleware("http")
+    async def trace_request(request: Request, call_next):
+        """One root span per HTTP request, and one id every layer shares.
+
+        The id comes from the caller when the caller has one (`X-Request-ID`,
+        which a gateway or the client's own logs will already know) and is
+        minted here otherwise. It goes on the span, into the ContextVar the
+        pipeline and audit log read, and back out as a response header — so a
+        user quoting an id from an error message resolves to a trace, an audit
+        row, and a log line without anyone joining on timestamps.
+
+        Ordering note, and it is the opposite of what registration order looks
+        like: Starlette inserts each middleware at the FRONT, so the last one
+        registered runs first. This is outside `throttle`, which means a shed
+        request still gets a span and an `x-request-id`. Worth keeping — "we are
+        returning 429s" is exactly the moment someone needs the trace, and a
+        rejection nobody can look up is a rejection nobody can explain.
+        """
+        with observe.request_scope(request.headers.get("x-request-id")) as rid, stage(
+            assistant.rec.tracer, observe.REQUEST_SPAN,
+            **{
+                observe.REQUEST_ID: rid,
+                observe.HTTP_METHOD: request.method,
+                observe.HTTP_ROUTE: request.url.path,
+            },
+        ) as span:
+            response = await call_next(request)
+            span.set_attribute(observe.HTTP_STATUS, response.status_code)
+            response.headers["x-request-id"] = rid
+            return response
+
+    @app.middleware("http")
+    async def bound_the_request(request: Request, call_next):
+        """One budget per request: a deadline, and a flag for "the caller left".
+
+        Both live here because this is the only layer that knows either fact —
+        the deadline is a property of the HTTP contract, and the disconnect is
+        an ASGI event. Everything below reads them through a ContextVar
+        (deadline.py) and stays synchronous.
+
+        The watcher is a task rather than a check because a disconnect arrives
+        as a message, not as a return value: `is_disconnected()` only becomes
+        true once something has awaited the receive channel. Polling it from a
+        sibling task is what lets a *synchronous* pipeline, running in the
+        threadpool, notice that nobody is listening any more.
+
+        The body is read here first, and that is not a stray optimisation. The
+        watcher reads from the same receive channel the route does, so a poll
+        that lands while the body is still in flight can take a body message and
+        drop it — an intermittently empty request, which is about the worst bug
+        shape there is. Reading first makes the middleware's request the owner of
+        the body (Starlette replays the cached copy downstream) and leaves the
+        channel with nothing on it but the disconnect the watcher is looking for.
+        """
+        await request.body()
+
+        left = asyncio.Event()
+
+        async def watch() -> None:
+            with contextlib.suppress(Exception):
+                while not await request.is_disconnected():
+                    await asyncio.sleep(DISCONNECT_POLL_SECONDS)
+                left.set()
+
+        watcher = asyncio.create_task(watch())
+        try:
+            with deadline.budget(s.request_deadline, cancelled=left.is_set):
+                return await call_next(request)
+        finally:
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
+
+    @app.exception_handler(deadline.Expired)
+    async def expired(request: Request, exc: deadline.Expired) -> JSONResponse:
+        """504 for a deadline, 499 for a disconnect.
+
+        The distinction is worth the extra branch. A 504 is an alert: the
+        service was too slow and somebody should look. A 499 (nginx's
+        "client closed request") is not — nobody is there to receive it, and
+        paging on it means paging every time a user closes a tab. Conflating
+        them is how a dashboard fills with incidents that are really just
+        people leaving."""
+        gone = exc.reason == "caller disconnected"
+        return JSONResponse({"detail": exc.reason}, status_code=499 if gone else 504)
+
+    policy = s.auth_policy()
+    # One JWKS cache for the process: the issuer's keys are fetched on first use
+    # and reused, so a busy service does not turn every request into a request
+    # to the identity provider.
+    keys = auth.JwksKeys(policy.jwks_url) if policy.jwks_url else None
+
     def require(scope: str) -> Callable[..., str]:
         """A FastAPI dependency enforcing the optional Bearer-JWT gate for one
-        scope. With auth off (no ASSISTANT_JWT_SECRET) it resolves to the
+        scope. With auth off (no secret and no JWKS URL) it resolves to the
         anonymous identity and never rejects — the zero-key demo path."""
 
         def dependency(request: Request) -> str:
-            ok, reason, subject = auth.identity_from(
-                request.headers.get("authorization", ""),
-                secret=s.jwt_secret, audience=s.jwt_audience, required_scope=scope,
-            )
-            if not ok:
-                raise HTTPException(status_code=401, detail=reason)
-            return subject
+            # Its own span: verification can be the slow part (a JWKS fetch on a
+            # cold cache is a network round trip), and a 401 that never reaches
+            # the pipeline is otherwise invisible in the trace.
+            with stage(
+                assistant.rec.tracer, observe.AUTH_SPAN,
+                **{observe.AUTH_MODE: assistant.tier()["auth"]},
+            ) as span:
+                ok, reason, subject = auth.identity_from(
+                    request.headers.get("authorization", ""),
+                    policy=policy, required_scope=scope, keys=keys,
+                )
+                span.set_attribute(observe.AUTH_OK, ok)
+                if not ok:
+                    span.set_attribute(observe.AUTH_REASON, reason)
+                    raise HTTPException(status_code=401, detail=reason)
+                span.set_attribute(observe.SUBJECT, subject)
+                return subject
 
         return dependency
 
@@ -88,19 +201,86 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def health() -> dict:
         # spans_recorded lets an end-to-end verifier confirm observability is live
         # from outside the process — the in-memory exporter is always attached.
+        #
+        # `version` is the commit baked into the image, and it is here so a deploy
+        # can be PROVEN rather than assumed: a rollout that half-finished leaves an
+        # old machine in the pool, and that machine is healthy, correct, and
+        # answering — it just isn't the code you shipped. Every other probe passes
+        # against it. This is the one that doesn't.
         return {
             "status": "degraded" if assistant.degraded else "ok",
+            "version": build_version(),
             "tier": assistant.tier(),
             "degraded": assistant.degraded,
             "spans_recorded": len(assistant.rec.spans()),
         }
 
+    def once(subject: str, operation_name: str, key: str | None, work) -> dict:
+        """Run a side effect at most once per (subject, operation, key).
+
+        Every mutating route goes through here, not just `/approve`. The
+        argument for extending it is the one that made `/approve` idempotent in
+        the first place: a client whose request timed out cannot tell whether
+        the server acted, so it will retry, and every unprotected mutation is a
+        double effect waiting for a slow network. `/ingest` without this is a
+        duplicated batch; `DELETE /corpus` without it is a source deleted twice,
+        the second time possibly after somebody re-added it.
+
+        Keys are namespaced by subject AND operation. They are client-chosen, so
+        one tenant's "retry-1" must not swallow another's — and the same tenant's
+        "retry-1" on `/ingest` must not swallow their "retry-1" on `/approve`.
+        """
+        namespaced = f"{subject}:{operation_name}:{key}" if key else None
+        result, replayed = assistant.idempotency.run(namespaced, work)
+        if replayed:
+            assistant.audit_log.record(
+                f"{operation_name}.replayed", subject, str(key),
+                result=audit_log.REPLAYED,
+            )
+            return dict(result) | {"replayed": True}
+        return result
+
     @app.post("/ingest")
     def ingest(
-        body: IngestBody, subject: str = Depends(require("assistant:ingest"))
+        body: IngestBody,
+        subject: str = Depends(require("assistant:ingest")),
+        idempotency_key: str | None = Header(default=None),
     ) -> dict:
-        # documents land in the CALLER's tenant — retrieval is scoped the same way
-        return {"ingested": assistant.rag.add(body.docs, tenant=subject)}
+        # Documents land in the CALLER's tenant — retrieval is scoped the same
+        # way — and are screened on the way IN, so a poisoned page is never
+        # written rather than merely never read. The response says how many were
+        # refused: a batch that silently loses half its rows is worse than one
+        # that fails.
+        return once(
+            subject, "ingest", idempotency_key,
+            lambda: assistant.ingest(list(body.docs), subject),
+        )
+
+    @app.delete("/corpus/{source}")
+    def forget(
+        source: str,
+        subject: str = Depends(require("assistant:ingest")),
+        idempotency_key: str | None = Header(default=None),
+    ) -> dict:
+        # Scoped to the caller's tenant by the same argument that scopes search:
+        # a delete that crossed tenants would be a denial-of-service with a REST
+        # interface. Requires the ingest scope, because the right to add a
+        # document and the right to withdraw it are the same right.
+        return once(
+            subject, "corpus.delete", idempotency_key,
+            lambda: assistant.forget(source, subject),
+        )
+
+    @app.get("/evidence/{chunk_id}")
+    def evidence(chunk_id: str, subject: str = Depends(require("assistant:ask"))) -> dict:
+        # What makes a citation checkable: the id printed in an answer resolves
+        # back to the exact text, source and revision that produced it. A 404 is
+        # a real answer here — the evidence is gone, and the reader should know
+        # that rather than be handed a plausible substitute.
+        found = assistant.evidence(chunk_id, subject)
+        if found is None:
+            raise HTTPException(status_code=404, detail="no such evidence")
+        return found
 
     @app.post("/ask")
     def ask(body: AskBody, subject: str = Depends(require("assistant:ask"))) -> dict:
@@ -118,26 +298,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/approve")
     def approve(
         body: ApproveBody,
-        request: Request,
         subject: str = Depends(require("assistant:approve")),
+        idempotency_key: str | None = Header(default=None),
     ) -> dict:
-        # A retried request (same Idempotency-Key) is acknowledged, not re-applied.
-        # The key is namespaced by subject: keys are client-chosen, and one tenant's
-        # "retry-1" must not silently swallow another tenant's approval.
-        key = request.headers.get("idempotency-key")
-        if key and assistant.idempotency.seen(f"{subject}:approve:{key}"):
-            assistant.audit_log.record("approval.replayed", subject, body.tool)
-            return {"approved": body.tool, "replayed": True}
-        # bound to the AUTHENTICATED subject, never to a subject in the body
-        grant = assistant.approvals.mint(subject, body.tool, body.args)
-        assistant.audit_log.record(
-            "approval.granted", subject, f"{body.tool} (approval {grant.approval_id})"
-        )
+        def mint() -> dict:
+            # bound to the AUTHENTICATED subject, never to a subject in the body
+            grant = assistant.approvals.mint(subject, body.tool, body.args)
+            assistant.audit_log.record(
+                "approval.granted", subject,
+                f"{body.tool} (approval {grant.approval_id})",
+                approval_id=grant.approval_id, args=body.args,
+            )
+            return {
+                "approved": body.tool,
+                "approval_id": grant.approval_id,
+                "args_hash": grant.args_hash,
+                "expires_at": grant.expires_at,
+            }
+
+        return once(subject, "approval", idempotency_key, mint)
+
+    @app.get("/outbox")
+    def outbox(subject: str = Depends(require("assistant:approve"))) -> dict:
+        """Irreversible effects this service started, and how they ended.
+
+        A `pending` row is the interesting one: the intent was committed and the
+        outcome never was, which means the process stopped mid-send. That is a
+        question for a human — "did this message go out?" — and it is a question
+        that can only be asked if somebody wrote the intent down first
+        (outbox.py). Automatic redelivery is deliberately absent: re-sending a
+        possibly-already-sent irreversible action is worse than asking."""
+        rows = assistant.outbox.entries(subject)
         return {
-            "approved": body.tool,
-            "approval_id": grant.approval_id,
-            "args_hash": grant.args_hash,
-            "expires_at": grant.expires_at,
+            "effects": [
+                {"tool": e.tool, "status": e.status, "at": e.at,
+                 "request_id": e.request_id, "detail": e.detail}
+                for e in rows
+            ],
+            "pending": sum(1 for e in rows if e.status == "pending"),
         }
 
     return app

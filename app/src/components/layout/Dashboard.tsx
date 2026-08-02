@@ -1,10 +1,11 @@
 import { dashboard } from "../../data/dashboard";
-import { milestones, myths, prerequisites } from "../../data/intro";
+import { milestones, myths, outOfScope, prerequisites } from "../../data/intro";
 import { phases } from "../../data/phases";
 import { InlineText } from "../../lib/markdown";
 import type { Progress } from "../../lib/progress";
 import { CheckItem } from "../ui/CheckItem";
 import { ProgressRing } from "../ui/ProgressRing";
+import { ManifestPanel } from "./ManifestPanel";
 
 interface DashboardProps {
   progress: Progress;
@@ -125,6 +126,34 @@ export function Dashboard({ progress, onToggle, onNav, phasePct, overallPct }: D
           ))}
         </div>
       </section>
+
+      <section className="mt-12">
+        <SectionLabel
+          kicker="Read this before Phase 1, not after Phase 9"
+          title="What this course does not teach"
+        />
+        <p className="mb-3 max-w-[68ch] text-[13px] leading-[1.7] text-ink/75">
+          This is a course about <strong>building systems on top of models</strong>. Everything
+          below is deliberately out of scope — none of it is needed for that job, and all of it is
+          needed for a different one. Saying so up front beats leaving you to infer the boundary
+          from an absence.
+        </p>
+        <div className="divide-y divide-line/60 rounded-lg border border-line bg-card">
+          {outOfScope.map((item) => (
+            <div key={item.topic} className="px-4 py-3">
+              <div className="text-[13px] font-semibold text-ink">{item.topic}</div>
+              <p className="mt-1 text-[12.5px] leading-[1.7] text-ink/75">
+                <InlineText text={item.why} />
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-graphite">
+                Start here instead: <InlineText text={item.next} />
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <ManifestPanel phases={phases} progress={progress} />
 
       <section className="mt-12">
         <SectionLabel kicker="Quick self-check before Phase 1" title="Prerequisites" />

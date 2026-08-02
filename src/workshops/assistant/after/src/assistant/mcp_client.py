@@ -19,8 +19,12 @@ def as_agent_tools(
 ) -> dict[str, Tool]:
     """Turn discovered MCP tool specs into agent Tools — no hand-coding per tool.
 
-    Each spec: {"name", "description", "requires_approval"?}. The invoker actually
-    calls the MCP server (call_tool) at runtime.
+    Each spec: {"name", "description", "requires_approval"?, "required_args"?}.
+    The invoker actually calls the MCP server (call_tool) at runtime.
+
+    `required_args` comes from the server's own input schema, which is what lets
+    planner.py treat a discovered tool exactly like a built-in one: it can tell
+    whether it is able to fill the call.
     """
     registry: dict[str, Tool] = {}
     for spec in discovered:
@@ -36,6 +40,7 @@ def as_agent_tools(
             fn=make(name),
             requires_approval=bool(spec.get("requires_approval", False)),
             doc=spec.get("description", ""),
+            required_args=tuple(spec.get("required_args", ())),
         )
     return registry
 

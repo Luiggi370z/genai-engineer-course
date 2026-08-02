@@ -6,6 +6,7 @@ import { DataTable } from "./DataTable";
 import { DeepDive } from "./DeepDive";
 import { FlowDiagram } from "./FlowDiagram";
 import { PredictBlock } from "./PredictBlock";
+import { SourceNote } from "./SourceNote";
 
 /**
  * The one place block kinds are dispatched. A `Block` variant without a case
@@ -53,6 +54,8 @@ export function BlockList({ blocks, accent }: { blocks: Block[]; accent: string 
             );
           case "table":
             return <DataTable key={i} headers={block.headers} rows={block.rows} accent={accent} />;
+          case "sources":
+            return <SourceNote key={i} verifiedOn={block.verifiedOn} items={block.items} />;
           case "callout":
             return <Callout key={i} tone={block.tone} title={block.title} text={block.text} />;
           case "deepdive":

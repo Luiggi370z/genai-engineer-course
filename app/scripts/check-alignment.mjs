@@ -18,7 +18,7 @@
  * The rules live in `lib/alignment.mjs` and are unit-tested in `alignment.test.mjs`.
  */
 import process from "node:process";
-import { audit, leadVerb, sieve } from "./lib/alignment.mjs";
+import { audit, leadVerb, MASTERY, MASTERY_FLOOR, RANK, sieve } from "./lib/alignment.mjs";
 import { loadCourseData } from "./lib/load-data.mjs";
 
 /**
@@ -44,6 +44,10 @@ console.log(
   `Pedagogy    · ${counts.blanks} blank-editor tasks · ${counts.recall} recall checks · ` +
     `${counts.predicts} predict-first prompts`,
 );
+console.log(
+  `Mastery     · ${counts.operates} task(s) reach "operate" — the only rung that ` +
+    "produces evidence somebody else would accept",
+);
 
 if (process.argv.includes("--report")) {
   for (const phase of phases) {
@@ -53,8 +57,19 @@ if (process.argv.includes("--report")) {
       const tasks = [...phase.exercises, ...(phase.workshop ? [phase.workshop] : [])]
         .filter((e) => e.assesses?.includes(o.id))
         .map((e) => e.id);
+      const verb = leadVerb(o.text) ?? "?";
+      const floor = MASTERY_FLOOR[verb] ?? "?";
+      const reached =
+        tasks
+          .map((id) =>
+            [...phase.exercises, ...(phase.workshop ? [phase.workshop] : [])].find(
+              (t) => t.id === id,
+            ),
+          )
+          .reduce((best, t) => Math.max(best, RANK.get(t?.proves) ?? -1), -1) ?? -1;
       console.log(
-        `    ${o.id.padEnd(13)} ${(leadVerb(o.text) ?? "?").padEnd(13)} ` +
+        `    ${o.id.padEnd(13)} ${verb.padEnd(13)} needs ${floor.padEnd(10)} ` +
+          `reaches ${(MASTERY[reached] ?? "—").padEnd(10)} ` +
           `taught by ${cards.join(", ") || "—"} · tested by ${tasks.join(", ") || "—"}`,
       );
     }

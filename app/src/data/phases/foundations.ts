@@ -1,6 +1,14 @@
 // Generated from the shipped course bundle by scripts/extract-data.mjs.
 // Edit freely from here on — this file is the source of truth for the content.
 
+import {
+  claim,
+  HARDWARE_VERIFIED,
+  hardwareRows,
+  sourceNote,
+  VENDORS,
+  vendorRows,
+} from "../reference";
 import type { PhaseContent } from "../types";
 
 export const foundations: PhaseContent = {
@@ -47,22 +55,9 @@ export const foundations: PhaseContent = {
         {
           kind: "table",
           headers: ["Vendor", "Flagship", "Daily default", "Budget tier"],
-          rows: [
-            [
-              "Anthropic",
-              "Opus 4.8 · $5/$25 (Fable 5 above it)",
-              "Sonnet 4.6 · $3/$15",
-              "Haiku 4.5 · $1/$5",
-            ],
-            ["OpenAI", "GPT-5.5 · $5/$30", "GPT-5.2 · $1.75/$14", "GPT-5.4 mini/nano"],
-            [
-              "Google",
-              "Gemini 3.1 Pro · $2/$12 (3.5 Pro not GA yet)",
-              "Gemini 3.5 Flash · $1.50/$9",
-              "3.1 Flash-Lite · $0.25/$1.50",
-            ],
-          ],
+          rows: vendorRows(),
         },
+        { kind: "sources", ...sourceNote(VENDORS) },
         {
           kind: "p",
           text: "And a fourth player that’s actually you: **open-weight models** — Gemma 4, Qwen 3.5/3.6, gpt-oss, Llama 4 — running on your own machine for **$0 per token**. What fits depends on your RAM; the sizing table in the next card covers everything from an 8GB laptop to a workstation (and the zero-GPU path too).",
@@ -88,35 +83,9 @@ export const foundations: PhaseContent = {
         {
           kind: "table",
           headers: ["Your machine (RAM)", "What runs well (Ollama tags)", "What it unlocks"],
-          rows: [
-            ["~8 GB", "gemma4:e2b · nomic-embed-text", "Light chat, embeddings, learning the APIs"],
-            [
-              "16 GB",
-              "qwen3.5:9b · gemma4:e4b · gpt-oss:20b",
-              "The whole course locally: routing, agents, guard models",
-            ],
-            [
-              "24 GB (or a 24GB GPU)",
-              "+ qwen3.6:27b · gemma4:31b (Q4)",
-              "Best local coding + generalist quality on consumer hardware",
-            ],
-            [
-              "32–64 GB",
-              "+ qwen3-coder 30B-A3B (the MLX-on-Mac favorite)",
-              "Agentic coding, bigger contexts, a free local eval judge",
-            ],
-            [
-              "64 GB+ / 80GB GPU",
-              "+ qwen3-coder-next · gpt-oss:120b",
-              "Open frontier-class reasoning and coding",
-            ],
-            [
-              "No GPU / older laptop",
-              "Hosted budget tiers or Ollama cloud models",
-              "Same code, same lessons — just a different base_url",
-            ],
-          ],
+          rows: hardwareRows(),
         },
+        { kind: "sources", ...sourceNote([HARDWARE_VERIFIED]) },
         {
           kind: "p",
           text: "Rule of thumb: a model’s Q4 download size ≈ the RAM it needs, plus a few GB of headroom for context. And the RAG essentials — **BGE-M3 embeddings + BGE-reranker-v2** — run on nearly anything, so a fully local retrieval stack is possible at 16 GB.",
@@ -348,6 +317,7 @@ ticket = client.chat.completions.create(
             "Sampling cheat sheet: `temperature` 0–0.2 for extraction and tools, 0.7+ for brainstorming. Tune temperature **or** top_p — never both.",
           ],
         },
+        { kind: "sources", ...sourceNote([claim("tokenizer-drift"), claim("cache-discount")]) },
         {
           kind: "code",
           title: "Count before, measure after",
@@ -621,6 +591,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       title: "Build the universal client",
       repo: "phase1-foundations/01-universal-client",
       rung: "faded",
+      proves: "implement",
       task: "Make complete(prompt, provider) work across Anthropic, OpenAI, Google and Ollama (MLX too if you’re on a Mac). Normalize streaming and tool-call shapes. Start from the template in the companion repo.",
       assesses: ["p1-o1"],
       solution: [
@@ -634,6 +605,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       title: "Build a cost meter (count before, measure after)",
       repo: "phase1-foundations/02-token-cost-meter",
       rung: "faded",
+      proves: "integrate",
       task: "Pre-flight: count a big prompt with Anthropic’s free count_tokens endpoint AND with tiktoken, and record how far apart they are. Post-flight: write cost(model, usage) that reads the response’s usage object (including cached tokens) and logs dollars per request. Wire it into your universal client.",
       assesses: ["p1-o2"],
       solution: [
@@ -647,6 +619,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       title: "Extraction shoot-out: cloud vs laptop",
       repo: "phase1-foundations/03-structured-extraction",
       rung: "faded",
+      proves: "integrate",
       task: "Pull {vendor, date, total} from 20 messy invoices using structured outputs on (a) a frontier model and (b) qwen3.5:9b locally. Compare schema-violation and field-accuracy rates.",
       assesses: ["p1-o4"],
       solution: [
@@ -659,6 +632,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       title: "Chunk a real document",
       repo: "phase1-foundations/04-chunking",
       rung: "faded",
+      proves: "implement",
       task: "Implement two splitters over the provided handbook: fixed-size (~512 tokens, 15% overlap) and heading-aware (split on markdown structure, then size-cap). Print the worst chunk from each — the one that makes least sense alone — and say why.",
       assesses: ["p1-o3"],
       solution: [
@@ -671,6 +645,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       title: "Embed, index, search — a mini vector store",
       repo: "phase1-foundations/05-embed-index",
       rung: "faded",
+      proves: "implement",
       task: "Embed your chunks with a local model (nomic-embed-text via Ollama’s OpenAI-compatible endpoint), build an in-memory index with numpy, and write search(query, k) returning the top-k chunks by cosine. Then ask it something phrased with completely different words than the text.",
       assesses: ["p1-o3"],
       solution: [
@@ -683,6 +658,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       id: "p1-e6",
       title: "Blank editor: rebuild the pipeline from memory",
       rung: "independent",
+      proves: "integrate",
       task: "Empty directory, `uv init`, one file. From memory — no scrolling back, no `after/` open in another tab — write: a `complete(prompt, provider)` that reaches at least two providers, a `cost(model, usage)` that reads real usage, a chunker, an embedder, and `search(query, k)`. Then answer one question about a document you paste in, and print what the answer cost. Give yourself 90 minutes and keep whatever you produce, however ugly.",
       assesses: ["p1-o1", "p1-o2", "p1-o3"],
       solution: [
@@ -700,6 +676,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
     subtitle:
       "A CLI that runs one real task across every provider and reports tokens, cost and latency side by side — ranked on the number that actually decides the purchase.",
     repo: "workshops/model-bench",
+    proves: "integrate",
     assesses: ["p1-o1", "p1-o2", "p1-o4"],
     blocks: [
       {
@@ -753,30 +730,37 @@ def cost_per_success(self) -> float:
       {
         id: "w-bench-d1",
         text: "A provider is a **config entry, not a code path** — the runner is injected, and the fast test tier benches four candidates with zero network",
+        tier: "minimum",
       },
       {
         id: "w-bench-d2",
         text: "Every row reports **tokens, cost and latency**, with cost computed from the response’s `usage` and never from a pre-flight estimate",
+        tier: "minimum",
       },
       {
         id: "w-bench-d3",
         text: "Each reply is **validated against a schema**, so the row reports a success rate instead of assuming the call worked",
+        tier: "full",
       },
       {
         id: "w-bench-d4",
         text: "Ranking is by **cost per successful parse** — and a test proves the half-price model that fails three in four is the worse buy",
+        tier: "full",
       },
       {
         id: "w-bench-d5",
         text: "A provider that errors or times out becomes a **row with an error**, never a crashed run — one dead vendor can’t hide the other three",
+        tier: "full",
       },
       {
         id: "w-bench-d6",
         text: "`--json` emits the same numbers as the table, so today’s bench can be **diffed against last month’s**",
+        tier: "full",
       },
       {
         id: "w-bench-d7",
         text: "The integration tier runs the identical bench against a **real local model** and reports what it actually costs and how often it holds the schema",
+        tier: "full",
       },
     ],
     stretch: [
@@ -790,31 +774,37 @@ def cost_per_success(self) -> float:
       id: "p1-q1",
       q: "Why are structured outputs better than parsing prose with regex — and how do they differ from tool calling?",
       a: "Constrained decoding guarantees the output matches your schema, so parse failures basically vanish and the schema lives in code. Tool calling is the model requesting an **action** from your code; structured outputs shape the **final answer**. Actions vs data.",
+      demands: ["alternatives", "constraints"],
     },
     {
       id: "p1-q2",
       q: "Your RAG answers feel vague and generic. Name three Phase-1 suspects before blaming the model.",
       a: "(1) Retrieval is fetching irrelevant chunks. (2) The prompt never forces grounding (“answer only from context” missing). (3) The window is overstuffed and the good chunk is lost in the middle. Check those before paying for a bigger model.",
+      demands: ["evidence", "failure-modes"],
     },
     {
       id: "p1-q3",
       q: "When is a 1M-token window NOT the fix for a retrieval problem?",
       a: "Nearly always at scale: context rot degrades accuracy, cost and latency grow with every token, and your corpus won’t fit anyway. Retrieval picks the right tokens; a big window just tolerates more wrong ones.",
+      demands: ["alternatives", "constraints", "failure-modes"],
     },
     {
       id: "p1-q4",
       q: "When does a local model beat a hosted one — and what’s the trade?",
       a: "Privacy/data residency, offline work, zero-cost dev loops and bulk batch jobs. You trade away the quality ceiling, big windows, and tool-calling reliability — and you become the ops team.",
+      demands: ["alternatives", "constraints"],
     },
     {
       id: "p1-q5",
       q: "Why is the response’s usage object the source of truth for cost, rather than any pre-flight estimate?",
       a: "Estimates drift: tokenizers differ per vendor (tiktoken undercounts Claude 15–20%), tokenizers change between model versions, caching discounts what you actually pay, and reasoning tokens are invisible before the call but billed as output. usage reports what the vendor actually charged — meter it per request and build dashboards on that.",
+      demands: ["evidence", "failure-modes"],
     },
     {
       id: "p1-q6",
       q: "You added prompt caching to an agent that re-reads the same 6,000-token tool manual every turn, but `cache_read_input_tokens` is always 0. What did you almost certainly do wrong?",
       a: "Something **before** the cache point changes every call. The cache key is the exact token prefix from the start of the request, so a timestamp, a session id, a turn counter or a shuffled tool list sitting in the system prompt invalidates everything after it. Fix: stable content first (tool docs, examples, retrieved document), volatile content last (the user’s turn). Also check the prefix clears the minimum — 1,024 tokens on Sonnet, 4,096 on Opus and Haiku — and that the gap between calls is inside the 5-minute TTL.",
+      demands: ["constraints", "evidence", "failure-modes"],
     },
   ],
   resources: [

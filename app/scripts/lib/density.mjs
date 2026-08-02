@@ -68,6 +68,9 @@ const PROSE_OF = {
   predict: (block) => [block.prompt],
   code: () => [],
   deepdive: () => [],
+  // Chrome, not reading. Counting citation lines against a card's prose budget
+  // would make citing a source cost you words you could have spent teaching.
+  sources: () => [],
 };
 
 /** Every block kind this walk has an opinion about, derived from the table itself. */
@@ -124,11 +127,16 @@ export function audit({ phases }) {
           `${prose} chars of visible prose, over the ${LIMITS.cardProse} cap — move the tail into a deep dive or cut it`,
         );
       }
-      if (owner.blocks.length > LIMITS.cardBlocks) {
+      // Citations do not count against the cap. The budget exists to stop a card
+      // carrying three ideas, and a source line is not an idea — charging for one
+      // would make citing a number cost you a paragraph, which is a strange thing
+      // for a workbook about evidence to price that way.
+      const counted = owner.blocks.filter((b) => b.kind !== "sources");
+      if (counted.length > LIMITS.cardBlocks) {
         fail(
           "card-blocks",
           owner.id,
-          `${owner.blocks.length} visible blocks, over the ${LIMITS.cardBlocks} cap — this is two cards wearing a trenchcoat`,
+          `${counted.length} visible blocks, over the ${LIMITS.cardBlocks} cap — this is two cards wearing a trenchcoat`,
         );
       }
 

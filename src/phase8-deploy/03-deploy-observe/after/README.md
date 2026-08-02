@@ -15,6 +15,32 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel   # Langf
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006/v1/traces              # local Phoenix
 ```
 
+## The release lane
+
+`observe.py` answers "is it healthy?". `release.py` answers the four questions
+around it, and `deploy/` is the plumbing that asks them — a Fly.io reference,
+executable, gated behind `DEPLOY_LANE=fly`, and **not live-provisioned**: nothing
+here has run against a paid account.
+
+| the question | the code | the 2am failure it closes |
+|---|---|---|
+| What exactly is running? | `image_ref`, `is_immutable` | You roll back to `latest` and get the code you rolled back *from* — the tag moved with you |
+| Where do the secrets live? | `render_manifest`, `leaked_secrets` | A key pasted into a manifest is in git history forever; rotating it is the only remedy |
+| Did it actually work? | `smoke`, `passed` | A half-finished rollout leaves an old machine in the pool: healthy, correct, answering, and not your code |
+| Can we undo it? | `decide` | There is nothing immutable behind you, and the script "rolls back" to a tag that does not move |
+| What if the data is gone? | `backup`, `verify_backup`, `prune` | `cp` of a live SQLite file is a torn copy, and you find out at restore time |
+
+The split is the part to internalise: `deploy/release.sh` owns four `flyctl`
+commands and *no judgement at all*. Every decision is a call into `release.py`,
+where it is unit tested — because shell is where logic goes to never be tested,
+and an untested rollback trigger fires for the first time during an incident.
+
+One probe deserves singling out. `/health` reports the commit baked into the image
+(`ARG GIT_SHA`, read back by `provenance.build_version`), and the smoke check
+compares it to the SHA just deployed. Without that comparison the nastiest deploy
+failure is invisible, because the machine still serving last week's code passes
+every other check you have — it is a working service, just not the one you shipped.
+
 Deploy notes: secrets via the platform's secret manager (never the image), a `/health`
 endpoint, keep the previous image for one-click rollback, and turn ON the MCP server's
 auth (Phase 7) the moment it is remote.

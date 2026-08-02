@@ -21,7 +21,7 @@ FAITHFULNESS_BAR = 0.85
 CONTEXT_RECALL_BAR = 0.80
 
 
-def local_judge(model: str = "qwen3.6:27b"):
+def local_judge(model: str = "qwen3-coder:30b"):
     raise NotImplementedError  # TODO 1
 
 

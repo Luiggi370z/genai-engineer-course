@@ -45,9 +45,12 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-2">
             <span className="font-mono text-[11px] text-graphite">EX.{index + 1}</span>
-            <h4 className={`text-[14px] font-semibold ${done ? "text-graphite" : "text-ink"}`}>
+            {/* h3, matching the concept cards: the section above is an h2, and a
+                document that jumps h2 → h4 tells a reader navigating by heading
+                that they missed a level. */}
+            <h3 className={`text-[14px] font-semibold ${done ? "text-graphite" : "text-ink"}`}>
               {exercise.title}
-            </h4>
+            </h3>
             <span
               className="rounded px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide"
               style={
@@ -60,6 +63,16 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
               }
             >
               {blank ? "blank editor" : "faded"}
+            </span>
+            {/* Two different claims, so two different chips. The one above says
+                how much scaffolding was removed; this one says what finishing
+                actually demonstrates — a blank-editor task can still only prove
+                you can build in isolation. */}
+            <span
+              className="rounded border border-line px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-graphite"
+              title="What finishing this demonstrates: understand → implement → integrate → operate"
+            >
+              proves {exercise.proves}
             </span>
           </div>
           <p className="mt-1 text-[13px] leading-[1.65] text-ink/75">

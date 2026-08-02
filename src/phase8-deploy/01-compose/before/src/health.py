@@ -22,6 +22,11 @@ def health() -> dict:
 
 
 def load_services(compose_path: str | Path) -> dict:
+    # TODO 9: `safe_load` raises on `!override` and `!reset`, compose's two merge
+    # tags — and you will need `!override` in the secure overlay (see TODO 7).
+    # Teach a SafeLoader subclass about both rather than dropping to `yaml.load`
+    # with the default loader: a reviewer that executes arbitrary tags in a file
+    # it was handed to review is its own security lesson.
     data = yaml.safe_load(Path(compose_path).read_text())
     return data.get("services") or {}
 
@@ -52,6 +57,43 @@ def weak_dependencies(services: dict) -> list[str]:
 
 def published_ports(services: dict) -> dict[str, list]:
     """TODO 5: {service: ports} for every service that publishes onto the host."""
+    raise NotImplementedError
+
+
+# The base file is a zero-key local demo. The secure overlay is what makes the
+# stack safe to expose, so it gets reviewed too — and by the same rule: a control
+# that is only present as a commented-out line is not present.
+REQUIRED_SECURE_ENV = ("ASSISTANT_JWT_SECRET", "RATE_LIMIT_RPS", "MAX_CONCURRENCY")
+
+
+def merged_service(base_path: str | Path, overlay_path: str | Path, name: str) -> dict:
+    """TODO 7: one service as compose would see it with the overlay applied.
+
+    Mappings merge key-by-key, so `environment` behaves the way you expect.
+    Sequences do NOT: compose CONCATENATES them across files. Model that, however
+    much it feels like a bug — because the whole point of this function is to tell
+    you what will actually run, and "overlay keys win" is a comfortable model that
+    would have you sign off on a profile that cannot start.
+
+    Then look at docker-compose.secure.yml with that rule in mind. Narrowing
+    `8000:8000` to `127.0.0.1:8000:8000` publishes both; the wildcard bind takes
+    the port, the loopback bind fails, and the HARDENED profile is the only one
+    that will not boot — reported as "address already in use" on a port nothing
+    else in the stack wants. `!override` replaces the list; `!reset` removes it.
+    """
+    raise NotImplementedError
+
+
+def secure_overlay_problems(base_path: str | Path, overlay_path: str | Path) -> list[str]:
+    """TODO 8: what the secure profile must actually turn on. Every name in
+    REQUIRED_SECURE_ENV set on the merged assistant; ASSISTANT_JWT_SECRET read from
+    the environment (`${...}`) rather than hard-coded; every published port bound
+    to loopback; and no container port published twice, which is the signature of
+    an overlay that appended where it meant to replace. Give that last one its own
+    message — the symptom is nothing like the cause, and a reviewer that only says
+    "publishes 0.0.0.0:8000" sends the reader to the wrong file.
+
+    Then fix docker-compose.secure.yml until this returns []."""
     raise NotImplementedError
 
 

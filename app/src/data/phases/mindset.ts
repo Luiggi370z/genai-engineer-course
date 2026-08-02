@@ -1,6 +1,7 @@
 // Generated from the shipped course bundle by scripts/extract-data.mjs.
 // Edit freely from here on — this file is the source of truth for the content.
 
+import { claim, sourceNote } from "../reference";
 import type { PhaseContent } from "../types";
 
 export const mindset: PhaseContent = {
@@ -176,6 +177,7 @@ export const mindset: PhaseContent = {
             "**Present numbers precisely, cite them, and date them** — salary data ages in months. Re-check the sources above before an interview loop; quoting a stale number precisely is worse than quoting a range honestly.",
           ],
         },
+        { kind: "sources", ...sourceNote([claim("salary-premium"), claim("salary-bands")]) },
       ],
     },
   ],
@@ -189,6 +191,7 @@ export const mindset: PhaseContent = {
       title: "Daily reps",
       repo: "phase9-mindset/drill-deck",
       rung: "faded",
+      proves: "understand",
       task: "Five questions from the bank, out loud, no notes, self-graded. Every day. The bank doubles as your drill deck.",
       assesses: ["p7-o2"],
       solution: [
@@ -200,6 +203,7 @@ export const mindset: PhaseContent = {
       title: "The metric-mining pass",
       repo: "phase9-mindset/resume",
       rung: "faded",
+      proves: "implement",
       task: "Extract every number from your four workshop READMEs into resume bullets. Delete any bullet that survives without a number.",
       assesses: ["p7-o3"],
       solution: [
@@ -211,6 +215,7 @@ export const mindset: PhaseContent = {
       title: "Instrument the funnel",
       repo: "phase9-mindset/funnel-tracker",
       rung: "faded",
+      proves: "integrate",
       task: "Set up the 4-stage tracker. After 20 applications, name your leaking stage and apply exactly one fix.",
       assesses: ["p7-o4"],
       solution: [
@@ -221,6 +226,7 @@ export const mindset: PhaseContent = {
       id: "p7-e4",
       title: "Blank editor: write your own next twelve weeks",
       rung: "independent",
+      proves: "understand",
       task: "Blank page, no template, no example to imitate. Write the learning system you will actually run after this course ends: the sources you will read weekly and why those, the standing weekly slot where you build something small, how a claim gets verified before you repeat it, and the specific trigger that tells you a habit has lapsed. Then, on the same page, write your funnel’s four numbers as they stand today — even if three of them are zero — and name the one stage you will work on next and the one fix you will apply. One page. Date it, and put a review date on it.",
       assesses: ["p7-o1", "p7-o4"],
       solution: [
@@ -239,6 +245,7 @@ export const mindset: PhaseContent = {
     subtitle:
       "The only workshop with no code, because the artifact is a habit: a scored design mock, a metrics sheet that traces every claim to a file, and a funnel with a fix attached.",
     repo: "workshops/interview-loop",
+    proves: "understand",
     assesses: ["p7-o1", "p7-o2", "p7-o3", "p7-o4"],
     needs: ["p4-o1", "p4-o2", "p6-o5"],
     blocks: [
@@ -282,34 +289,42 @@ export const mindset: PhaseContent = {
       {
         id: "w-interview-d1",
         text: "A **written weekly schedule** — drill, mock and metrics slots on specific days, each attached to a trigger that already happens",
+        tier: "minimum",
       },
       {
         id: "w-interview-d2",
         text: "A **spaced-repetition list with real entries**, proving you drilled long enough to fumble something twice",
+        tier: "full",
       },
       {
         id: "w-interview-d3",
         text: "**Three recorded design mocks**, each scored on the 8-step rubric, with the scores trending upward",
+        tier: "minimum",
       },
       {
         id: "w-interview-d4",
         text: "Every rubric row scoring 0 or 1 has a **named drill and a date**, so a weakness becomes a task rather than an observation",
+        tier: "full",
       },
       {
         id: "w-interview-d5",
         text: "A **metrics sheet where every claim traces to a file**, test or trace in your own repos — and anything that can’t is deleted",
+        tier: "full",
       },
       {
         id: "w-interview-d6",
         text: "A **resume with a number in every bullet**, mined from that sheet; nothing survives without one",
+        tier: "minimum",
       },
       {
         id: "w-interview-d7",
         text: "The **funnel with 20+ applications behind it**, the leaking stage named, and exactly one fix applied and dated",
+        tier: "full",
       },
       {
         id: "w-interview-d8",
         text: "A **learning system that outlives the course**: what you skim weekly, the personal eval set you keep growing, what you build in public — plus the review date",
+        tier: "full",
       },
     ],
     stretch: [
@@ -324,16 +339,19 @@ export const mindset: PhaseContent = {
       id: "p7-q1",
       q: 'How do you answer "how do you keep up with a field moving this fast?"',
       a: "Show a system, not heroics: changelogs and the MCP spec skimmed weekly, a growing personal eval set that turns each new model into a ten-minute experiment, and building in public. The verify-everything, benchmark-on-your-own-data stance is the real answer.",
+      demands: ["constraints", "evidence"],
     },
     {
       id: "p7-q2",
       q: "Your search is stalling. How do you diagnose it like a pipeline?",
       a: "Treat it as a funnel and find the failing stage: applications→screens (fix resume/targeting), screens→technicals (fix story/basics), technicals→onsites (drill the bank + mocks), onsites→offers (design round + behaviorals). Fix one stage, re-measure. Rejection is a metric, not a verdict.",
+      demands: ["evidence", "failure-modes"],
     },
     {
       id: "p7-q3",
       q: "What turns a resume bullet from noise into signal?",
       a: 'A verifiable number. "Built a RAG chatbot" is noise; "RAG service, faithfulness 0.92, p95 480ms, eval-gated CI" is signal — and every such number already exists in your workshop READMEs.',
+      demands: ["alternatives", "evidence"],
     },
   ],
   qbank: [
@@ -418,7 +436,7 @@ export const mindset: PhaseContent = {
         {
           id: "qb-13",
           q: "MCP vs plain tool calling?",
-          a: "MCP adds runtime discovery, standard transports, and sessions on top of tool calling — write the server once, any compliant client uses it. stdio locally, Streamable HTTP remotely.",
+          a: "MCP adds runtime discovery and standard transports on top of tool calling — write the server once, any compliant client uses it. In-memory in tests, stdio locally, Streamable HTTP remotely. Since the 2026-07-28 spec it is stateless request/response, so the five beats still describe what a client does but nothing is held open between them.",
         },
         {
           id: "qb-14",

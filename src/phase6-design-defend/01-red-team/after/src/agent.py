@@ -19,6 +19,12 @@ class Result:
     leaked_pii: bool = False
     blocked_reason: str = ""
     audit: list[str] = field(default_factory=list)
+    #: how many untrusted items arrived, and how many L1 refused to pass on.
+    #: Counted rather than inferred, because "the attack was contained" and
+    #: "the attack was detected" are different claims and a suite that only
+    #: checks the first cannot notice the detector rotting.
+    screened_untrusted: int = 0
+    dropped_untrusted: int = 0
 
 
 # least privilege: the agent literally has no "forward email" tool.
@@ -41,9 +47,25 @@ def guarded_run(
         return r
 
     # untrusted content arrives on TWO channels — retrieved documents and tool
-    # output (a fetched page, an email body). Both are spotlighted, never trusted
-    # as instructions; neither can approve anything.
-    untrusted = list(retrieved) + list(tool_outputs or [])
+    # output (a fetched page, an email body). Both go through the SAME L1 screen
+    # as the user's message, because "we only screen what the user typed" is how
+    # a poisoned page walks in through a door nobody was watching. An item that
+    # fails is dropped, not sanitised: there is no safe residue of an
+    # instruction, and half of one is not evidence either.
+    arriving = list(retrieved) + list(tool_outputs or [])
+    r.screened_untrusted = len(arriving)
+    untrusted = []
+    for item in arriving:
+        item_ok, _ = layer1(str(item))
+        if item_ok:
+            untrusted.append(item)
+        else:
+            r.dropped_untrusted += 1
+            r.audit.append("untrusted item dropped: injection")
+
+    # ...and whatever survives is still DATA. Spotlighting is what stops a clean
+    # -looking document from being read as an instruction; dropping is what stops
+    # the dirty ones from getting that far. Neither replaces the other.
     safe_ctx = [spotlight(c) for c in untrusted]
 
     # simulate the model deciding to act. Even if injected text in the untrusted

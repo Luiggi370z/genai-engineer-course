@@ -15,7 +15,14 @@
 # SIGKILL.
 services:
   assistant:
-    build: ../../../workshops/assistant/after
+    build:
+      context: ../../../workshops/assistant/after
+      # Bakes the commit into the image so `/health` can report which code is
+      # actually serving. A post-deploy smoke check compares it to the SHA it
+      # just shipped — see phase8-deploy/03-deploy-observe/deploy/release.sh.
+      # Defaults to `dev` outside CI, which is honest rather than wrong.
+      args:
+        GIT_SHA: ${GIT_SHA:-dev}
     restart: unless-stopped
     mem_limit: 1g
     cpus: 1.0
@@ -36,6 +43,11 @@ services:
       # RATE_LIMIT_RPS: "5"
       # RATE_LIMIT_BURST: "10"
       # MAX_CONCURRENCY: "4"
+      # One deadline for the whole request, which every layer's timeout fits
+      # inside. Off here so a cold local model's first token is not a 504; the
+      # secure overlay turns it on, because there an unbounded request holds a
+      # worker until somebody restarts the container.
+      # REQUEST_DEADLINE_SECONDS: "120"
     volumes:
       - assistant-data:/data # memory survives a container restart — that is the point
     ports:

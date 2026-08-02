@@ -5,16 +5,27 @@ message: documents coming back from retrieval, and content coming back from
 read-only tools (including tools discovered over MCP). Both are classic
 indirect-injection paths, so both are run through the same L1 guardrails
 screen as user input before they become evidence.
+
+"The same screen" is enforced by passing it in rather than by everyone importing
+the same function: when `ASSISTANT_GUARD_MODEL` adds a model-in-the-loop second
+opinion (`guard.py`), it has to apply to every channel or it applies to none —
+and a filter that only covers the channel the user types into is the channel an
+attacker will not use.
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from assistant import guardrails
-from assistant.tools import Tool
+from assistant.guardrails import Screen
+from assistant.rag import Chunk
+from assistant.tools import Tool, rewrap
 
 
-def harden_registry(registry: dict[str, Tool]) -> dict[str, Tool]:
+def harden_registry(
+    registry: dict[str, Tool], screen: Screen = guardrails.screen
+) -> dict[str, Tool]:
     """Re-screen the OUTPUT of every read-only tool. A fetched email or web page is
     exactly where an indirect injection arrives, so its content is run back through
     the same L1 screen as user input; an irreversible tool is left to the agent's
@@ -25,22 +36,38 @@ def harden_registry(registry: dict[str, Tool]) -> dict[str, Tool]:
             return tool  # gated by HITL, not by content screening
 
         def guarded(*args: Any, **kwargs: Any) -> Any:
-            ok, cleaned = guardrails.screen(str(tool.fn(*args, **kwargs)))
+            ok, cleaned = screen(str(tool.fn(*args, **kwargs)))
             return {"content": cleaned} if ok else {"blocked": cleaned}
 
-        return Tool(tool.name, guarded, tool.requires_approval, tool.doc)
+        return rewrap(tool, guarded)
 
     return {name: wrap(tool) for name, tool in registry.items()}
 
 
-def screen_contexts(docs: list[str]) -> list[str]:
+def screen_contexts(docs: list[str], screen: Screen = guardrails.screen) -> list[str]:
     """Retrieved documents are the classic indirect-injection channel — a poisoned
     page lands in the corpus, retrieval hands it straight to the composer. Every
     document is re-screened before it becomes evidence: an injection-bearing doc
     is DROPPED from the context entirely, PII in a clean one is redacted."""
     kept = []
     for doc in docs:
-        ok, cleaned = guardrails.screen(str(doc))
+        ok, cleaned = screen(str(doc))
         if ok:
             kept.append(cleaned)
+    return kept
+
+
+def screen_chunks(chunks: list[Chunk], screen: Screen = guardrails.screen) -> list[Chunk]:
+    """The same gate, over retrieved chunks, keeping their provenance.
+
+    A redaction rewrites the text and nothing else: the source, version and
+    offsets still describe where the text came from, so a citation on a redacted
+    chunk points at the real document rather than at an anonymous fragment. The
+    offsets now describe the ORIGINAL span, which is the honest reading — this is
+    that part of that document, with something removed."""
+    kept = []
+    for chunk in chunks:
+        ok, cleaned = screen(chunk.text)
+        if ok:
+            kept.append(replace(chunk, text=cleaned))
     return kept

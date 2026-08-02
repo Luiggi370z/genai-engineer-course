@@ -28,16 +28,36 @@ to build *this kind* of software.
 You do not need a machine-learning background. Vectors, cosine similarity and a feel for
 probability are plenty; there is no maths derivation anywhere in here.
 
+**Scope — what this course does not teach.** It is about *building systems on top of
+models*. Six areas are deliberately out of scope, and knowing that now beats inferring
+it from an absence in week seventeen:
+
+| Not covered | Why not | Where to go instead |
+|---|---|---|
+| Transformer mathematics and model architecture | You will use attention daily and never implement it. A model here is a component with a latency, a price and a failure mode — the right abstraction for building on one, the wrong one for changing one | Karpathy's *Let's build GPT*, *The Illustrated Transformer* |
+| Pretraining and distributed training | Nothing here trains a base model. Trillion-token pipelines, sharding, and keeping a thousand GPUs busy are a specialty with their own hiring loop | The Llama and OLMo technical reports; the *Ultra-Scale Playbook* |
+| Fine-tuning and alignment research | The electives cover *when* to fine-tune and how LoRA fits a workflow — not RLHF, DPO, reward modelling, or what alignment means. The default here is that retrieval and prompting solve most of what people fine-tune to fix | The InstructGPT and DPO papers; the HF alignment handbook |
+| GPU kernels, quantization, serving at scale | You will run local models and reason about tokens per second and RAM. You will not write CUDA or tune a vLLM cluster; the elective *runs* vLLM, it does not operate it under load | The vLLM and FlashAttention papers; llama.cpp quantization docs |
+| Multimodal depth | Vision and audio appear as electives and as capabilities you call, not as things you train or evaluate deeply | The CLIP and Whisper papers |
+| Research methodology | You learn to measure a system you built — not to design a study, pick a defensible baseline, or reason about significance across seeds | *How to Read a Paper* (Keshav), then reproduce one result end to end |
+
+None of the above is a prerequisite for this job. All of it is a prerequisite for a
+different one, and if that is the job you want, the right-hand column is a better use of
+your next eighteen weeks than this workbook.
+
 **Hardware.** Four honest tiers — pick yours and nothing you *learn* changes:
 
+<!-- canonical:hardware -->
 | Tier | What runs | What to know |
 |------|-----------|--------------|
 | Any machine | Every lesson's fast test suite (`make test`) | Offline, deterministic, no models, no keys — the whole course can be *completed* here |
-| 16 GB RAM | The course's working models locally: `qwen3.5:9b`, `gemma4:e4b`, embeddings, guard models | The recommended local path. The 30B eval judge does **not** fit here — swap in a smaller judge or a hosted one |
-| 32 GB RAM | + `qwen3-coder:30b` as a free local Phase 3 judge | The comfortable path; bigger judges are measurably better |
+| 16 GB | The course's working models locally: `qwen3.5:9b`, `gemma4:e4b`, embeddings, guard models | The recommended local path. The 30B eval judge does **not** fit here — swap in a smaller judge or a hosted one |
+| 32–64 GB | + `qwen3-coder:30b` as a free local Phase 3 judge | The comfortable path; bigger judges are measurably better |
 | No GPU / older laptop | Everything, against a hosted budget tier by changing one `base_url` | Needs an account, an API key, and network; costs real (small) money |
+<!-- /canonical:hardware -->
 
-Phase 1 carries the full sizing table.
+Phase 1 carries the full sizing table, and both come from one place:
+`app/src/data/reference.ts`. `pnpm check-claims` fails if this copy drifts from it.
 
 **Money.** The fast test tier of every lesson runs **offline with zero API keys** — that
 is a design constraint of this course, not an accident. Running models locally is free.
@@ -73,10 +93,22 @@ Phase 6 guardrails) are worth pulling when you reach those phases rather than no
 
 The workbook is a build output, not a file in this repo. If you cloned instead of
 downloading the release, build it yourself — that needs Node, which nothing else in
-the course does: `cd app && pnpm install && pnpm ship` writes `dist/course.html`.
+the course does: `cd app && pnpm install`, then `./package.sh` from the repo root.
+That builds all three artifacts from one commit and stamps `dist/BUILD.json` with it;
+`./verify-dist.sh` — which CI runs on every push — is what catches a `dist/` nobody
+rebuilt.
 
 Your progress in `course.html` is saved in the browser's `localStorage`, so tick things
-off as you go — but keep in mind it lives in that one browser on that one machine.
+off as you go — but keep in mind it lives in that one browser on that one machine. Three
+buttons at the bottom of the sidebar are your insurance against that: **Export** writes a
+small JSON file, **Import** reads one back on another machine, and **Reset** clears
+everything after a confirmation. Export before you clear a cache, change laptops, or try
+a different browser; nothing else in the workbook can recover a wiped `localStorage`.
+
+The dashboard also has a **completion manifest**: it reconciles what you have ticked with
+`evidence/manifest.json` from `make evidence`, and writes a `COMPLETION.md` that says
+which of the two it is. Ticked boxes alone come out as *self-reported* — deliberately, and
+no amount of ticking changes that.
 
 ---
 
@@ -84,8 +116,14 @@ off as you go — but keep in mind it lives in that one browser on that one mach
 
 Every exercise ships twice. **`before/`** is a runnable scaffold with the judgement
 removed and `TODO`s where your work goes; its tests fail on purpose, and turning them
-green is the exercise. **`after/`** is a working reference — open it when you are stuck,
-not before, because reading a solution feels exactly like understanding one.
+green is the exercise. **`after/`** is a working reference.
+
+**Attempt before you read.** The order is the method, not a suggestion: write your
+attempt, run the tests, and open `after/` only once your version passes or you are
+genuinely stuck — then diff it against what you wrote, because the diff is where the
+lesson is. Reading a working solution feels like learning and mostly is not. The
+struggle you skip is the part that makes it stick, and once you have read a solution
+you can no longer tell, from the inside, whether you could have written it.
 
 That pairing is the whole pedagogical spine: each phase moves you along a **worked →
 faded → independent** ladder, and every phase ends with at least one task that hands you
@@ -165,7 +203,7 @@ fortnight. Those are very different numbers and the course is careful never to b
   the single `course.html`, with three gates (alignment, integrity, density) that
   content has to pass before it can ship.
 - **[`release/`](release/README.md)** — what goes in the release next to the workbook.
-  Currently the student-facing README that `pnpm ship` copies into `dist/`.
+  Currently the student-facing README that `./package.sh` copies into `dist/`.
 
 ## License
 

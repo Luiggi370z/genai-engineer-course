@@ -1,7 +1,7 @@
 // Generated from the shipped course bundle by scripts/extract-data.mjs.
 // Edit freely from here on — this file is the source of truth for the content.
 
-import type { Milestone, Myth, Prerequisite } from "./types";
+import type { Milestone, Myth, OutOfScope, Prerequisite } from "./types";
 
 export const prerequisites: Prerequisite[] = [
   {
@@ -55,6 +55,47 @@ export const myths: Myth[] = [
   {
     title: "What the chart forgot entirely",
     text: "Security and **guardrails** (prompt injection is OWASP’s #1 LLM risk), an **evaluation habit** (golden sets in CI), **local models** (Ollama/MLX), and knowing when to fine-tune vs retrieve. All four are woven through this course.",
+  },
+];
+
+/**
+ * The scope, stated as an exclusion list. A syllabus that only says what it
+ * covers leaves the reader to infer the boundary from an absence, which is how
+ * someone finishes nine phases still believing they were taught how models are
+ * made. This course is about *building systems on top of* models; none of the
+ * below is a prerequisite for that, and all of it is a prerequisite for a
+ * different job.
+ */
+export const outOfScope: OutOfScope[] = [
+  {
+    topic: "Transformer mathematics and model architecture",
+    why: "You will use attention every day and never implement it. The course treats a model as a component with a latency, a price and a failure mode — which is the correct abstraction for building on one, and the wrong one for changing one.",
+    next: "Karpathy’s *Let’s build GPT* and *The Illustrated Transformer*, then Bishop or the Goodfellow book if you want the maths underneath.",
+  },
+  {
+    topic: "Pretraining and distributed training",
+    why: "Nothing here trains a base model. Data pipelines at the trillion-token scale, sharding strategies, and the systems work of keeping a thousand GPUs busy are a specialty with its own hiring loop.",
+    next: "The Llama and OLMo technical reports, then the *Ultra-Scale Playbook* for the parallelism.",
+  },
+  {
+    topic: "Fine-tuning and alignment research",
+    why: "The electives shelf covers when to fine-tune and how LoRA fits a workflow. It does not cover RLHF, DPO, reward modelling or the research on what alignment even means — and the honest default in this course is that retrieval and prompting solve most of what people reach for fine-tuning to fix.",
+    next: "The InstructGPT and DPO papers, then the Hugging Face alignment handbook for the practice.",
+  },
+  {
+    topic: "GPU inference kernels, quantization and serving at scale",
+    why: "You will run local models through Ollama and reason about tokens per second and RAM. You will not write CUDA, implement paged attention, or tune a vLLM cluster. The elective goes as far as *running* vLLM, not operating it under load.",
+    next: "The vLLM and FlashAttention papers, and the llama.cpp quantization docs for what the GGUF suffixes actually mean.",
+  },
+  {
+    topic: "Multimodal depth",
+    why: "Vision and audio appear as electives and as capabilities you call. Training a VLM, building a speech pipeline, or the evaluation problems specific to generated images are each their own course.",
+    next: "The CLIP and Whisper papers; for production voice, start from latency budgets rather than model choice.",
+  },
+  {
+    topic: "Research methodology",
+    why: "This course teaches you to measure a system you built. It does not teach you to design a study, choose a baseline that survives review, or reason about statistical significance across seeds — the skills that separate an engineer’s benchmark from a paper’s.",
+    next: "*How to Read a Paper* (Keshav), then reproduce one result end to end; the gap between the paper and your rerun is the lesson.",
   },
 ];
 

@@ -10,7 +10,7 @@ open straight from disk: no server, no network (fonts aside), progress in
 pnpm install
 pnpm dev            # dev server with HMR
 pnpm build          # -> dist/course.html (single file, JS + CSS inlined)
-pnpm ship           # build, then copy the bundle + ../release/README.md into ../dist/
+pnpm verify         # build, then the unit tests, then the a11y gate on the artifact
 pnpm lint           # biome (lint + format check)
 pnpm format         # biome --write
 pnpm typecheck      # tsc --noEmit
@@ -18,13 +18,20 @@ pnpm test           # node --test: every gate rule, each proved to fire
 pnpm check-alignment          # does the phase teach what it tests
 pnpm check-integrity          # is the data well-formed
 pnpm check-density            # can a human read it
+pnpm check-claims             # do the perishable numbers still agree with each other
+pnpm check-a11y               # axe + a keyboard journey through the built page
 pnpm check-parity --bundle path/to/course.html   # src/data == a reference bundle
 node scripts/screenshot.mjs   # every block kind, light and dark (see below)
 ```
 
-All three checkers take `--report` to print their measurements rather than just a
-verdict. `pnpm build` runs all three before Vite, so content that is unaligned,
-malformed or unreadable cannot reach a bundle.
+Releases are cut from the repo root, not from here: `../package.sh` builds the workbook,
+cuts the source zip from HEAD and stamps `dist/BUILD.json` with the commit, so all three
+artifacts a student receives come from one place.
+
+Every checker takes `--report` to print its measurements rather than just a verdict.
+`pnpm build` runs the first four before Vite, so content that is unaligned, malformed,
+unreadable or contradicted by its own sources cannot reach a bundle. `check-a11y` runs
+after, because it mounts the bundle it is checking.
 
 ## Stack
 
@@ -99,12 +106,35 @@ anything at *apply* or above needs an artifact the student builds, while
 enforces the worked → faded → independent ladder, and that a prerequisite always
 comes from an earlier phase.
 
+**Mastery — does the assessment reach the level the verb promises?** Every
+exercise and workshop declares `proves: understand | implement | integrate |
+operate`, and each objective verb carries a floor in `MASTERY_FLOOR`. An
+objective reading "**Deploy** to a real host" whose only assessment proves
+`implement` fails the build — that is the course promising a level it never asks
+for. Two details are load-bearing. The floor is keyed by **verb, not Bloom
+level**, because the axes come apart at the top: "design out loud" is Bloom's
+*create* and produces an argument, so demanding a deploy for a whiteboard
+exercise would be the gate being wrong in a way that teaches authors to game it.
+And a verb missing from `MASTERY_FLOOR` is itself a failure, since an
+unclassified verb would exempt every objective using it — a gate with a silent
+pass is not a gate. Exceeding a floor is fine and common: an objective is a
+minimum, not a ceiling.
+
 **Integrity — is the data well-formed?** Id uniqueness (ids are `localStorage`
 progress keys, so a duplicate silently ties two checkboxes together), ids prefixed
 by the phase they live in, `repo:` paths that exist on disk, rectangular tables,
 resource urls a browser will actually follow, and content that is not empty behind
 a satisfied type. It walks the q-bank, the prerequisites and the electives, which
 the alignment gate never had reason to visit.
+
+It also enforces the **checkpoint rubric.** Each spoken checkpoint declares which of
+`alternatives`, `constraints`, `evidence` and `failure-modes` its answer has to name,
+shown to the student *before* the answer opens — a bar you meet afterwards is one you
+grade yourself against. Two elements minimum per question, because one is an
+explanation rather than a defense; all four across each phase's set, because the
+element candidates omit is `failure-modes`, and a phase that never asks for it is a
+phase where the omission gets practised. Not four per question: a rubric that reads
+the same on every card stops being read by the third one.
 
 **Density — can a human read it?** Caps on paragraph length, visible prose and
 blocks per card, with deep dives as the pressure valve and their own limits so

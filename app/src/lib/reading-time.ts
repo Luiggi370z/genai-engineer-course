@@ -51,6 +51,10 @@ function proseOf(block: Block): string[] {
       return [block.prompt];
     case "code":
     case "deepdive":
+    // A citation line is chrome, not reading: nobody budgets time for the URLs
+    // under a table, and counting them would inflate every phase that cites
+    // properly — a tax on doing the right thing.
+    case "sources":
       return [];
   }
 }

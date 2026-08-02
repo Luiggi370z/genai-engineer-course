@@ -15,6 +15,12 @@ FROM python:3.12-slim-bookworm
 WORKDIR /app
 COPY --from=build /app/.venv /app/.venv
 COPY src/ src/
+# Which commit is inside this image, baked in because there is no .git here to
+# ask later. `/health` reports it, and a post-deploy smoke check compares it to
+# the SHA it just shipped — the only probe that catches a half-finished rollout
+# still serving an old, perfectly healthy machine.
+ARG GIT_SHA=dev
+ENV GIT_SHA=${GIT_SHA}
 ENV PATH="/app/.venv/bin:$PATH" PYTHONPATH=/app/src
 EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=3s --retries=12 \

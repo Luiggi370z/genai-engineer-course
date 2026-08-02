@@ -16,6 +16,10 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pyright]
 typeCheckingMode = "basic"
+# oauth/ is a browser-driven script that imports the capstone package off sys.path
+# at runtime. It is not part of this lesson's checked surface; the flow it calls is
+# type-checked and unit-tested where it lives, in workshops/assistant.
+exclude = ["oauth", "**/__pycache__", "**/.venv"]
 
 [dependency-groups]
 dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]

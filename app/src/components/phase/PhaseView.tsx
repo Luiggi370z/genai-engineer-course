@@ -14,6 +14,7 @@ import { ExerciseCard } from "./ExerciseCard";
 import { LadderRail } from "./LadderRail";
 import { PhaseToc, type TocEntry } from "./PhaseToc";
 import { QuestionCard } from "./QuestionCard";
+import { SectionBar } from "./SectionBar";
 import { WorkshopCard } from "./WorkshopCard";
 
 interface PhaseViewProps {
@@ -103,7 +104,28 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
               <InlineText text={phase.tldr} />
             </p>
           </div>
+          {/*
+            Repeated on every phase rather than said once on the dashboard, because
+            it is not information — it is an instruction, and the moment it applies
+            is the moment you open a lesson with a reference implementation sitting
+            one directory away.
+          */}
+          <p className="mt-3 max-w-[68ch] text-[12.5px] leading-[1.65] text-graphite">
+            <span className="font-medium text-ink/75">Attempt before you read.</span> Every lesson
+            ships a <code className="font-mono text-[11.5px]">before/</code> you write and an{" "}
+            <code className="font-mono text-[11.5px]">after/</code> that already works. Open the
+            reference only once your own attempt runs or you are genuinely stuck, and diff it
+            against what you wrote. Reading a working solution feels like learning and mostly is
+            not: the struggle you skip is the part that makes it stick, and a solution you have read
+            is indistinguishable, to you, from one you could have written.
+          </p>
         </header>
+
+        {/* The sticky rail's counterpart below `xl`, where the rail is hidden. Placed
+            after the header rather than above it: a navigator is only useful once you
+            know what you are navigating, and the first thing on a phase should be its
+            title. */}
+        <SectionBar entries={entries} accent={accent} />
 
         <SectionHeading
           id="objectives"
@@ -250,6 +272,12 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
               title="Checkpoint"
               accent={accent}
             />
+            <p className="mb-3 max-w-[68ch] text-[13px] leading-[1.7] text-graphite">
+              Each question lists what a complete answer has to name. That is the line between
+              describing a system and defending one: what else you could have built, what ruled the
+              others out, what measurement says it worked, and where it breaks. The last is the one
+              nearly everyone leaves out, which is why it is printed rather than hoped for.
+            </p>
             <div className="space-y-2.5">
               {phase.checkpoint.map((q) => (
                 <QuestionCard
@@ -362,9 +390,12 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
         </div>
       </div>
 
-      <aside className="sticky top-2 hidden h-fit w-[190px] shrink-0 self-start pt-2 xl:block">
+      {/* A plain div, not an `aside`: the sidebar is already a complementary
+          landmark, and two unnamed ones read identically to a screen reader
+          listing regions. The `nav` inside carries the label that matters. */}
+      <div className="sticky top-2 hidden h-fit w-[190px] shrink-0 self-start pt-2 xl:block">
         <PhaseToc entries={entries} accent={accent} />
-      </aside>
+      </div>
     </div>
   );
 }

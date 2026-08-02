@@ -437,6 +437,7 @@ def test_forget_actually_forgets(store: MemoryStore):
       title: "Four memory types behind one interface",
       repo: "phase5-memory/01-memory-types",
       rung: "faded",
+      proves: "implement",
       task: "Implement `write`, `recall` and `forget` over four namespaces on the retrieval stack you already know. Then prove the types stay separated: a procedural recipe must never come back as the answer to a semantic question about the user, and a forgotten fact must be gone — not merely outranked.",
       assesses: ["p-memory-o1"],
       needs: ["p2-o1"],
@@ -476,6 +477,7 @@ def test_procedural_memory_never_answers_a_semantic_question(store):
       title: "Spend the window on purpose",
       repo: "phase5-memory/02-context-engineering",
       rung: "faded",
+      proves: "implement",
       task: "Build a context assembler with a hard token budget and the four moves: pin the constraints, compress old turns, evict superseded facts, park the bulk. Then plant a poisoned fact in a transcript and show you can trace it to its source and remove it.",
       assesses: ["p-memory-o2", "p-memory-o3"],
       solution: [
@@ -510,6 +512,7 @@ def test_compression_preserves_every_hard_fact():
       title: "A crew that earns its keep (medium)",
       repo: "phase5-memory/03-supervisor-crew",
       rung: "faded",
+      proves: "integrate",
       task: "Build a supervisor that delegates to two workers with tiered models, and account for cost per node. Run the same task list single-tier and tiered, then report the cost delta with quality held constant. Add the trajectory assertion that the supervisor actually delegated instead of doing the work itself.",
       assesses: ["p-memory-o4"],
       needs: ["p1-o2", "p3-o5"],
@@ -539,6 +542,7 @@ def test_a_worker_failure_does_not_sink_the_run():
       title: "Rent two implementations, keep your interface",
       repo: "phase5-memory/04-memory-frameworks",
       rung: "faded",
+      proves: "integrate",
       task: "Implement your `MemoryStore` protocol twice — once on Mem0, once on LangMem — and run one shared contract suite against both plus an offline fake. Then write the one-paragraph adoption verdict: which you would ship, and what would make you change your mind.",
       assesses: ["p-memory-o1", "p-memory-o5"],
       solution: [
@@ -571,6 +575,7 @@ class LangMemStore:                    # langmem over a LangGraph store
       id: "p-memory-e5",
       title: "Blank editor: a token budget you cannot cheat",
       rung: "independent",
+      proves: "implement",
       task: "Empty directory, no scaffold. Write `fit(messages, budget)` from nothing: it takes a long transcript and a hard token limit and returns what actually goes in the window, applying keep, compress, evict and park in that order. Count real tokens, not characters. Then write the test that matters — feed it a transcript containing three facts you know are load-bearing, squeeze the budget until compression has to fire, and assert all three survive. Finish by printing tokens used, lines parked, and which move dropped what.",
       assesses: ["p-memory-o2", "p-memory-o3"],
       needs: ["p1-o2"],
@@ -589,26 +594,31 @@ class LangMemStore:                    # langmem over a LangGraph store
       id: "p-memory-q1",
       q: "Your agent confidently tells a user something that was true last quarter. Which memory type failed, and what was missing?",
       a: "Semantic memory — the durable facts store. What was missing is an expiry and a correction path: the fact was written with no `expires_at`, so nothing ever retired it, and when the user supplied the new value the old row was outranked rather than deleted. Provenance is the other half; without a source on the claim you cannot find the row that caused the answer. Facts that change on their own belong behind a live tool call, not in memory.",
+      demands: ["evidence", "failure-modes"],
     },
     {
       id: "p-memory-q2",
       q: "You have 8k tokens of context budget and 30k of potentially relevant material. Walk through your decision.",
       a: "Pin first: the task and the hard constraints, and if those alone blow the budget, that is a design bug to fix now. Then rank the rest by relevance and fill what fits, skipping anything that does not rather than truncating it mid-fact. Compress finished turns into a summary you have tested for fact survival. Evict anything a newer fact supersedes. Park the bulk in the store and recall on demand. Then log tokens used and lines parked, because long-run rot shows up in that log long before it shows up in an answer.",
+      demands: ["alternatives", "constraints", "evidence"],
     },
     {
       id: "p-memory-q3",
       q: "Why is “add a summarizer” not a safe answer to a full context window?",
       a: "Because compression is a lossy write that launders guesses into statements. A summary can drop the one constraint that mattered, and it can absorb a hallucinated or misread detail and hand it to every later step as established fact — that is context poisoning, and it compounds. Treat the summarizer as a component with tests: feed it a transcript with known hard facts and assert they survive, and keep the source on each line so a poisoned claim stays traceable and deletable.",
+      demands: ["evidence", "failure-modes"],
     },
     {
       id: "p-memory-q4",
       q: "When is a supervisor-plus-workers design the wrong call?",
       a: "Whenever you cannot name what it buys. Splitting the job splits the context: workers miss what the supervisor never passed, results contradict each other, and no single trace explains the outcome. The default is one agent with a better toolbox; a crew earns its complexity only for genuinely parallel sub-tasks, a job too large for one window, or a step that wants a different model tier. And if you do split, assert delegation actually happens — a supervisor doing the work itself passes every output check while wasting the whole design.",
+      demands: ["alternatives", "constraints", "failure-modes"],
     },
     {
       id: "p-memory-q5",
       q: "An interviewer asks whether you would use MCP or A2A for your agents. What is the right answer?",
       a: "That they answer different questions. MCP connects an agent to a capability — tools, resources, prompts — and is the right port for anything your agent should be able to do. A2A hands a whole task to another agent that has its own loop and models, and pays off when that agent belongs to a team or vendor you do not control. For your own crew, delegate in process: a function call is cheaper, faster, and keeps one debuggable trace. Expose your capabilities over MCP, and reach for A2A the day the other side stops being yours.",
+      demands: ["alternatives", "constraints"],
     },
   ],
   workshop: {
@@ -617,6 +627,7 @@ class LangMemStore:                    # langmem over a LangGraph store
     subtitle:
       "Give the assistant a memory it can invalidate, a context budget it respects, and a research crew it delegates to — with the cost written down.",
     repo: "workshops/assistant",
+    proves: "integrate",
     assesses: ["p-memory-o1", "p-memory-o2", "p-memory-o3", "p-memory-o4"],
     needs: ["p3-o2", "p-evals-o5"],
     blocks: [
@@ -672,26 +683,32 @@ def delegate(task: str, workers: dict[str, Worker], route: Router) -> CrewRun:
       {
         id: "w-memory-d1",
         text: "Memory writes carry a **source and a TTL**, and `forget` makes a fact unrecallable — proven by a test, not by inspection",
+        tier: "minimum",
       },
       {
         id: "w-memory-d2",
         text: "The assistant recalls a fact you told it in a **previous session** and cites where it learned it",
+        tier: "minimum",
       },
       {
         id: "w-memory-d3",
         text: "Context assembly respects a **hard token budget**, pins the guardrails, and logs tokens used vs. parked",
+        tier: "full",
       },
       {
         id: "w-memory-d4",
         text: "A **corrected** fact replaces the old one — the stale row is deleted, not merely outranked",
+        tier: "full",
       },
       {
         id: "w-memory-d5",
         text: "A supervisor delegates research to **tiered workers**; a test asserts the delegation actually happened",
+        tier: "full",
       },
       {
         id: "w-memory-d6",
         text: "`make eval` reports **cost per run alongside the quality score**, single-tier vs. tiered, on the Phase-3 suite",
+        tier: "full",
       },
     ],
     stretch: [

@@ -22,8 +22,26 @@ def test_health_reports_the_offline_tier():
         "rag": "in-memory", "memory": "in-process", "brain": "rule-based",
         "tools": "builtin", "otlp": "in-memory-only",
         "auth": "off", "connectors": "stubs", "stream": "safe-buffered",
+        "guard": "regex-only",
     }
     assert body["spans_recorded"] == 0  # nothing has run yet
+
+
+def test_health_says_which_commit_is_serving(monkeypatch):
+    """The probe a post-deploy smoke check actually needs. A rollout that
+    half-finishes leaves an old machine in the pool — healthy, correct, and
+    answering the wrong code. Every other check passes against it."""
+    monkeypatch.setenv("GIT_SHA", "9f2c1ab34de5f6789012345678901234567890ab")
+    assert client().get("/health").json()["version"] == "9f2c1ab34de5"
+
+
+def test_health_never_fails_over_a_missing_version_stamp(monkeypatch):
+    """Outside a repo and outside an image there is no SHA to report. `dev` is
+    the honest answer; a version stamp that can take down the health endpoint is
+    worse than no version stamp."""
+    monkeypatch.delenv("GIT_SHA", raising=False)
+    monkeypatch.setenv("PATH", "")  # no git binary to fall back to
+    assert client().get("/health").json()["version"] == "dev"
 
 
 def test_asking_leaves_a_trace_a_verifier_can_see():
@@ -42,13 +60,17 @@ def test_a_grounded_question_is_answered_from_ingested_docs():
 
 def test_a_grounded_answer_carries_structured_citations():
     c = client()
-    c.post("/ingest", json={"docs": ["approved refunds are processed within five business days"]})
+    c.post("/ingest", json={"docs": [{"text": "approved refunds are processed within"
+                                              " five business days", "source": "refunds.md"}]})
     body = c.post("/ask", json={"question": "how long do refunds take"}).json()
     assert body["citations"], "a grounded answer must cite its evidence"
     first = body["citations"][0]
     assert first["id"] == "c1"
     assert "refunds" in first["snippet"]
-    assert first["source"] == "rag"
+    # the DOCUMENT, not the machine that found it: "source: rag" is unfalsifiable
+    assert first["source"] == "refunds.md"
+    assert first["version"], "a citation without a revision goes stale silently"
+    assert first["offsets"] == [0, len("approved refunds are processed within five business days")]
 
 
 def test_an_unanswerable_question_abstains_instead_of_inventing():

@@ -463,11 +463,13 @@ def gate(scores: dict[str, float], baseline: dict[str, float]) -> list[str]:
       title: "Build a golden set you can defend",
       repo: "phase3-evals/01-golden-set",
       rung: "faded",
-      task: "Take the corpus behind your Workshop-2 RAG service and write 50 golden rows across the five slices — including the unanswerable ones. Then write the *dataset* tests: no near-duplicates, no verbatim leakage from a chunk, every slice populated, every row carrying its provenance.",
+      proves: "implement",
+      task: "Take the corpus behind your Workshop-2 RAG service and write golden rows across the five slices — including the unanswerable ones — in three sittings of **10, 25 and 50**, scoring at each. Then write the *dataset* tests: no near-duplicates, no verbatim leakage from a chunk, every slice populated, every row carrying its provenance.",
       assesses: ["p-evals-o1"],
       needs: ["p2-o3"],
       solution: [
         "Test the dataset before you test the system. A suite whose fixture is broken produces confident nonsense.",
+        "Score at 10, 25 and 50 — the milestones are what keep this from being the task everyone abandons, and the interval at each is the actual lesson. 8 of 10 is not 0.80; it is 0.80 with a 95% interval of roughly 0.49–0.94, which a mediocre system produces routinely. Ten rows still finds your obvious bugs on day one. It is just not a number you may quote yet, and by row 50 you will have watched the interval close.",
         "Near-duplicate detection with `rapidfuzz` catches both accidental copy-paste and the leakage case where a question is lifted from the chunk it should be retrieving.",
         "Store `supporting_doc_ids` on every answerable row — that one field gives you judge-free retrieval metrics forever.",
       ],
@@ -505,6 +507,7 @@ def test_no_near_duplicates():
       title: "A judged run, and a harness you can unit-test",
       repo: "phase3-evals/02-llm-judge",
       rung: "faded",
+      proves: "implement",
       task: "Score the golden set with RAGAS `Faithfulness` and `ContextRecall` against a pinned local judge. The trick: structure it so the *harness* — row building, aggregation, slice breakdown, gate logic — is fully covered by offline tests, and only the judge call itself needs a model.",
       assesses: ["p-evals-o2"],
       needs: ["p1-o1"],
@@ -545,6 +548,7 @@ def test_abstention_row_passes_when_system_abstains():
       title: "Calibrate the judge against your own labels",
       repo: "phase3-evals/03-judge-calibration",
       rung: "faded",
+      proves: "integrate",
       task: "Hand-label 50 judged rows pass/fail yourself, then measure agreement and Cohen’s κ against the judge. Sweep the threshold for the best κ, read every disagreement, and write down the κ you will quote alongside your scores.",
       assesses: ["p-evals-o3"],
       solution: [
@@ -588,6 +592,7 @@ def test_rubber_stamp_judge_has_near_zero_kappa():
       title: "The gate that blocks the merge",
       repo: "phase3-evals/04-ci-regression-gate",
       rung: "faded",
+      proves: "operate",
       task: "Commit a `baseline.json`, then build `make gate`: it fails on an absolute-bar breach, on a per-slice regression beyond tolerance, and on a stale baseline. Wire it into a GitHub Actions workflow with the fast tier on every PR and the judged tier nightly.",
       assesses: ["p-evals-o5"],
       solution: [
@@ -620,6 +625,7 @@ jobs:
       id: "p-evals-e5",
       title: "Blank editor: calibrate a judge with no library and no scaffold",
       rung: "independent",
+      proves: "integrate",
       task: "Empty directory, no RAGAS, no scikit-learn. Take 30 answers from anything you have built and label them pass or fail yourself, first, before the judge sees them — that ordering is not optional. Then write a judge prompt, run it, and compute raw agreement and Cohen’s κ from the confusion matrix with arithmetic you wrote. Print both, plus the base rate of your own labels. Finish by writing down the threshold you would gate on and why.",
       assesses: ["p-evals-o2", "p-evals-o3"],
       needs: ["p1-o4"],
@@ -637,26 +643,31 @@ jobs:
       id: "p-evals-q1",
       q: "Your faithfulness score is 0.93 and users are complaining. Where do you look first?",
       a: "At the golden set, not the system. The usual cause is a dataset that can’t express the failure — most often no unanswerable rows (so the abstain path is untested) or questions generated from the indexed chunks (so every question is answerable by construction and phrased like its own source). Then check the per-slice breakdown: a high average routinely hides one collapsed slice.",
+      demands: ["evidence", "failure-modes"],
     },
     {
       id: "p-evals-q2",
       q: "The judge agrees with your labels 92% of the time. Is it good enough to gate merges?",
       a: "Unknown from that number alone. If 92% of rows are passes, a judge that always says “pass” scores the same 92%. Report Cohen’s κ, which corrects for chance agreement: κ near 0 means a rubber stamp, and roughly 0.6+ is where gating merges starts to be defensible. κ also sets your regression tolerance — you cannot detect a delta smaller than your judge’s disagreement with you.",
+      demands: ["constraints", "evidence", "failure-modes"],
     },
     {
       id: "p-evals-q3",
       q: "Which parts of an eval suite should need no LLM at all?",
       a: "Dataset integrity (slices populated, no near-duplicates, no leakage), retrieval metrics computed from `supporting_doc_ids`, abstention checks, all trajectory metrics (tool choice, arguments, step count), aggregation and the gate logic itself. Everything there is deterministic, free, offline, and belongs in the per-PR tier — the judge is reserved for what genuinely requires reading meaning.",
+      demands: ["alternatives", "constraints"],
     },
     {
       id: "p-evals-q4",
       q: "Why gate on both absolute bars and regression deltas?",
       a: "A bar alone permits slow rot: every PR passes at 0.86 while you slide down from 0.94. A delta alone permits a permanently broken system as long as it doesn’t get worse. Together they catch both. The tolerance on the delta has to exceed the noise you measured during calibration, or CI cries wolf and people start routing around it.",
+      demands: ["alternatives", "constraints", "failure-modes"],
     },
     {
       id: "p-evals-q5",
       q: "An agent answered the user’s question correctly. Why might that still be a failing trace?",
       a: "Because the trajectory can be wrong while the final message is right: it called a destructive tool, passed the wrong argument to a gated tool, acted without the required approval, or burned six tool calls on a one-call task. Those are the failures that page you at 3 a.m., and they are all checkable offline against reference tool calls.",
+      demands: ["evidence", "failure-modes"],
     },
   ],
   workshop: {
@@ -665,6 +676,7 @@ jobs:
     subtitle:
       "Put the Workshop-2 service on trial: golden set, calibrated judge, and a CI gate that blocks your own merges.",
     repo: "workshops/assistant",
+    proves: "operate",
     assesses: ["p-evals-o1", "p-evals-o2", "p-evals-o3", "p-evals-o4", "p-evals-o5"],
     needs: ["p2-o1", "p2-o3"],
     blocks: [
@@ -723,26 +735,32 @@ def gate(result: SuiteResult, baseline: dict[str, float],
       {
         id: "w-evals-d1",
         text: "`golden.jsonl` has **all five slices** populated, at least 5 unanswerable rows, and provenance on every row",
+        tier: "minimum",
       },
       {
         id: "w-evals-d2",
         text: "Dataset tests fail on a planted near-duplicate and on a question copied verbatim out of a chunk",
+        tier: "full",
       },
       {
         id: "w-evals-d3",
         text: "`make eval` prints an **overall + per-slice** table; the abstention slice is scored without a judge",
+        tier: "minimum",
       },
       {
         id: "w-evals-d4",
         text: "A calibration report over ≥30 hand-labeled rows quotes **agreement and Cohen’s κ**, and your tolerance is derived from it",
+        tier: "full",
       },
       {
         id: "w-evals-d5",
         text: "`make gate` exits non-zero on an absolute-bar breach **and** on a per-slice regression against the committed `baseline.json`",
+        tier: "full",
       },
       {
         id: "w-evals-d6",
         text: "The fast tier (dataset + harness + gate + trajectory checks) runs with **no model and no network**, in under a minute",
+        tier: "full",
       },
     ],
     stretch: [

@@ -46,6 +46,89 @@ for (const [level, verbs] of Object.entries(BLOOM)) {
 /** Above `understand`, an objective must be assessed by something the student builds. */
 export const NEEDS_ARTIFACT = new Set(["apply", "analyze", "evaluate", "create"]);
 
+/**
+ * The mastery ladder, ordered. See `Mastery` in data/types.ts for what each
+ * level means; the index is what makes "at least this high" comparable.
+ */
+export const MASTERY = ["understand", "implement", "integrate", "operate"];
+export const RANK = new Map(MASTERY.map((level, i) => [level, i]));
+
+/**
+ * The mastery floor each objective verb demands.
+ *
+ * Keyed by **verb**, not by Bloom level, and the difference is the whole point.
+ * Bloom ranks how hard the thinking is; the ladder ranks what the finished work
+ * demonstrates, and the two come apart badly at the top. "Design a system out
+ * loud under interview pressure" is Bloom's `create` and produces an argument,
+ * not a running service — mapping the whole `create` class to `operate` would
+ * demand a deploy for a whiteboard exercise, and the gate would be wrong in a
+ * way that teaches authors to game it. Meanwhile `consume`, a mere `apply`
+ * verb, means talking to somebody else's server, which is squarely `integrate`.
+ *
+ * So each verb is placed by what it commits the course to. A missing verb is a
+ * failure rather than a default: an unclassified verb would silently pass every
+ * objective that used it, which is the one bug a gate must not have.
+ *
+ * A task ABOVE its objective's floor is fine and common — an objective is a
+ * minimum, and a workshop routinely exceeds one. Only falling short is a
+ * defect, because that is the course promising a level it never asks for.
+ */
+export const MASTERY_FLOOR = {
+  // An explanation is proven by answering, arguing or choosing — not by a repo.
+  define: "understand",
+  list: "understand",
+  name: "understand",
+  recall: "understand",
+  identify: "understand",
+  explain: "understand",
+  describe: "understand",
+  summarize: "understand",
+  contrast: "understand",
+  classify: "understand",
+  interpret: "understand",
+  justify: "understand",
+  critique: "understand",
+  defend: "understand",
+  judge: "understand",
+  choose: "understand",
+  evaluate: "understand",
+  design: "understand",
+  rehearse: "understand",
+  // A working thing, in isolation, with its tests green.
+  implement: "implement",
+  build: "implement",
+  run: "implement",
+  use: "implement",
+  construct: "implement",
+  engineer: "implement",
+  constrain: "implement",
+  compose: "implement",
+  rewrite: "implement",
+  // Needs a system with parts that can disagree. You cannot diagnose, compare,
+  // calibrate or measure something you have only built in isolation, and you
+  // cannot consume a server you also wrote the client contract for.
+  consume: "integrate",
+  diagnose: "integrate",
+  compare: "integrate",
+  analyze: "integrate",
+  differentiate: "integrate",
+  audit: "integrate",
+  measure: "integrate",
+  estimate: "integrate",
+  calibrate: "integrate",
+  orchestrate: "integrate",
+  combine: "integrate",
+  // Only true once it is running under conditions that can hurt it. Each of
+  // these names an act performed on a live system, so the assessment has to
+  // produce evidence rather than a passing test.
+  deploy: "operate",
+  containerize: "operate",
+  instrument: "operate",
+  optimize: "operate",
+  gate: "operate",
+  contain: "operate",
+};
+
 export const leadVerb = (text) =>
   /^\*\*([A-Za-z]+)\*\*/.exec(text ?? "")?.[1]?.toLowerCase() ?? null;
 
@@ -121,6 +204,10 @@ export function audit({ phases }) {
       ...phase.exercises.map((e) => ({ item: e, what: "exercise" })),
       ...(phase.workshop ? [{ item: phase.workshop, what: "workshop" }] : []),
     ];
+    // Highest mastery any task claims for each objective, so the floor check
+    // below asks "did ANYTHING reach this level" rather than penalising a phase
+    // for also having a gentler warm-up exercise on the same objective.
+    const provenFor = new Map();
     for (const { item, what } of tasks) {
       if (!item.assesses?.length) {
         fail(
@@ -147,6 +234,17 @@ export function audit({ phases }) {
           );
         }
         assessed.add(ref);
+        const claimed = RANK.get(item.proves);
+        if (claimed !== undefined) {
+          provenFor.set(ref, Math.max(provenFor.get(ref) ?? -1, claimed));
+        }
+      }
+      if (!RANK.has(item.proves)) {
+        fail(
+          "mastery-declared",
+          item.id,
+          `${what} declares proves="${item.proves ?? ""}" — must be one of ${MASTERY.join(", ")}`,
+        );
       }
       // A prerequisite must already have been taught, which means an earlier phase.
       for (const ref of item.needs ?? []) {
@@ -253,6 +351,27 @@ export function audit({ phases }) {
           "nothing assesses this objective, not even a checkpoint question",
         );
       }
+      // The mastery gate. An objective is a promise written in a verb; this asks
+      // whether anything the student is actually set reaches that high.
+      const verb = leadVerb(o.text);
+      const floor = MASTERY_FLOOR[verb ?? ""];
+      if (verb && LEVEL_OF.has(verb) && !floor) {
+        fail(
+          "mastery-floor",
+          o.id,
+          `"${verb}" has no mastery floor — classify it in MASTERY_FLOOR, because an ` +
+            "unclassified verb passes silently and a gate with a silent pass is not a gate",
+        );
+      }
+      const reached = provenFor.get(o.id);
+      if (floor && assessed.has(o.id) && reached !== undefined && reached < RANK.get(floor)) {
+        fail(
+          "mastery-floor",
+          o.id,
+          `"${verb}" promises ${floor}, but the tasks assessing it only reach ` +
+            `${MASTERY[reached]} — either weaken the verb or set work that gets there`,
+        );
+      }
     }
 
     if (!phase.workshop) fail("phase-has-workshop", phase.id, `${label} ends without a workshop`);
@@ -273,6 +392,10 @@ export function audit({ phases }) {
           0,
         ),
       workshops: acc.workshops + (p.workshop ? 1 : 0),
+      operates:
+        acc.operates +
+        [...p.exercises, ...(p.workshop ? [p.workshop] : [])].filter((t) => t.proves === "operate")
+          .length,
     }),
     {
       phases: 0,
@@ -283,6 +406,7 @@ export function audit({ phases }) {
       recall: 0,
       predicts: 0,
       workshops: 0,
+      operates: 0,
     },
   );
   return { errors, counts };

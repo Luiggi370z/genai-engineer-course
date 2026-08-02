@@ -258,6 +258,52 @@ top5 = [c for c, _ in sorted(zip(candidates, scores),
       ],
     },
     {
+      id: "p2-c3b",
+      title: "A chunk needs a name, or you can never take it back",
+      tag: "the part demos skip",
+      teaches: ["p2-o2"],
+      blocks: [
+        {
+          kind: "p",
+          text: "Chunking tutorials stop at `list[str]`. Then the loader runs twice — after a crash, after a config change, on a cron — and the corpus doubles. Every duplicate is retrievable, every duplicate is citable, and nothing errors. **Store a chunk, not a string**: text plus the source it came from, a hash of that source's current content, and the character span it occupies.",
+        },
+        {
+          kind: "p",
+          text: "Then derive its id from `(tenant, source, ordinal)` — never from a counter, and never from the text. A counter makes re-ingest a duplicate. Hashing the text sounds safer and is worse: edit a paragraph and you get a *new* id, so the old version stays indexed beside the new one, and retrieval cites whichever ranked higher.",
+        },
+        {
+          kind: "code",
+          title: "Identity from position, so a re-ingest is an update",
+          code: `CHUNK_NS = uuid.UUID("6f1a4a2e-6f2a-5c7b-9b23-2f4c1a9d8e10")
+
+@dataclass(frozen=True)
+class Chunk:
+    text: str; source: str; version: str      # version = hash of the whole document
+    ordinal: int; start: int; end: int        # start/end index the ORIGINAL text
+    tenant: str
+
+    @property
+    def id(self) -> str:
+        # text deliberately absent: an edit must REPLACE, not accumulate
+        return str(uuid.uuid5(CHUNK_NS, f"{self.tenant}|{self.source}|{self.ordinal}"))
+
+# the offsets are a claim, so assert it — a citation with a range that
+# doesn't hold is a lie with a number in it
+assert body[c.start : c.end] == c.text`,
+        },
+        {
+          kind: "callout",
+          tone: "warn",
+          title: "Three questions a `list[str]` corpus cannot answer",
+          text: '*“Delete everything from that document”* — you cannot delete by prose. *“Where did this claim come from?”* — `source: "rag"` names the machine that did the lookup, not the document, so nobody can check it. *“The policy page changed; is that answer stale?”* — without a version stamp, silence. All three arrive on a bad day, and all three are cheap on the day you build the store.',
+        },
+        {
+          kind: "p",
+          text: "One more thing the metadata buys: a shorter revision has to clean up after itself. Re-ingest a page that lost two paragraphs and ordinals 4 and 5 of yesterday's version stay indexed, still retrievable, still citing a revision that no longer exists. Delete the ordinals that no longer exist before you upsert the ones that do.",
+        },
+      ],
+    },
+    {
       id: "p2-c4",
       title: "Enough scorekeeping to tune with",
       tag: "the number you tune against",
@@ -355,6 +401,7 @@ assert doc_embedder.name == query_embedder.name, "mismatch -> recall craters"
       title: "The two-tier harness (build this one first)",
       repo: "phase2-retrieval/01-eval-harness",
       rung: "faded",
+      proves: "implement",
       task: "Write a 30-question golden set over your corpus — 15 meaning-based, 10 exact-match/jargon, 5 unanswerable (those test your “I don’t know” path). Score it two ways: a deterministic lexical tier that runs on every push, and an opt-in judged tier for the nightly run. Wrap tier 1 in pytest so a regression blocks the merge.",
       assesses: ["p2-o3"],
       solution: [
@@ -394,6 +441,7 @@ def test_lexical_bars():
       title: "Hybrid + rerank, with receipts",
       repo: "phase2-retrieval/02-hybrid-rerank",
       rung: "faded",
+      proves: "integrate",
       task: "Add keyword search and a reranker to your Phase-1 pipeline. Measure context recall before and after with the harness — especially on the exact-match slice.",
       assesses: ["p2-o1"],
       needs: ["p1-o3"],
@@ -440,6 +488,7 @@ for name, fn in [("dense only", dense_only), ("hybrid", hybrid),
       title: "Sabotage Saturday",
       repo: "phase2-retrieval/03-break-and-fix",
       rung: "faded",
+      proves: "integrate",
       task: "Plant one bug in a working pipeline (mismatched embedding models, giant chunks, zero overlap) — or use the pre-bugged one in the repo — then hunt it with the playbook. Name which metric moved and why.",
       assesses: ["p2-o2", "p2-o4"],
       needs: ["p1-o3"],
@@ -484,6 +533,7 @@ def test_mixing_embedders_breaks_retrieval():
       title: "Contextual chunks, free of charge",
       repo: "phase2-retrieval/04-contextual-chunks",
       rung: "faded",
+      proves: "implement",
       task: "Implement chunk contextualization using a local model as the batch worker (it’s free). Compare retrieval failure rate against the naive version on your golden set.",
       assesses: ["p2-o2"],
       needs: ["p1-o1"],
@@ -531,6 +581,7 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
       id: "p2-e5",
       title: "Blank editor: the 20-minute triage, on someone else’s corpus",
       rung: "independent",
+      proves: "integrate",
       task: "Empty directory. Take a corpus you have never indexed — your own notes, a downloaded standards document, a repo’s docs folder — and in one sitting write a script that answers, in order: is the known-good document indexed at all, are queries and documents embedded by the same model, does the right chunk make top-20, and does it make top-5. Ten questions is enough. Then write three sentences naming which stage is worst and what you would change first. No harness from exercise 1 to start from — the point is that you can build the diagnostic, not run it.",
       assesses: ["p2-o3", "p2-o4"],
       needs: ["p1-o3"],
@@ -548,21 +599,25 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
       id: "p2-q1",
       q: "Why does pure vector search miss exact identifiers, and what’s the fix?",
       a: "Tokenizers shred IDs and codes into sub-tokens with no stable meaning, so there’s no clean vector neighborhood. Fix: keyword search (BM25) fused with dense results, then a reranker for precision.",
+      demands: ["alternatives", "failure-modes"],
     },
     {
       id: "p2-q2",
       q: "You can only afford two metrics. Which, and what does each blame?",
       a: "Faithfulness (blames the writer — catches hallucination) and context recall (blames the librarian — did retrieval find it). Together they split every failure into “generation” or “retrieval,” which is debugging question #1.",
+      demands: ["constraints", "evidence"],
     },
     {
       id: "p2-q3",
       q: "Your overall recall is 0.71 and you have one afternoon. What do you look at?",
       a: "The per-slice breakdown, not the average. Recall that is strong on paraphrase questions and terrible on identifier questions is a missing keyword arm — a couple of hours of wiring. A uniform 0.71 across every slice is a different bug entirely (chunking, or an embedding mismatch between index and query). Averages hide the cheap fix.",
+      demands: ["constraints", "evidence", "failure-modes"],
     },
     {
       id: "p2-q4",
       q: "Make the case for and against GraphRAG in one breath.",
       a: "For: multi-hop and corpus-wide questions (“trends across all filings”) that chunk retrieval structurally can’t answer. Against: heavy build/run cost when hybrid + rerank + contextual chunks already pass your eval bar for ordinary Q&A.",
+      demands: ["alternatives", "constraints"],
     },
   ],
   workshop: {
@@ -570,6 +625,7 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
     title: "Workshop · Ship a real RAG service",
     subtitle: "Everything from Phases 1–2, wired into one running system you can curl.",
     repo: "workshops/assistant",
+    proves: "integrate",
     assesses: ["p2-o1", "p2-o2", "p2-o3", "p2-o4"],
     needs: ["p1-o1", "p1-o2", "p1-o3"],
     blocks: [
@@ -635,22 +691,32 @@ class QdrantStore:                       # <- your job in the workshop
       {
         id: "w1-d1",
         text: "`docker compose up` brings the whole stack online with **no API keys** (Ollama for embeddings + generation)",
+        tier: "minimum",
       },
       {
         id: "w1-d2",
         text: "`POST /ask` returns a grounded answer **with citations**, and abstains (“not in the docs”) on unanswerable questions",
+        tier: "minimum",
+      },
+      {
+        id: "w1-d2b",
+        text: 'A citation names the **document, revision and character span** — not `source: "rag"` — and re-ingesting the same source **updates** it instead of adding a second copy. Prove it: ingest twice, assert one chunk',
+        tier: "full",
       },
       {
         id: "w1-d3",
         text: "Retrieval is **hybrid + reranked** — verified by a recall jump on the exact-match slice of your golden set",
+        tier: "full",
       },
       {
         id: "w1-d4",
         text: "`make eval` runs the fast lexical gate over the golden slices and **CI fails** on a regression — Phase 3 upgrades this gate to a judged one",
+        tier: "full",
       },
       {
         id: "w1-d5",
         text: "The vector store lives behind a `Store` interface — you can articulate exactly what changes to move to pgvector",
+        tier: "full",
       },
     ],
     stretch: [

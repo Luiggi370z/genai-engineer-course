@@ -26,10 +26,17 @@ functions over data: no I/O, no globals, fully testable.
 
 ## Deliverables
 
+Three passes. **Minimum** is the walking skeleton — the smallest thing that is
+really this, and a place to stop that is not quitting. **Full** is the version you
+would show someone. **Stretch** is for when the full pass came easily.
+
+### Minimum
 - [ ] Golden rows cover **all five slices** — `semantic`, `exact`, `multi_hop`,
       `unanswerable`, `adversarial` — with at least 5 unanswerable
 - [ ] `run_suite` reports **overall and per-slice** scores; abstention rows are scored
       **without** the judge (`judged=False`)
+
+### Full
 - [ ] An invented answer to an unanswerable question drives that slice to 0.0
 - [ ] `gate()` fails on an absolute-bar breach **and** on a per-slice regression
       against the baseline, and marks a collapse

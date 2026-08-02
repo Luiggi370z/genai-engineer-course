@@ -1,32 +1,96 @@
 # 4.4 Framework bakeoff — reference
 
-Two tiers. The fast tier (`src/bakeoff.py`) is the same agent as a mini LangGraph
-state machine, a typed Pydantic-style agent, and a CrewAI-style role crew — offline
-miniatures, honestly labelled, that capture each defining idea in ~15 lines.
+Three tiers, honestly labelled.
 
-The real tier (`make test-integration`) proves each idea in the actual library:
-LangGraph's `StateGraph` + checkpointer resuming by `thread_id`, Pydantic AI
-returning a validated model via `TestModel` (offline), and a two-role CrewAI crew
-orchestrated through local Ollama.
+**Miniatures** (`src/bakeoff.py`) — each framework's defining idea in ~15 offline
+lines: a state machine with a checkpoint, a typed agent that validates first, a
+role crew passing context along. For feeling the shape, not for deciding.
 
-**Verdict template:** LangGraph = durability/branching/HITL (production default);
-Pydantic AI = type-safe single agent, minimal ceremony; CrewAI = fast role-based
-multi-agent prototyping. Choose by your dominant constraint.
+**The real tier** (`src/frameworks.py`, `make test-integration`) — the *same*
+tool-using agent in LangGraph, Pydantic AI and CrewAI, each returning the same
+`Run` shape. One task: look a fact up with a tool, then answer with it.
+
+**The matrix** (`src/matrix.py`) — six dimensions scored from `Measured` rows.
+
+## Why the task is identical across the three
+
+The usual bakeoff gives each library the thing it is best at and concludes what
+it assumed. Fixing the task is what makes the residue attributable: same agent,
+same assertions in `test_integration.py`, so the differences left over — glue
+lines, what survives the process, whether an offline test is even possible —
+are the framework's, not the example's.
+
+The single assertion allowed to differ is durability, because it *is* the
+finding: `test_only_langgraph_leaves_state_a_second_call_can_resume` reads
+`resumable` back out of `get_state` rather than trusting the docs.
+
+## The six dimensions, and why these six
+
+| dimension | measured by | decides |
+|---|---|---|
+| durability | `Run.resumable`, read back from the store | whether you need a database |
+| recovery | did a killed run resume | whether a crash costs the user their work |
+| complexity | lines of *your* glue | what the next engineer's week looks like |
+| observability | spans the run emitted | whether you can debug it at 2am |
+| latency | p50 over repeats | whether it ships |
+| cost | tokens per run | whether it keeps shipping |
+
+"Nice API" is not here. It is the one everybody rates first and the only one
+that stops mattering after a month.
+
+## Read `undecided()` before the winners
+
+On a task this small, several dimensions come back `not distinguished by this
+test` — and that is the honest result rather than a gap to fill in. `winner()`
+refuses twice: on a tie for the best value, and when the whole spread sits
+inside `NOISE_RATIO` (15%). A 4% latency difference is noise, and a matrix is a
+persuasive artifact that will outlive everyone's memory of how it was measured.
+
+The skill being taught is reading a ties-heavy matrix and saying either "this
+dimension doesn't decide this choice" or "I need a harder test" — instead of
+filling all six rows and calling it evidence.
+
+## Verdict template (yours must cite measurements)
+
+LangGraph = durability, branching, human-in-the-loop; the glue is real and buys
+you addressable state. Pydantic AI = one typed agent, least ceremony, nothing
+survives the process. CrewAI = several collaborating roles; on a single-tool
+task it is ceremony, and it is the only one of the three with no offline test
+double.
 
 ## Concept → framework primitive
 
 | what you built | LangGraph | Pydantic AI | CrewAI |
 |---|---|---|---|
-| `Graph.nodes` / `Graph.edges` / `Graph.run` — a hand-rolled state machine | `StateGraph.add_node()` / `add_edge()` / `set_entry_point()` / `compile()` | `Agent.run_sync()` — one typed call, no graph at all | `Task(..., context=[...])` chains one task's output into the next |
-| `self.checkpoint`, overwritten after every node | `MemorySaver` checkpointer + `app.get_state(config)`, addressable by `thread_id` | — (no built-in checkpointing) | — (no built-in checkpointing) |
-| `TypedAgent.run`'s manual `isinstance` check + `raise ValueError` | — (validation lives in the state schema, not per call) | `output_type=Answer`, a `BaseModel` — a malformed reply fails loudly instead of flowing downstream | — (roles exchange free text, no schema) |
-| `crew_style`'s `for w in workers` loop over `Worker(role, fn)` | — (edges model handoff between nodes, not roles) | — (a single agent, no role concept) | `Agent(role=..., goal=..., backstory=..., llm=...)` + `Crew(agents=[...], tasks=[...]).kickoff()` |
+| `Graph.nodes` / `edges` / `run` — a hand-rolled state machine | `StateGraph.add_node()` / `add_edge()` / `set_entry_point()` / `compile()` | `Agent.run_sync()` — one typed call, no graph | `Task(..., context=[...])` chains one task's output into the next |
+| `self.checkpoint`, overwritten after every node | `MemorySaver` + `app.get_state(config)`, addressable by `thread_id` | — (nothing persists) | — (nothing persists) |
+| `TypedAgent.run`'s manual `isinstance` + `raise ValueError` | — (validation lives in the state schema) | `output_type=Answer`, a `BaseModel` | — (roles exchange free text) |
+| `crew_style`'s loop over `Worker(role, fn)` | — (edges model handoff between nodes) | — (a single agent) | `Agent(role=..., goal=..., tools=[...])` + `Crew(...).kickoff()` |
+| `Recorder.calls` — proof the tool ran | node function calls it directly | `@agent.tool_plain` | `@tool("lookup")` from `crewai.tools` |
 
-**Two artifacts.** You now own two things that prove different skills: the three
-~15-line miniatures in `bakeoff.py` prove you understand what each framework's
-defining idea actually *does* underneath — a checkpoint, a validated model, a
-role handoff — and the tests in `test_integration.py` prove you can drive the
-real `StateGraph`, `Agent`, and `Crew` APIs to get that same behavior out of a
-production library. The interview skill is being able to point at
-`self.checkpoint` and say "that's what `MemorySaver` gives you for free" —
-this table is that explanation written down.
+## Two traps worth the ink
+
+**`from __future__ import annotations` is deliberately absent from
+`frameworks.py`.** It stringifies annotations, which Pydantic AI then resolves
+against *module* globals — where a function-local `RunContext` import does not
+exist. Lazy imports and postponed annotations do not compose, and the
+`NameError` comes from inside the library and names neither cause.
+
+**The topic reaches the Pydantic AI tool through `deps`, not as an argument.**
+`TestModel` fills model-chosen arguments with throwaway strings, so a
+`lookup(topic: str)` signature yields an agent that looks up `"a"`, returns
+`No fact on file.`, and sails past `used_the_tool()`. Values the caller
+controls are dependencies; values the model chooses are arguments.
+
+## The CrewAI bound
+
+Python **3.12**, and `qwen3.5:9b` must exist **on the host** (Ollama at
+`localhost:11434`). On a newer interpreter CrewAI dies inside Chroma's Pydantic
+v1 shim (`unable to infer type for attribute "chroma_server_nofile"`) — a
+version bound wearing a library bug's clothes, which `_require_crewai()` skips
+with that message rather than a traceback. A model pulled into a Docker volume
+is likewise unreachable from a host-run test.
+
+Both skips are findings: the other two run offline on any supported Python,
+while CrewAI constrains the interpreter and cannot be tested without a live
+model. That is the observability column, measured.
