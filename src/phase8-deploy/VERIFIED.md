@@ -31,8 +31,8 @@ with SIGPIPE), so the collector check greps a saved log file instead; and the
 durability check must PLANT a memorable turn before restarting, because memory is
 deliberately selective and ordinary questions store nothing.
 
-A full pass takes about twenty-five minutes, nearly all of it waiting on a local
-model, so the script takes `--from N` and `--only N` (and `--list`, `--no-build`).
+A full pass is dominated by the local model, so the script takes `--from N` and
+`--only N` (and `--list`, `--no-build`, `--host-model`).
 That is a debugging affordance, not a shorter suite: fix what check 12 caught and
 re-prove it in two minutes instead of re-running eleven checks that already
 passed. The checks share state deliberately — one corpus, one outbox, one set of
@@ -50,6 +50,55 @@ is an **in-process** store — empty in a freshly started container regardless o
 what is in Qdrant. It now establishes its own precondition, and the fact it was
 hiding is worth stating plainly: restart the service while its primary is down
 and the fallback has nothing to fall back to.
+
+### The twenty minutes, and what was hiding inside them
+
+The run used to take about twenty-five minutes, and roughly seventeen of those were
+one thing: the composer asking for an unbounded completion, waiting out its 60-second
+budget, retrying once, and answering from the offline composer instead. Every check
+passed the whole time, and that is the part worth sitting with rather than the clock:
+nothing was broken, the answers were grounded, `/health` was green, and **the model
+was never the one answering**. The suite asked "is this answer grounded in the
+corpus", which the fallback composer also satisfies, and never asked "did the model
+write it". It is eighteen minutes now on the same lane, and forty-five seconds with
+`--host-model`, with the model composing in both.
+
+Two fixes, in the order they matter. The composer now asks for a **bounded**
+completion — `think=False` and a `num_predict` ceiling (`adapters.py`). A reasoning
+model deliberates hardest about a task with nothing to work out: measured at 667
+reasoning tokens for a one-sentence restatement of retrieved text, at 0.52
+tokens/second, which does not fit in any budget. The same prompt with thinking off:
+10 tokens. A token cap alone would not have helped — cap it with thinking on and the
+model spends the cap thinking and returns nothing. And check 4 now **asserts the
+model composed the answer**, by reading `degraded.brain` off `/health` after the ask.
+That assertion is the durable half of the fix; the timeout tuning is not.
+
+The 0.52 tokens/second is itself a fact about deployment rather than about this
+laptop: Docker Desktop on macOS gives containers **no GPU**, so the in-stack Ollama
+runs a 9B model on CPU inside a VM. The host's own Ollama, same model, same machine,
+with Metal: 81 tokens/second — 156×. `--host-model` and `docker-compose.hostmodel.yml`
+point the container at it through `host.docker.internal` and switch the in-stack
+service off with an unenabled profile, which also makes the overlay the smallest real
+use of `!override` in the repo (the base file's `depends_on` waits for a service the
+overlay has just turned off). The default lane stays self-contained, because check 1's
+claim is one command with nothing installed, and CI runs that lane.
+
+What the bounded composer did not rescue, on the CPU lane, is everything after the
+first few checks. Check 4 composes with a freshly loaded model and an idle machine and
+now makes its budget reliably; by check 10 the same call has started exceeding 60
+seconds again, because an abandoned generation does not stop when the client gives up
+— Ollama was still burning 395% CPU on work nobody was waiting for, and each later
+call queues behind that. A timeout is a promise to the caller, not a cancellation of
+the work. If you take one operational lesson from this phase, that is a good candidate.
+
+The **streaming** path is the sharper version of the same problem, and there it is
+structural rather than contention. `tier.stream` is safe-buffered — the gate screens
+the entire answer before releasing the first chunk — so a first-chunk deadline is
+really a whole-generation deadline, on a generation the batch path has already paid
+for once. Check 4 therefore holds the two paths to different standards: a batch
+fallback fails the run, a stream fallback is allowed but must appear on `/health`
+naming the stream. "Allowed to degrade, not allowed to be quiet about it" is the
+contract the service makes to its callers, applied to its own verifier.
 
 The observability layer is deliberately vendor-free: no Langfuse or Phoenix SDK is
 imported anywhere. Both read OTLP, so the backend is an environment variable and there

@@ -325,7 +325,8 @@ def test_the_stream_is_bounded_the_same_way(monkeypatch):
     seen = fake_ollama(monkeypatch, {})
     from assistant.adapters import COMPLETION_TOKEN_CAP, ollama_stream
 
-    assert "".join(ollama_stream("q", host="http://ollama:11434", model="m")) == "five business days"
+    streamed = "".join(ollama_stream("q", host="http://ollama:11434", model="m"))
+    assert streamed == "five business days"
     assert seen["think"] is False
     assert seen["options"]["num_predict"] == COMPLETION_TOKEN_CAP
 

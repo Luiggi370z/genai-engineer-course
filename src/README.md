@@ -157,11 +157,22 @@ over the wire, two authenticated callers whose memories never cross, spans recor
 and (via the observability overlay) the same spans arriving at an otel-collector
 outside the process. `verify-lessons.sh` stays offline and never runs it.
 
-A full pass is about twenty-five minutes, so `verify-e2e.sh` also takes `--list`,
-`--from N`, `--only N` and `--no-build` for the fix-and-re-prove loop. The checks
-share one corpus, outbox and set of approvals on purpose, so a resumed run only
-means something against volumes a full run has already filled; the unqualified
-`./verify-e2e.sh` is the claim.
+A full pass is about eighteen minutes, nearly all of it the local model, so
+`verify-e2e.sh` also takes `--list`, `--from N`, `--only N` and `--no-build` for the
+fix-and-re-prove loop. The checks share one corpus, outbox and set of approvals on purpose, so a
+resumed run only means something against volumes a full run has already filled; the
+unqualified `./verify-e2e.sh` is the claim.
+
+`--host-model` runs the same fifteen checks against the **host's** Ollama instead of
+the one in the stack, and finishes in forty-five seconds instead of eighteen minutes.
+That gap is not a trick: Docker Desktop gives containers no GPU, so the containerised
+model runs on CPU inside a VM at 0.52 tokens per second against the host's 81. Worth
+reading [Phase 8's
+VERIFIED.md](phase8-deploy/VERIFIED.md#the-twenty-minutes-and-what-was-hiding-inside-them)
+for how that number stayed hidden for so long: the suite spent most of its runtime
+timing out and answering from the fallback composer, with every check green, because
+"is the answer grounded" and "did the model write it" are different questions and only
+the first was being asked. Check 4 now asserts the second one.
 
 ### Phase 9 · The GenAI Mindset
 - `drill-deck` — the interview question bank as flashcards

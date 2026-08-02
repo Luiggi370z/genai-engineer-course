@@ -6,16 +6,33 @@
 #   ./verify-e2e.sh --from 9     boot, then run checks 9..15 and skip 2..8
 #   ./verify-e2e.sh --only 12    boot, then run check 12 and nothing else
 #   ./verify-e2e.sh --no-build   skip the image build (the stack is already current)
+#   ./verify-e2e.sh --host-model use the HOST's ollama (much faster on a Mac; see below)
 #   ./verify-e2e.sh --list       print the checks and exit
 #
 # Needs Docker and disk for two Ollama models (~6 GB on first boot). Everything else
 # in this repo verifies offline; this is the one script that proves the composed
 # stack really boots, authenticates, retrieves, refuses, contains, and traces.
 #
-# A full pass takes twenty minutes, most of it waiting on a local model, and a
-# verifier you can only run from the top is a verifier that stops being run: fix
-# something check 12 caught, and re-proving it should not cost another nineteen
-# minutes of checks that already passed. Hence `--from` and `--only`.
+# A full pass takes about eighteen minutes, nearly all of it waiting on a local
+# model — or about forty-five seconds with `--host-model`, below. A verifier you can
+# only run from the top is a verifier that stops being run: fix something check 12
+# caught, and re-proving it should not cost another seventeen minutes of checks that
+# already passed. Hence `--from` and `--only`.
+#
+# `--host-model` attacks those minutes instead of working around them, and is worth
+# reading about even if you never use it, because the measurement is the lesson.
+# Docker Desktop on macOS gives containers no GPU, so the containerised Ollama runs a
+# 9B model on CPU inside a VM: 0.52 tokens/second, against a composer budget of 60
+# seconds. The same model on the same machine's own Ollama, with Metal: 81
+# tokens/second. `--host-model` points the container at it through
+# `host.docker.internal` and switches the stack's ollama service off — eighteen
+# minutes becomes forty-five seconds, with the model composing every answer.
+#
+# The default stays self-contained, because check 1's claim is that a stranger
+# clones this repo and runs ONE command with nothing installed and no keys — and a
+# lane that needs a host daemon and a pre-pulled model cannot make that claim. CI
+# runs the default. Use `--host-model` for the local loop, and run the default lane
+# before you believe a green result.
 #
 # What they assume, stated plainly: the checks SHARE STATE. They ingest into one
 # corpus, spend approvals, fill the outbox and write memories, and several of the
@@ -70,6 +87,10 @@
 #      the audit log + memories are still in the SQLite volume
 set -euo pipefail
 
+# Resolved BEFORE the cd below, because `--help` reads this file's own header and a
+# relative $0 stops resolving the moment the working directory changes.
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
 cd "$(dirname "$0")/phase8-deploy/01-compose/after" || exit 1
 
 # Three overlays, three reasons:
@@ -110,11 +131,13 @@ DOWN=0
 FROM=1
 ONLY=0
 BUILD="--build"
+HOST_MODEL=0
 
 while (($#)); do
   case "$1" in
     --down) DOWN=1 ;;
     --no-build) BUILD="" ;;
+    --host-model) HOST_MODEL=1 ;;
     --from) FROM="${2:?--from needs a check number}"; shift ;;
     --from=*) FROM="${1#*=}" ;;
     --only) ONLY="${2:?--only needs a check number}"; shift ;;
@@ -122,7 +145,7 @@ while (($#)); do
     --list)
       for i in $(seq 1 $TOTAL); do printf '%2d  %s\n' "$i" "${TITLE[$i]}"; done
       exit 0 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,35p' "$SELF"; exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
   shift
@@ -130,6 +153,23 @@ done
 [[ "$FROM" =~ ^[0-9]+$ && "$ONLY" =~ ^[0-9]+$ ]] || die "--from/--only take a number"
 ((ONLY)) && FROM="$ONLY"
 ((FROM >= 1 && FROM <= TOTAL)) || die "--from/--only must be between 1 and $TOTAL"
+
+# The model lane, announced rather than inferred. A run that quietly used a
+# different inference path than the reader assumes is worse than a slow one, so
+# both lanes say which they are, and the preflight turns "the host is not set up
+# for this" into a message here instead of a composer timeout in check 4.
+MODEL_LANE="in-stack ollama (CPU-only in Docker Desktop; slow by design, self-contained)"
+if ((HOST_MODEL)); then
+  HOST_OLLAMA="http://127.0.0.1:11434"
+  WANT_MODEL="${OLLAMA_MODEL:-qwen3.5:9b}"
+  curl -sf "$HOST_OLLAMA/api/version" -o /dev/null \
+    || die "--host-model needs the host's ollama serving on 11434 (start Ollama, or drop the flag)"
+  curl -sf "$HOST_OLLAMA/api/tags" | grep -q "\"$WANT_MODEL\"" \
+    || die "--host-model: host ollama has no $WANT_MODEL — run 'ollama pull $WANT_MODEL', or set OLLAMA_MODEL to one you have"
+  export OLLAMA_MODEL="$WANT_MODEL"
+  COMPOSE="$COMPOSE -f docker-compose.hostmodel.yml"
+  MODEL_LANE="host ollama via host.docker.internal, model $WANT_MODEL (GPU; not what CI runs)"
+fi
 
 # The secure overlay refuses to start without this, on purpose: a committed
 # default is a published credential. Ephemeral per run — nothing outlives it.
@@ -212,6 +252,7 @@ check() {
 # to repeat — compose reuses the layers and the containers it already has.
 boot() {
   say "1/$TOTAL ${TITLE[1]}"
+  echo "model lane: $MODEL_LANE"
   # shellcheck disable=SC2086 # BUILD is a flag, deliberately unquoted when empty
   $COMPOSE up $BUILD --detach
   local deadline=$((SECONDS + BOOT_TIMEOUT))
@@ -232,6 +273,11 @@ boot() {
 check_2() {
   [[ "$(jget /tmp/e2e-health.json tier.rag)"    == "qdrant"        ]] || die "rag tier is not qdrant"
   [[ "$(jget /tmp/e2e-health.json tier.memory)" == "sqlite"        ]] || die "memory tier is not sqlite"
+  # This line was in the header for a long time before it was in the script, and
+  # the gap cost twenty minutes a run: with the model unreachable the composer
+  # falls back, every assertion below still passes, and nothing says which brain
+  # answered. Check 4 proves the model was actually USED; this proves it was wired.
+  [[ "$(jget /tmp/e2e-health.json tier.brain)"  == "ollama"        ]] || die "brain tier is not ollama — the model is not wired in"
   [[ "$(jget /tmp/e2e-health.json tier.tools)"  == "mcp+builtin"   ]] || die "MCP tools were not discovered"
   [[ "$(jget /tmp/e2e-health.json tier.auth)"   == "shared-secret" ]] || die "the deployed service is running with auth OFF"
   # The guard model is off here on purpose — the deterministic screen is the floor,
@@ -248,7 +294,7 @@ check_2() {
     -H "authorization: Bearer $(mint alice 'assistant:ask')" \
     -H 'content-type: application/json' -d '{"docs": ["nope"]}')"
   [[ "$code" == "401" ]] || die "an ask-scoped token reached /ingest (returned $code)"
-  echo "tier: qdrant + sqlite + mcp+builtin, gated by a shared-secret JWT"
+  echo "tier: qdrant + sqlite + ollama + mcp+builtin, gated by a shared-secret JWT"
 }
 
 check_3() {
@@ -266,12 +312,30 @@ check_3() {
   echo "serving $reported, which is the commit compose just built"
 }
 
+# brain_degradation -> whatever /health is currently confessing about the model
+# tier, empty when the model is composing. The seam that makes the two assertions
+# in check 4 possible: a composer that falls back reports it, so "which brain
+# answered" is observable from outside the container instead of inferred from prose.
+brain_degradation() {
+  curl -sf "$BASE/health" -o /tmp/e2e-brain.json || die "/health stopped answering"
+  python3 -c "import json; print(json.load(open('/tmp/e2e-brain.json'))['degraded'].get('brain', ''))"
+}
+
 check_4() {
   as "$ALICE" -X POST "$BASE/ingest" -H 'content-type: application/json' \
     -d '{"docs": ["approved refunds are processed within five business days"]}' >/dev/null
   ask "how long do refunds take"
   grep -qi "refunds" /tmp/e2e-ask.json || die "answer is not grounded in the ingested doc"
   [[ "$(jget /tmp/e2e-ask.json citations.0.id)" == "c1" ]] || die "grounded answer carried no citations"
+  # The MODEL answered — the assertion this suite lacked for its whole life. A
+  # composer that times out is caught, reported, and answered anyway by the offline
+  # composer: right in production, wrong to pass quietly in a verifier. Before this
+  # line existed, every answer in a run came from the fallback and all fifteen checks
+  # still went green, because "is it grounded in the corpus" and "did the model write
+  # it" are different questions and only the first one was being asked.
+  local brain
+  brain="$(brain_degradation)"
+  [[ -n "$brain" ]] && die "the batch answer came from the FALLBACK composer, not the model: $brain"
   as "$ALICE" -X POST "$BASE/ask/stream" -H 'content-type: application/json' \
     -d '{"question": "how long do refunds take"}' -o /tmp/e2e-stream.txt
   grep -q '^event: chunk' /tmp/e2e-stream.txt || die "/ask/stream produced no chunk events"
@@ -290,6 +354,24 @@ for frame in open(sys.argv[1]).read().strip().split("\n\n"):
     done = payload if fields["event"] == "done" else done
 sys.exit(0 if done and "".join(chunks) == done.get("answer") else 1)
 EOF
+  # The streaming path is held to a different standard than the batch one, and the
+  # difference is a measurement rather than a concession. `tier.stream` is
+  # safe-buffered: the gate screens the WHOLE answer before releasing the first
+  # chunk, so a "first chunk within 60s" budget is really "generate and screen it
+  # all within 60s" — strictly harder than the batch path, which then pays for the
+  # same generation a second time. A 9B model on a CPU-only container sits right on
+  # that line and sometimes crosses it. So the stream is allowed to fall back, but it
+  # is NOT allowed to fall back quietly: the degradation has to be on /health, naming
+  # the stream. A batch fallback still fails the run outright.
+  brain="$(brain_degradation)"
+  if [[ -z "$brain" ]]; then
+    echo "the model composed both answers, batch and streamed"
+  elif [[ "$brain" == *stream* ]]; then
+    echo "note: the model missed the streaming budget and /health confessed: $brain"
+    echo "      expected where the container has no GPU — see docker-compose.hostmodel.yml"
+  else
+    die "the model stopped composing for a reason that is not the stream budget: $brain"
+  fi
   echo "grounded answer came back with contexts, citations, and streamed through the gate"
 }
 
@@ -662,5 +744,8 @@ if ((SKIPPED)); then
 else
   printf '\nE2E: all %s checks passed, every one of them through the gate\n' "$RAN"
 fi
+# Repeated at the end because that is where a green line gets pasted into a pull
+# request, and "all 15 passed" means something different on the lane CI does not run.
+((HOST_MODEL)) && printf 'lane: %s\n' "$MODEL_LANE"
 ((DOWN)) && $COMPOSE down
 exit 0

@@ -64,3 +64,19 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml logs co
 ```
 
 `docker-compose.observability.yml` adds a pinned OpenTelemetry Collector (`otel-collector.yaml` config: OTLP-in over HTTP, debug exporter to stdout) and sets `OTEL_EXPORTER_OTLP_ENDPOINT` on the assistant. The assistant's instrumentation does not change — the same spans that back `spans_recorded` on `/health` also ship over OTLP, and `logs collector` shows the `agent.run` trees arriving **outside the process**. Swap the debug exporter for an `otlp` exporter at Phoenix, Langfuse or your APM and nothing upstream notices; that pluggability is why the course exports OTel instead of a vendor SDK. `verify-e2e.sh` boots with this overlay and asserts the collector saw the spans.
+
+## Host-model overlay (optional, and a lesson about where the GPU is)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.hostmodel.yml up --build
+../../../verify-e2e.sh --host-model     # the same, with the preflight checks
+```
+
+`docker-compose.hostmodel.yml` points the assistant at the **host's** Ollama through `host.docker.internal` and switches the in-stack `ollama` service off with a profile nobody enables. It exists because of a number worth knowing before you deploy anything that runs a model: Docker Desktop on macOS gives containers **no GPU access**. The stack's own Ollama therefore runs a 9B model on CPU inside a VM, measured at **0.52 tokens/second**. The same model, on the same laptop, through the host's Ollama with Metal: **81 tokens/second**. Identical code, identical model, 156× — the entire difference is which side of the VM boundary the accelerator is on.
+
+Two things follow, and only one of them is about speed:
+
+- The self-contained lane stays the **default**, for CI and for anyone cloning this repo, because "one command, nothing installed, no keys" is a claim `verify-e2e.sh`'s first check exists to prove — and a lane that needs a host daemon and a pre-pulled model cannot make it. This overlay is the local shortcut, and both lanes print which one is running.
+- If your production plan is "containerised model on a VM without a GPU", that 0.52 tokens/second is your latency budget, not a laptop artifact. Either give the container the accelerator, call a model over the network, or design for the number you actually have.
+
+The overlay is also the smallest honest example of `!override`: the base file makes the assistant wait for the `ollama` service to report healthy, so without replacing that list the stack would wait forever for a container this overlay just turned off.

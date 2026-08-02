@@ -347,6 +347,12 @@ the same spans arriving at a real otel-collector **outside the process**.
       spans observed at a real collector outside the process, degraded-but-honest
       answers with Qdrant stopped, and state that survives a restart (grounded
       answers, audit rows, memories)
+- [ ] The answers in that run came from the **model**, not the fallback composer —
+      check 4 reads `degraded.brain` off `/health` and fails if the composer fell
+      back. Worth doing on your own service: "grounded in the corpus" and "written
+      by the model" are different claims, and the offline composer satisfies the
+      first. This suite went green on all fifteen checks while the model was timing
+      out on every single request (`phase8-deploy/VERIFIED.md`)
 - [ ] `make report` writes `PORTFOLIO.md` — eval scores per slice, live red-team
       containment, latency percentiles read off the spans, the cost story and the
       ADR list, every number measured by `src/assistant/report.py` and the
