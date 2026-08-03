@@ -1,0 +1,20 @@
+{
+  "cost_usd": 0.0,
+  "faithfulness": 0.733,
+  "p99_ms": 4526.993,
+  "recall": 1.0,
+  "redteam_bypasses": 0,
+  "runs": 63,
+  "tokens_in": 541,
+  "tokens_out": 102,
+  "tokens_source": "mixed",
+  "versions": {
+    "corpus": "corpus-3-81e3e9c7",
+    "dataset": "golden-5-d7ef7fc7+probes-3",
+    "judge": "ragas-0.4.3/qwen3-coder:30b",
+    "model": "qwen3.5:9b",
+    "prompt": "grounded-fbc5e0e3",
+    "redteam": "v3+rows-58",
+    "source": "e1efe9d5"
+  }
+}

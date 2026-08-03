@@ -1,0 +1,9 @@
+{
+  "source": "e1efe9d5",
+  "commit": "92d996f2d0d9a44829c794bf0a3f38773ae147a9",
+  "lane": "host ollama via host.docker.internal, model qwen3.5:9b (GPU; not what CI runs)",
+  "model": "qwen3.5:9b",
+  "checks_run": 15,
+  "checks_total": 15,
+  "finished_at": "2026-08-03T18:12:14+00:00"
+}
