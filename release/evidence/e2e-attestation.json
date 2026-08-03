@@ -1,9 +1,14 @@
 {
-  "source": "e1efe9d5",
-  "commit": "92d996f2d0d9a44829c794bf0a3f38773ae147a9",
-  "lane": "host ollama via host.docker.internal, model qwen3.5:9b (GPU; not what CI runs)",
+  "source": "1a0898d9",
+  "commit": "da117b51b6551ca3ebe3766468a63fc6bc81c109",
+  "lane": "host ollama via host.docker.internal, model qwen3.5:9b",
   "model": "qwen3.5:9b",
+  "ollama_version": "0.32.5",
+  "model_digests": {
+    "nomic-embed-text": "0a109f422b47e3a30ba",
+    "qwen3.5:9b": "6488c96fa5faab64bb6"
+  },
   "checks_run": 15,
   "checks_total": 15,
-  "finished_at": "2026-08-03T18:12:14+00:00"
+  "finished_at": "2026-08-03T20:33:52+00:00"
 }

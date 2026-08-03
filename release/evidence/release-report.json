@@ -1,12 +1,12 @@
 {
   "cost_usd": 0.0,
-  "faithfulness": 0.733,
-  "p99_ms": 4526.993,
+  "faithfulness": 0.767,
+  "p99_ms": 6101.267,
   "recall": 1.0,
   "redteam_bypasses": 0,
   "runs": 63,
-  "tokens_in": 541,
-  "tokens_out": 102,
+  "tokens_in": 615,
+  "tokens_out": 235,
   "tokens_source": "mixed",
   "versions": {
     "corpus": "corpus-3-81e3e9c7",
@@ -15,6 +15,6 @@
     "model": "qwen3.5:9b",
     "prompt": "grounded-fbc5e0e3",
     "redteam": "v3+rows-58",
-    "source": "e1efe9d5"
+    "source": "1a0898d9"
   }
 }
