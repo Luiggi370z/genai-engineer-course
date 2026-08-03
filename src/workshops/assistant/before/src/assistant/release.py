@@ -157,20 +157,43 @@ def build_judge(model: str, host: str | None) -> Judge:
     raise NotImplementedError
 
 
-def require_real_tiers(assistant: Assistant) -> dict[str, str | int]:
-    """TODO 5: refuse to publish a number the offline tier produced.
+def require_real_tiers(assistant: Assistant) -> dict[str, str | float | int]:
+    """Refuse to publish a number the offline tier produced.
 
-    Read `assistant.tier()` and require rag=qdrant, memory=sqlite, brain=ollama,
-    retrieval=hybrid-rrf, plus a real `embed_model`, a real `rerank_model`, and
-    an empty `assistant.degraded`. Anything else raises `SystemExit` naming every
-    mismatch and pointing at docs/RELEASE-CHECKLIST.md.
-
-    Every one of those is something that fails OPEN in normal operation, which is
+    Every one of these is something that fails OPEN in normal operation, which is
     correct for a service and wrong for a measurement. `report.py` running on the
     fallback tier is a proxy doing its job; this module running on the fallback
     tier is a lie with a date on it.
     """
-    raise NotImplementedError
+    tier = assistant.tier()
+    wanted = {
+        "rag": "qdrant",
+        "memory": "sqlite",
+        "brain": "ollama",
+        "retrieval": "hybrid-rrf",
+    }
+    wrong = [f"{k}={tier.get(k)!r} (want {v!r})" for k, v in wanted.items() if tier.get(k) != v]
+    if assistant.settings.embed_model is None:
+        wrong.append("embed=hash (want a real embedder via ASSISTANT_EMBED_MODEL)")
+    if assistant.settings.rerank_model is None:
+        wrong.append("rerank=off (want ASSISTANT_RERANK_MODEL set)")
+    # A recall number measured on a store that cannot abstain is not a recall
+    # number. Without a floor every question retrieves its three nearest rows, so
+    # the retrieval metrics are computed over a system that never says "nothing
+    # here" — which is most of what they are supposed to be measuring.
+    if not assistant.settings.min_score:
+        wrong.append("threshold=none (want ASSISTANT_MIN_SCORE set, see docker-compose.yml)")
+    if assistant.degraded:
+        wrong.append(f"degraded={dict(assistant.degraded)}")
+    if wrong:
+        raise SystemExit(
+            "release evidence must be measured on the deployed tier; this run is not:\n  "
+            + "\n  ".join(wrong)
+            + "\n\nBoot the stack (src/phase8-deploy/01-compose/after) and export "
+            "QDRANT_URL, OLLAMA_HOST, ASSISTANT_EMBED_MODEL, ASSISTANT_RERANK_MODEL, "
+            "ASSISTANT_MIN_SCORE, ASSISTANT_DB. See docs/RELEASE-CHECKLIST.md."
+        )
+    return tier
 
 
 def provenance(assistant: Assistant, judge_model: str, rows: int, tokens: str) -> str:

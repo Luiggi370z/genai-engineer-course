@@ -57,11 +57,20 @@ the plumbing, and the plumbing was never what was broken.
 output. When it is the only evidence and it bears on the question, it answers.
 Three rules make that safe:
 
-1. **Relevance is required.** `relevant_memories` applies the same content-word
-   filter documents get. Recall is greedy — it returns what it has about the
-   caller — so without this, knowing someone's timezone would answer every
-   question the corpus could not, confidently and wrongly. A document question
-   with an unrelated memory in scope still abstains.
+1. **Relevance is required.** `relevant_memories` applies a content-word filter.
+   Recall is greedy — it returns what it has about the caller — so without this,
+   knowing someone's timezone would answer every question the corpus could not,
+   confidently and wrongly. A document question with an unrelated memory in scope
+   still abstains.
+
+   A **lexical** filter is the right instrument here and only here, because memory
+   recall is itself lexical (`memory.overlap`): the filter speaks the same language
+   as the store it is filtering. The same filter was briefly applied to retrieved
+   documents on the argument that both are "evidence that might not answer", and
+   that was wrong for the mirror-image reason — retrieval had been made semantic, so
+   a word-overlap test downstream discarded exactly the hits the embedder existed to
+   find. Documents are now filtered by score, at the store, where the scores are.
+   See ADR-0012.
 2. **It is attributed, never asserted.** The answer opens "You told me earlier",
    and the model tier uses `memory_prompt` rather than `grounded_prompt` —
    because that prompt demands `[c#]` ids, and a model asked to cite with nothing

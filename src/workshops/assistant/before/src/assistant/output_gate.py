@@ -9,29 +9,50 @@ already rendered in the caller's browser and sitting in their proxy logs. A
 `done` event announcing "actually that was redacted" is a notification, not a
 control.
 
-Buffering the whole answer fixes it and throws away streaming. The middle is a
-**holdback window**: keep the last `HOLDBACK_CHARS` characters back, screen the
-accumulated text on every chunk, and release only the prefix that is far enough
-behind the head. The argument only works if no pattern the gate can match spans
-more than `HOLDBACK_CHARS` characters — then a match that *starts* inside the
-released prefix must already be complete, and therefore already caught, before
-that prefix goes out.
+Buffering the whole answer fixes it and throws away streaming. The middle is to
+release only the prefix of the answer that no still-forming match could reach
+back into. Getting that condition right took three attempts, and the two failures
+are worth more than the fix.
 
-That premise used to be a comment claiming a round number was "far more than
-enough". It was wrong: an unbounded `+` in the email pattern could match a span
-of any length, and a long enough local part pushed the start of the address out
-of the window and onto the wire. The window is now *derived* from the patterns
-instead of asserted over them — every entry in `guardrails.PII` declares the
-longest text it can match, and this module takes the maximum. Adding a pattern
-that can match further automatically widens the window, and a pattern that
-cannot state a bound cannot be added at all.
+**Attempt one** kept back a round 256 characters and a comment calling it "far
+more than enough". The email pattern had an unbounded `+`, so it could match a
+span of any length; a long local part pushed the start of the address out of the
+window and onto the wire.
 
-The cost is honest and bounded: the caller sees the answer `HOLDBACK_CHARS`
-characters later than they otherwise would, and an answer shorter than the window
-arrives in a single frame. That is the price of a gate that actually gates, and
-`ASSISTANT_STREAM_MODE=raw` is available for local work where it is not worth
-paying — documented as local-only, because with it the gate becomes a
-notification again.
+**Attempt two** bounded every pattern and *derived* the window from those bounds
+— `HOLDBACK_CHARS` is the longest span any `guardrails.PII` entry can match. That
+fixed the stated premise and left the real one unstated. Bounding the email regex
+to 64 characters of local part means an over-long address still matches, but only
+on its **last** 64 characters; the hundreds of characters in front of that are
+part of no match at all, so nothing held them. A 1000-character local part
+released 608 characters of itself and then blocked the terminal event, which is
+the same leak wearing the previous fix as a costume.
+
+The mistake both times was reasoning about **matches** when the thing that must
+not escape is a **candidate**. Before the `@` arrives, the gate cannot know
+whether the run of characters it is holding is a word or the front half of an
+address. So the release rule now rests on two bounds and takes the tighter:
+
+1. **the span bound** — a character older than `HOLDBACK_CHARS` cannot be
+   extended into a new match, because no pattern can match that far; and
+2. **the token bound** — a character before the start of the trailing
+   *unterminated* candidate run cannot be part of a match that is still forming,
+   because no pattern can match across a `DELIMITER`.
+
+Either one alone would be sufficient today. Keeping both means a future edit has
+to break two independent invariants to leak, and both are proved mechanically
+rather than asserted in prose: `test_stream.py` derives each pattern's true
+maximum span from its compiled form, and walks its parse tree to prove it can
+consume no delimiter. A pattern that cannot state a bound, or that could match
+across a space, fails the suite instead of quietly widening the hole.
+
+The cost is honest and bounded. Ordinary prose is full of delimiters, so the
+token bound is nearly free — the gate holds the word being typed. Adversarial
+input is where it bites: a single unbroken 4000-character token is held in full
+until something terminates it, which is to say the gate degrades to full
+buffering exactly when full buffering is what safety requires. `ASSISTANT_STREAM_MODE=raw`
+remains available for local work where none of this is worth paying for —
+documented as local-only, because with it the gate becomes a notification again.
 
 The other terminal event here is `truncated`. A model that dies halfway through
 leaves a grammatical fragment that reads like a whole answer; presenting it as
@@ -40,6 +61,7 @@ from "this is as far as the answer got".
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 from assistant import guardrails
@@ -48,10 +70,22 @@ from assistant.composers import StreamTruncated
 SAFE_BUFFERED = "safe-buffered"
 RAW = "raw"
 
-#: The window, derived from the patterns rather than guessed ahead of them: the
-#: longest span any `guardrails.PII` entry can match. Release a character sooner
-#: than this and a match could still form behind it.
+#: The span bound, derived from the patterns rather than guessed ahead of them:
+#: the longest span any `guardrails.PII` entry can match. Release a character
+#: sooner than this and a match could still form behind it.
 HOLDBACK_CHARS = max(p.max_span for p in guardrails.PII)
+
+#: One character that no `guardrails.PII` pattern can consume — the complement of
+#: every character class they use. A match therefore lies entirely inside one run
+#: of non-delimiter characters, which is what makes the run boundary a safe place
+#: to cut: everything before the trailing run is either already a complete match
+#: (and blocked) or can never become one.
+#:
+#: This is a claim about the patterns, so it is checked against the patterns.
+#: `test_stream.py` walks each compiled regex's parse tree and proves it can
+#: consume nothing this expression matches. Add a pattern with a space in it and
+#: that test fails; the alternative is a comment nobody re-reads.
+DELIMITER = re.compile(r"[^\w.+@-]")
 
 REDACTION = "[redacted: output failed the safety gate]"
 
@@ -73,16 +107,29 @@ def gated_chunks(
     `mode == RAW` is the naive shape and is written for you in `_raw` below —
     read it first, then build the default so the difference is concrete.
 
-    For SAFE_BUFFERED, keep two pieces of state: the accumulated `buffer` and how
-    many characters you have `released`. On every incoming chunk:
+    For SAFE_BUFFERED, keep three pieces of state: the accumulated `buffer`, how
+    many characters you have `released`, and where the trailing run of candidate
+    characters starts (`run_starts_at`, which is just past the most recent
+    `DELIMITER` match). On every incoming chunk:
 
       * append it to the buffer and re-screen the WHOLE buffer — a pattern can
         straddle a chunk boundary, so screening chunks individually catches
         nothing;
       * on failure, yield ("blocked", REDACTION) and stop. What you already
         released is clean by construction; the client still discards it;
-      * otherwise compute `cut = len(buffer) - HOLDBACK_CHARS` and, if that is
+      * advance `run_starts_at` by scanning the text you just appended for
+        delimiters (`DELIMITER.finditer(buffer, scanned_to)` — scan only the new
+        part, or an adversarial 4000-character token costs you a quadratic);
+      * cut at `min(len(buffer) - HOLDBACK_CHARS, run_starts_at)` and, if that is
         ahead of `released`, yield `buffer[released:cut]` and move `released` up.
+
+    Both halves of that `min` are load-bearing, and the module docstring above
+    explains why at length. The short version, because it is the part that is
+    genuinely hard: the span bound alone is not enough. Reason about it with a
+    500-character local part and you will find that the address still gets
+    detected — the regex matches its last 64 characters — while the first hundred
+    characters of it are part of no match at all, and so nothing holds them back.
+    Two shipped versions of this file had that bug.
 
     When the source is exhausted, screen once more, flush whatever is still held
     back, and yield ("done", buffer).
@@ -93,10 +140,12 @@ def gated_chunks(
     `("truncated", buffer)` instead of `("done", buffer)`. Ending a died-early
     stream with `done` is how a fragment gets served as a finished answer.
 
-    Two tests to hold yourself to: a stream whose LAST chunk completes an email
-    address must emit no chunk containing it, and the window you rely on is
-    `HOLDBACK_CHARS`, which is derived from `guardrails.PII` rather than picked.
-    Do not hardcode a number here.
+    The tests to hold yourself to are already written, and two of them are worth
+    reading before you start: `test_no_local_part_is_long_enough_to_outrun_the_gate`
+    sweeps the address length past the window at five different chunk sizes, and
+    `test_nothing_the_gate_releases_belongs_to_a_token_it_blocks` states the
+    property over generated inputs. Do not hardcode a number here — the bounds come
+    from `HOLDBACK_CHARS` and `DELIMITER`, both derived from `guardrails.PII`.
     """
     raise NotImplementedError
 

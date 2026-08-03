@@ -9,6 +9,7 @@ These tests are written against the leak rather than the fix, so they would fail
 again if someone reintroduced a single shared store.
 """
 import sqlite3
+from dataclasses import replace
 
 import pytest
 
@@ -16,7 +17,7 @@ from assistant.composers import ABSTAIN
 from assistant.core import Assistant
 from assistant.memory import AssistantMemory
 from assistant.rag import Chunk
-from assistant.service import build_assistant
+from assistant.service import build_assistant, relevance_gap
 from assistant.settings import Settings
 from assistant.sqlite_memory import SqliteMemory
 from assistant.tenancy import TenantMemory
@@ -161,8 +162,26 @@ def test_a_document_answer_is_still_grounded_in_documents():
     assert answer["citations"]
 
 
+#: What `nomic-embed-text` actually scores, measured against the deployed corpus
+#: and used here so the fake ranks the way the real store ranks. The pairs below
+#: are the two that matter: a question answered in entirely different words scores
+#: 0.66, and the nearest document to an off-topic question scores 0.51. Everything
+#: about relevance in this system lives in that gap.
+MEASURED = {
+    ("which timezone should we schedule in", "refunds"): 0.51,
+    ("which timezone should we schedule in", "expenses"): 0.43,
+    ("how long do refunds take", "refunds"): 0.79,
+    ("how long do refunds take", "expenses"): 0.52,
+    ("how quickly do i get money back for a work trip", "expenses"): 0.66,
+    ("how quickly do i get money back for a work trip", "refunds"): 0.64,
+}
+
+#: The floor from `docker-compose.yml`, midway between the two sides of that gap.
+FLOOR = 0.58
+
+
 class NearestNeighbours:
-    """A store that answers every query with the same three documents.
+    """A vector store: it ranks everything, and abstains only if told how.
 
     Not a strawman — it is what a vector index does. BM25 returns nothing when no
     term matches, so every test above ran with an empty `contexts` list on an
@@ -171,37 +190,76 @@ class NearestNeighbours:
     about timezones and it hands back the nearest rows in the corpus, which are
     about refunds.
 
-    The deployed stack failed exactly here — `grounding: "documents"`, three
-    irrelevant citations, and an answer of "I don't know" with the caller's own
-    timezone sitting in the `memories` field of the same response — while this
-    suite was green. The fake is the difference between the two.
+    `floor` is the whole point of the fake. Set, it is `ASSISTANT_MIN_SCORE` and
+    the store can say "nothing here". Unset, it cannot, and the deployed stack
+    failed exactly there — `grounding: "documents"`, three irrelevant citations,
+    and an answer of "I don't know" with the caller's own timezone sitting in the
+    `memories` field of the same response, while this suite was green.
+
+    Scores come from `MEASURED` rather than from a keyword rule, because a fake
+    that decides relevance by shared words cannot show the difference between
+    lexical and semantic retrieval — which is the difference this file exists to
+    hold on to.
     """
 
-    def __init__(self, texts: list[str]) -> None:
-        self.chunks = [Chunk(text=t, source=f"doc-{i}") for i, t in enumerate(texts)]
+    def __init__(self, docs: dict[str, str], floor: float = FLOOR) -> None:
+        self.docs = docs
+        self.floor = floor
 
     def add(self, docs: list) -> None:  # pragma: no cover - not what this proves
         pass
 
     def search(self, query: str, k: int = 3, tenant: str = "local") -> list[Chunk]:
-        return self.chunks[:k]
+        ranked = sorted(
+            ((MEASURED.get((query, name), 0.3), name) for name in self.docs),
+            reverse=True,
+        )
+        return [
+            Chunk(text=self.docs[name], source=f"{name}.md", score=score,
+                  scored_by="cosine")
+            for score, name in ranked[:k]
+            if score >= self.floor
+        ]
 
 
-def with_neighbours() -> Assistant:
+CORPUS = {
+    "refunds": "approved refunds are processed within five business days",
+    "expenses": "staff are reimbursed for travel expenses within ten business days",
+}
+
+
+def with_neighbours(floor: float = FLOOR) -> Assistant:
     assistant = build_assistant(Settings())
-    assistant.rag = NearestNeighbours([
-        "approved refunds are processed within five business days",
-        "staff are reimbursed for travel expenses within ten business days",
-    ])
+    assistant.rag = NearestNeighbours(CORPUS, floor=floor)
     return assistant
+
+
+def test_a_document_that_shares_no_words_with_the_question_still_answers_it():
+    """The promise the whole of Phase 2 makes, asserted on the answer.
+
+    "Money back for a work trip" and "reimbursed for travel expenses" have no word
+    longer than three characters in common, which is exactly why this is the test
+    worth having: it passes only if relevance is decided by the embedder's score
+    and not by string overlap. A lexical filter anywhere on this path — and there
+    was one, in the composer — turns this answer into an abstention while the
+    document sits in the response under `contexts`.
+    """
+    assistant = with_neighbours()
+    answer = assistant.ask("how quickly do i get money back for a work trip", subject="alice")
+    assert "reimbursed" in answer["answer"]
+    assert answer["grounding"] == "documents"
+    assert answer["citations"][0]["source"] == "expenses.md"
+    # the score that kept it travels with the citation, in named units
+    assert answer["citations"][0]["scored_by"] == "cosine"
+    assert answer["citations"][0]["score"] >= FLOOR
 
 
 def test_irrelevant_neighbours_do_not_outrank_the_memory_that_answers():
     """The regression the vector store found and the fake now keeps.
 
-    Retrieval returning something is not retrieval answering something. When
-    nothing that came back bears on the question, the evidence class is whatever
-    does — here, what the caller said about themselves."""
+    Retrieval returning something is not retrieval answering something. Nothing in
+    this corpus is within the floor of a timezone question, so the evidence class
+    is whatever is — here, what the caller said about themselves."""
     assistant = with_neighbours()
     assistant.ask(ALICE_FACT, subject="alice")
     answer = assistant.ask("which timezone should we schedule in", subject="alice")
@@ -213,8 +271,8 @@ def test_irrelevant_neighbours_do_not_outrank_the_memory_that_answers():
 
 
 def test_relevant_neighbours_still_win_over_a_memory():
-    """The other half: the filter must not turn every document answer into a
-    memory one. Ask these same neighbours something they DO answer and the
+    """The other half: abstaining retrieval must not turn every document answer
+    into a memory one. Ask these same neighbours something they DO answer and the
     document is the ground, cited."""
     assistant = with_neighbours()
     assistant.ask(ALICE_FACT, subject="alice")
@@ -229,3 +287,31 @@ def test_neighbours_that_answer_nothing_and_no_memory_still_abstain():
     answer = assistant.ask("which timezone should we schedule in", subject="alice")
     assert answer["answer"] == ABSTAIN
     assert answer["grounding"] == "none"
+
+
+def test_a_store_with_no_floor_grounds_an_answer_in_its_nearest_neighbours():
+    """The misconfiguration, kept as an executable description of itself.
+
+    With no floor the store cannot abstain, so a timezone question is answered
+    from a refund policy and the response says `grounding: "documents"` with a
+    citation to prove it. Nothing downstream can repair this — the composer is
+    holding text that retrieval has already vouched for. That is why the fix is a
+    floor rather than a second filter, and why `build_assistant` reports a vector
+    store without one as degraded instead of waiting to be asked."""
+    assistant = with_neighbours(floor=0.0)
+    assistant.ask(ALICE_FACT, subject="alice")
+    answer = assistant.ask("which timezone should we schedule in", subject="alice")
+    assert answer["grounding"] == "documents"
+    assert answer["answer"].startswith("approved refunds")
+    assert answer["citations"][0]["source"] == "refunds.md"
+
+    vector_store = Settings(qdrant_url="http://qdrant:6333")
+    assert "cannot abstain" in (relevance_gap(vector_store) or "")
+    assert relevance_gap(replace(vector_store, min_score=FLOOR)) is None
+    # and BM25 needs no floor, so asking for one is not a rule about all stores
+    assert relevance_gap(Settings()) is None
+
+    assistant.settings = vector_store
+    assert assistant.tier()["threshold"] == "none"
+    assistant.settings = replace(vector_store, min_score=FLOOR)
+    assert assistant.tier()["threshold"] == FLOOR

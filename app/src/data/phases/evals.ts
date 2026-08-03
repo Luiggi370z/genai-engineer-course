@@ -597,12 +597,14 @@ def test_rubber_stamp_judge_has_near_zero_kappa():
       effort: { fast: 75, integration: null, realistic: 120 },
       rung: "faded",
       proves: "operate",
-      task: "Commit a `baseline.json`, then build `make gate`: it fails on an absolute-bar breach, on a per-slice regression beyond tolerance, and on a stale baseline. Wire it into a GitHub Actions workflow with the fast tier on every PR and the judged tier nightly.",
+      task: "Commit a `baseline.json`, then build `make gate`: it fails on an absolute-bar breach, on a per-slice regression beyond tolerance, and on a stale baseline. Wire it into a GitHub Actions workflow with the fast tier on every PR and the judged tier nightly. Prove all three failures fire by making each one happen: record the number the gate read, the number it compared against, and the exit code, for a passing run and for one deliberate breach of each rule. Note how long the fast tier takes — a gate slower than about two minutes gets skipped, which is the same as not having one.",
       assesses: ["p-evals-o5"],
       solution: [
         "Gate on slices, not just the overall mean — that is where a collapsed abstain path hides.",
         "Re-baselining must be an explicit, reviewed commit. A gate that updates its own baseline is a gate that never fails.",
         "Print a diff table, not a stack trace. The failure message is a code-review artifact; make it readable.",
+        "Test the gate by breaking things on purpose, and write the numbers down. A gate nobody has seen fail is a gate nobody has tested — and the three rules fail for different reasons, so passing once proves one of them at most.",
+        "Check the boundary of your tolerance explicitly. A regression of exactly the tolerance either fails or passes depending on `<` versus `<=`, and every run either side of it looks identical.",
       ],
       code: `# Makefile
 gate:            ## fail the build on a regression (no model needed)

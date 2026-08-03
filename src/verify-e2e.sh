@@ -302,6 +302,40 @@ ask() { # ask 'question' [token] -> response saved to /tmp/e2e-ask.json
     -d "{\"question\": \"$1\"}" -o /tmp/e2e-ask.json
 }
 
+# answer_says PATTERN MESSAGE — the pattern appears in the ANSWER, not merely
+# somewhere in the response.
+#
+# This helper exists because of a specific false pass. The semantic-recall check
+# ran `grep -qi reimburse /tmp/e2e-ask.json` over the whole response body, and the
+# response body includes `contexts` — so it went green while the answer itself was
+# "I don't know", the document sat two fields away, and `grounding` said
+# "documents". The check was measuring retrieval and reporting on composition, and
+# the one bug that can sit between those two is the exact bug it was written to
+# catch. Every assertion about what the assistant SAID goes through here.
+answer_says() {
+  grep -qi -- "$1" <<<"$(jget /tmp/e2e-ask.json answer)" || die "$2"
+}
+
+# grounded_in KIND — the answer was built from the evidence class it claims.
+#
+# `grounding` is the field that separates "the model knew this" from "the corpus
+# said this", and asserting it is how a citation check becomes a check that the
+# citation had anything to do with the answer.
+grounded_in() {
+  local got
+  got="$(jget /tmp/e2e-ask.json grounding)"
+  [[ "$got" == "$1" ]] || die "expected grounding=$1, got $got: $(jget /tmp/e2e-ask.json answer)"
+}
+
+# cites SOURCE — SOURCE is among the citations, by name.
+cites() {
+  python3 - /tmp/e2e-ask.json "$1" <<'EOF' || die "no citation names $1"
+import json, sys
+cites = json.load(open(sys.argv[1]))["citations"]
+sys.exit(0 if any(c["source"] == sys.argv[2] for c in cites) else 1)
+EOF
+}
+
 # Starts at 1 because booting IS check 1 and it always runs. The old script
 # counted the numbered checks it looped over and reported "all 14 checks passed"
 # under a header that promised fifteen — the kind of off-by-one that makes a
@@ -421,7 +455,8 @@ check_4() {
   as "$ALICE" -X POST "$BASE/ingest" -H 'content-type: application/json' \
     -d '{"docs": ["approved refunds are processed within five business days"]}' >/dev/null
   ask "how long do refunds take"
-  grep -qi "refunds" /tmp/e2e-ask.json || die "answer is not grounded in the ingested doc"
+  answer_says "five business days" "the answer does not carry what the document says"
+  grounded_in documents
   [[ "$(jget /tmp/e2e-ask.json citations.0.id)" == "c1" ]] || die "grounded answer carried no citations"
   # The MODEL answered — the assertion this suite lacked for its whole life. A
   # composer that times out is caught, reported, and answered anyway by the offline
@@ -484,10 +519,32 @@ EOF
   # this at zero; a real one puts it first.
   ask "how quickly do i get money back for a work trip" \
     || die "the synonym question was refused"
-  grep -qi "reimburse" /tmp/e2e-ask.json \
-    || die "semantic recall failed: no word in that question appears in the answer's source"
+  # Three assertions where there used to be one, and the one was `grep -qi
+  # reimburse` over the entire response. That passed while the answer was "I don't
+  # know": the document was in `contexts`, the word was in the file, and the check
+  # never looked at what the assistant said. A lexical filter in the composer was
+  # discarding the very hit the embedder had just found, and this check reported
+  # success for two audit rounds.
+  #
+  # The order matters. `grounded_in documents` fails first and most clearly if the
+  # relevance floor is wrong; `answer_says` fails if composition threw the evidence
+  # away; `cites` fails if the answer came from somewhere else entirely.
+  grounded_in documents
+  answer_says "reimburse\|expense\|ten business days" \
+    "semantic recall reached retrieval but not the answer: $(jget /tmp/e2e-ask.json answer)"
+  cites expenses.md
+  # And the score that kept it, in its own units — the number the floor was
+  # compared against, published so an operator can retune it from real traffic
+  # instead of from the corpus someone used to pick 0.58.
+  python3 - /tmp/e2e-ask.json <<'EOF' || die "the citation carries no scored relevance"
+import json, sys
+top = json.load(open(sys.argv[1]))["citations"][0]
+ok = top.get("scored_by") == "cosine" and isinstance(top.get("score"), float)
+print(f"  top citation: {top['source']} at {top.get('score')} ({top.get('scored_by')})")
+sys.exit(0 if ok else 1)
+EOF
   echo "grounded answer came back with contexts, citations, and streamed through the gate"
-  echo "semantic recall works: a question sharing no vocabulary with the document found it"
+  echo "semantic recall works: a question sharing no vocabulary with the document answered it"
 }
 
 check_5() {
@@ -524,7 +581,10 @@ EOF
   [[ "$count" == "1" ]] || die "two ingests of one document produced $count copies of it"
   # The round trip that makes a citation checkable rather than decorative.
   as "$ALICE" "$BASE/evidence/$chunk_id" >/tmp/e2e-evidence.json
-  grep -qi "duty manager" /tmp/e2e-evidence.json \
+  # The `text` field specifically. `snippet` is a prefix of the same string, so a
+  # body-wide grep here would pass on an endpoint that returned the citation it was
+  # given and no evidence at all.
+  grep -qi "duty manager" <<<"$(jget /tmp/e2e-evidence.json text)" \
     || die "the cited chunk id did not resolve back to its text"
   # Withdrawal, tenant-scoped and audited. Rebuilding the collection used to be the
   # only way to retract one page.
@@ -540,8 +600,16 @@ EOF
 
 check_6() {
   ask "what is the CEO home postal address"
-  grep -qi "don't know" /tmp/e2e-ask.json || die "the assistant invented an answer"
-  echo "abstained instead of inventing"
+  answer_says "don't know" "the assistant invented an answer"
+  # The half that makes this check mean something. An abstention with
+  # `grounding: "documents"` is a system that retrieved three irrelevant pages,
+  # failed to answer from them, and still called them the evidence — which is what
+  # the deployed stack did before retrieval had a relevance floor. Asserting the
+  # words alone cannot tell that apart from an honest "nothing matched".
+  grounded_in none
+  [[ "$(jget /tmp/e2e-ask.json citations)" == "[]" ]] \
+    || die "abstained and cited sources anyway: $(jget /tmp/e2e-ask.json citations)"
+  echo "abstained instead of inventing, and claimed no evidence for it"
 }
 
 check_7() {
@@ -674,8 +742,12 @@ check_10() {
   ask "look up the company fact for the refund window"
   grep -q '"ran: lookup_fact"' /tmp/e2e-ask.json ||
     die "the planner never selected the MCP-discovered tool (registry-driven selection is broken)"
-  grep -qi "five business days" /tmp/e2e-ask.json ||
-    die "the discovered tool ran but its result never reached the answer"
+  # The answer field, not the response body: `"ran: lookup_fact"` above is already
+  # in the audit trail, and the tool's OUTPUT is echoed in `state` too. Grepping the
+  # whole body here would pass on a run where the tool executed, was recorded, and
+  # then had its result dropped on the floor by the composer.
+  answer_says "five business days" \
+    "the discovered tool ran but its result never reached the answer"
   echo "the planner picked lookup_fact off the registry and answered from it"
 
   # ...and that only worked because the operator allowlisted it. The MCP server
@@ -714,18 +786,22 @@ check_11() {
   # response body passed for months against a service that recalled "Lima"
   # perfectly, attached it to the payload, and replied "I don't know" — recall
   # that reaches the response and not the reader is recall nobody has.
-  grep -qi "lima" <<<"$(jget /tmp/e2e-ask.json answer)" ||
-    die "alice's own fact did not reach her answer — recall is decorative"
-  [[ "$(jget /tmp/e2e-ask.json grounding)" == "memory" ]] ||
-    die "a memory-grounded answer is not reported as one"
+  answer_says "lima" "alice's own fact did not reach her answer — recall is decorative"
+  grounded_in memory
   [[ "$(jget /tmp/e2e-ask.json citations)" == "[]" ]] ||
     die "a memory was passed off as a citation"
   cp /tmp/e2e-ask.json /tmp/e2e-alice.json
 
   ask "which timezone should we schedule in" "$BOB"
   [[ "$(jget /tmp/e2e-ask.json memories)" == "[]" ]] || die "bob recalled alice's memory"
+  # Deliberately the WHOLE body, unlike every positive assertion in this file. The
+  # question here is not "did Bob's answer use Alice's fact" but "did Alice's fact
+  # reach Bob's process at all" — a leak into `memories` or `contexts` is a leak
+  # even if the composer happened not to quote it. Narrowing this to `answer` would
+  # weaken it; narrowing a positive check to `answer` strengthens it. Same tool,
+  # opposite direction.
   if grep -q "Lima" /tmp/e2e-ask.json; then
-    die "alice's fact leaked into bob's answer"
+    die "alice's fact leaked into bob's response, in any field"
   fi
 
   # The partition has to live in the database, not in a label the recall query
@@ -840,7 +916,8 @@ check_14() {
     -d '{"docs": ["approved refunds are processed within five business days"]}' >/dev/null
   $COMPOSE stop qdrant >/dev/null
   ask "how long do refunds take"
-  grep -qi "refunds" /tmp/e2e-ask.json || die "the fallback tier did not answer while Qdrant was down"
+  answer_says "five business days" "the fallback tier did not answer while Qdrant was down"
+  grounded_in documents
   curl -sf "$BASE/health" -o /tmp/e2e-health.json
   [[ "$(jget /tmp/e2e-health.json status)" == "degraded" ]] || die "/health hid the degradation"
   echo "answered from the fallback tier and /health confessed: degraded"
@@ -866,7 +943,13 @@ check_15() {
   # Qdrant was stopped in check 14 and may still be re-passing its healthcheck;
   # retry the grounded ask until the real tier is back rather than racing it.
   local ask_deadline=$((SECONDS + 90))
-  until ask "how long do refunds take" && grep -qi "refunds" /tmp/e2e-ask.json; do
+  # The retry condition is the ANSWER carrying what the document says. Waiting on
+  # "refunds" anywhere in the body would stop waiting as soon as retrieval came
+  # back, because the retrieved text is echoed in `contexts` whether or not the
+  # composer used it — the same false positive as check 4's semantic assertion,
+  # which is what makes it worth fixing in a wait loop too.
+  until ask "how long do refunds take" &&
+    grep -qi "five business days" <<<"$(jget /tmp/e2e-ask.json answer)"; do
     ((SECONDS < ask_deadline)) || die "ingested knowledge did not survive the restart"
     sleep 5
   done

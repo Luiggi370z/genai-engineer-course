@@ -19,10 +19,23 @@ report:           ## run the service on trial: PORTFOLIO.md for humans, evals/re
 #   make release-evidence
 #
 # Full instructions, and what to do with the output: docs/RELEASE-CHECKLIST.md
+# A release measurement runs on its OWN corpus and its own database. Neither
+# default is cosmetic: step 5 of the checklist runs verify-e2e.sh against the same
+# Qdrant, and that script ingests refund policies, expense pages, an escalation
+# page it later deletes, and the poisoned document from the injection check. Left
+# in the collection, all of that becomes part of the corpus a recall number is
+# measured over — so retrieval metrics for a release would be partly a measurement
+# of the previous test run.
+#
+# `QDRANT_COLLECTION` is therefore release-specific rather than the shared
+# `assistant`, the same way `ASSISTANT_DB` is a fresh file rather than the
+# deployed volume's.
 RELEASE_ENV := QDRANT_URL=$${QDRANT_URL:-http://localhost:6333} \
   OLLAMA_HOST=$${OLLAMA_HOST:-http://localhost:11434} \
   ASSISTANT_EMBED_MODEL=$${ASSISTANT_EMBED_MODEL:-nomic-embed-text} \
   ASSISTANT_RERANK_MODEL=$${ASSISTANT_RERANK_MODEL:-BAAI/bge-reranker-base} \
+  QDRANT_COLLECTION=$${QDRANT_COLLECTION:-assistant-release} \
+  ASSISTANT_MIN_SCORE=$${ASSISTANT_MIN_SCORE:-0.58} \
   ASSISTANT_DB=$${ASSISTANT_DB:-evidence/release.db}
 
 .PHONY: release-evidence

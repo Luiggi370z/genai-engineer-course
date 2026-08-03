@@ -117,9 +117,41 @@ store's job rather than the client's.
 
 **Vector search never abstains.** `ASSISTANT_MIN_SCORE` is a floor on the DENSE
 similarity — not on the fused score, which is a reciprocal rank and means nothing
-as a magnitude. Default 0.0, because the useful cut depends on the embedder and
-the corpus and a wrong one abstains on good answers; the mechanism is what ships,
-tuned per deployment. `ASSISTANT_RERANK_MODEL` adds an optional cross-encoder
+as a magnitude. The library default is 0.0 because the useful cut depends on the
+embedder and the corpus; the deployment sets a real one, and a vector store without
+one is now **reported as degraded** (`relevance` in `degraded`, `threshold: "none"`
+on `/health`) rather than left to be discovered from an answer. `require_real_tiers`
+refuses to publish release numbers measured without it: recall scored against a
+store that cannot say "nothing here" is not a recall number.
+
+**Relevance is decided here and nowhere else.** This is the amendment a fourth
+audit forced, and it is a lesson about layers rather than about retrieval. When the
+store became a vector index, `contexts` stopped ever being empty, so a downstream
+filter was added in the composer to decide which retrieved documents "could
+plausibly answer the question". It could only compare words, because text is all a
+composer has — and a word-overlap test standing downstream of a semantic retriever
+discards precisely the results semantic retrieval exists to produce. "How quickly do
+i get money back for a work trip" retrieved the travel-expenses page at 0.66 cosine
+and the composer threw it away for sharing no vocabulary with it. The capstone
+contradicted Phase 2 in the artifact the course points at as the answer, for the
+second time and in the opposite direction.
+
+The filter is deleted. An empty `contexts` list means "retrieval found nothing
+relevant" and a non-empty one means "this is the evidence"; the composer's job is to
+use it. Relevance lives with the scores, which is the store.
+
+**The floor is measured, not chosen.** Against the deployed corpus and
+`nomic-embed-text`: the synonym-only true positive scores 0.6596, and the nearest
+document to a question the corpus does not answer scores 0.5097 (0.4779 and 0.3651
+for two more off-topic probes). `ASSISTANT_MIN_SCORE=0.58` splits that gap with
+about 0.07 of margin on each side. Both numbers move with the corpus and the
+embedder, which is why the value lives in `docker-compose.yml` beside the
+measurement and not in the code — and why `Chunk.score` and `Chunk.scored_by` ride
+into the citation, so an operator retunes it from real traffic instead of from the
+three documents somebody used to pick 0.58. The E2E semantic-recall check prints
+that score on every run of the deployed stack.
+
+`ASSISTANT_RERANK_MODEL` adds an optional cross-encoder
 over the fused candidates, which scores query and passage *together* rather than
 comparing two vectors computed apart. It is off by default: a second model on the
 request path, and hybrid already buys most of what it would. A missing
@@ -139,6 +171,18 @@ check by hand). Returning `(text, metadata)` tuples instead of a dataclass (work
 until the third field). Making the real embedder the default (the course must run
 offline; a default that requires a model server is a default that fails on a
 plane).
+
+On relevance specifically: keep the composer filter and make it smarter (embed the
+question a second time in the composer to compare it with each context — a second
+embedding call per answer to recompute a number the store already returned, and it
+would still be a second opinion overruling the retriever from a layer with less
+information). Have the model decide which contexts are relevant (it does, in the
+prompt, and that is the point — the grounded prompt already instructs it to cite only
+what it uses; a hard pre-filter takes that judgement away and makes it with words).
+Drop `min_score` and let the top-k always answer (what shipped, and it is how a
+vector store hallucinates: the nearest neighbour to a question about nothing is still
+a neighbour). Rank-based cuts instead of a score floor (a rank always exists — cut
+"below rank 3" and you still return rank 1 for a question the corpus cannot answer).
 
 ## Consequences
 
@@ -165,5 +209,19 @@ a failure that used to be silent, and cheap because ids are stable.
 Hybrid retrieval issues two prefetches per search instead of one query, and
 over-fetches four times `k` per arm so RRF has something to fuse. At workshop
 corpus sizes this is not measurable; it is the first thing to tune under volume.
-The threshold check costs a third query when `ASSISTANT_MIN_SCORE` is set, which
-is why the default leaves it off.
+The threshold check costs a third query when `ASSISTANT_MIN_SCORE` is set. The
+library default leaves it off; the deployed stack turns it on, and pays for it.
+
+Deleting the composer's filter means a wrong floor now shows up as a confidently
+wrong answer rather than as an abstention. That is the trade the amendment makes on
+purpose: the filter converted "the floor is mistuned" into "the assistant says I
+don't know", which is the failure that hides. The floor is one number, in one file,
+next to the measurement that produced it, and `Chunk.score` puts it in the response
+where a mistuned one is visible.
+
+`Chunk` carries `score` and `scored_by`, and both ride into the citation, so a
+citation now says *why* it is there. `scored_by` matters more than `score`: `"cosine"`
+and `"rrf"` are different units, and a client comparing across them would be reading
+noise. The BM25 tier reports `threshold: "inherent"` on `/health` — a lexical store
+abstains by construction, since no shared terms means no results — so the field
+answers "can this tier say nothing?" for every tier rather than only for Qdrant.

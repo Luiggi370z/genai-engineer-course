@@ -108,7 +108,7 @@ class Assistant:
     # attacker will not use.
     screen: Screen = guardrails.screen
 
-    def tier(self) -> dict[str, str | int]:
+    def tier(self) -> dict[str, str | float | int]:
         s = self.settings
         return {
             "rag": "qdrant" if s.qdrant_url else "in-memory",
@@ -123,6 +123,16 @@ class Assistant:
             # dense-only or dense+sparse fused. The second is what phase 2
             # teaches; the deployed stack shipped the first for a while.
             "retrieval": "hybrid-rrf" if s.qdrant_url else "bm25",
+            # The floor that lets retrieval say "nothing here", and the reason it
+            # is on /health rather than only in the environment: whether the store
+            # can abstain is the difference between an assistant that admits
+            # ignorance and one that grounds an answer in its nearest neighbours.
+            # "inherent" for BM25, which abstains by scoring zero and needs no
+            # number; a float for a vector store; "none" for a vector store that
+            # was never given one, which is a misconfiguration and reads like one.
+            "threshold": (
+                (s.min_score or "none") if s.qdrant_url else "inherent"
+            ),
             # The reranker that is RUNNING, not the one that was asked for —
             # same rule as the embed row above, and it fails the same two ways.
             # A model named without a vector store is never built (reranking a

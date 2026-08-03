@@ -56,6 +56,46 @@ def hosted_judge(model: str = DEFAULT_HOSTED_MODEL):
     return llm_factory(model, client=AsyncOpenAI(), temperature=0)
 
 
+def as_score(value: object, metric: str) -> float:
+    """One judge verdict, checked before it is allowed into an average.
+
+    A judge is a language model, and a language model returns whatever it
+    returns. RAGAS normally hands back a float in 0..1, but a parse failure can
+    surface as `None`, and a NaN propagates silently — `mean([0.9, nan])` is
+    `nan`, `nan < 0.85` is `False`, and a gate quietly stops gating. That is the
+    failure worth being loud about: not a bad score, an absent one wearing the
+    shape of a good one.
+
+    Separated from the scoring loop so it can be tested without a judge. The
+    interesting cases here are all inputs no live run reproduces on demand.
+    """
+    if value is None:
+        raise ValueError(f"{metric}: the judge returned no score (a parse failure?)")
+    score = float(value)  # type: ignore[arg-type]
+    if score != score:  # NaN, which compares false against every bar
+        raise ValueError(f"{metric}: the judge returned NaN, which no threshold can catch")
+    if not 0.0 <= score <= 1.0:
+        raise ValueError(f"{metric}: {score} is outside 0..1, so it is not a RAGAS score")
+    return score
+
+
+def aggregate(scored: list[dict[str, float]]) -> dict[str, float]:
+    """Per-row scores to the two numbers a gate reads.
+
+    The mean, per metric. Pulled out of `run_ragas` because averaging is where
+    eval harnesses go wrong quietly and it is the one part of tier 2 that needs no
+    judge to test: an empty run must not read as a perfect one, and it must not
+    crash either — nightly jobs die halfway through, and `0.0` fails the gate,
+    which is the correct outcome for a measurement that did not happen.
+    """
+    if not scored:
+        return {"faithfulness": 0.0, "context_recall": 0.0}
+    return {
+        metric: sum(row[metric] for row in scored) / len(scored)
+        for metric in ("faithfulness", "context_recall")
+    }
+
+
 def run_ragas(
     golden: list[dict],
     pipeline: Callable[[str], tuple[str, list[str]]],
@@ -72,25 +112,25 @@ def run_ragas(
     judge = judge or local_judge()
     faithfulness, context_recall = Faithfulness(llm=judge), ContextRecall(llm=judge)
 
-    scored: list[tuple[float, float]] = []
+    scored: list[dict[str, float]] = []
     for ex in golden:
         answer, contexts = pipeline(ex["question"])
-        scored.append((
-            float(faithfulness.score(
-                user_input=ex["question"], response=answer, retrieved_contexts=contexts
-            ).value),
-            float(context_recall.score(
-                user_input=ex["question"], retrieved_contexts=contexts,
-                reference=ex["ground_truth"],
-            ).value),
-        ))
-
-    if not scored:
-        return {"faithfulness": 0.0, "context_recall": 0.0}
-    return {
-        "faithfulness": sum(f for f, _ in scored) / len(scored),
-        "context_recall": sum(c for _, c in scored) / len(scored),
-    }
+        scored.append({
+            "faithfulness": as_score(
+                faithfulness.score(
+                    user_input=ex["question"], response=answer, retrieved_contexts=contexts
+                ).value,
+                "faithfulness",
+            ),
+            "context_recall": as_score(
+                context_recall.score(
+                    user_input=ex["question"], retrieved_contexts=contexts,
+                    reference=ex["ground_truth"],
+                ).value,
+                "context_recall",
+            ),
+        })
+    return aggregate(scored)
 
 
 def describe(model: str = DEFAULT_LOCAL_MODEL) -> dict[str, str]:

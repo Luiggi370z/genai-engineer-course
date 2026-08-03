@@ -99,6 +99,24 @@ def build_reranker(settings: Settings, report: Callable[[str, str], None]):
     return rerank
 
 
+def relevance_gap(settings: Settings) -> str | None:
+    """Why this deployment's retrieval cannot say "nothing here", or None.
+
+    A vector store ranks everything and rejects nothing: ask about timezones and
+    nearest-neighbour search returns the three least-unrelated rows in the corpus,
+    with no signal that it found no answer. Whatever runs next is then holding
+    evidence for a question nobody asked. `ASSISTANT_MIN_SCORE` is the only place
+    that judgement can be made, because it is the only place the scores exist.
+
+    A predicate rather than an inline `if` so the rule can be tested without a
+    Qdrant to connect to — the condition is worth a test, and reaching it through
+    `build_assistant` needs the store the condition is about.
+    """
+    if settings.qdrant_url and not settings.min_score:
+        return "ASSISTANT_MIN_SCORE is unset, so retrieval cannot abstain"
+    return None
+
+
 def build_assistant(settings: Settings | None = None) -> Assistant:
     settings = settings or Settings.from_env()
 
@@ -120,6 +138,12 @@ def build_assistant(settings: Settings | None = None) -> Assistant:
                 signature = settings.embed_model
             else:
                 report("embed", "ASSISTANT_EMBED_MODEL set without OLLAMA_HOST")
+        # Reported rather than tolerated, because the alternative is finding out
+        # from an answer: the deployed stack ran without a floor and told a caller
+        # "I don't know" while citing three refund policies at a question about
+        # timezones.
+        if gap := relevance_gap(settings):
+            report("relevance", gap)
         rag: Any = FallbackRag(
             QdrantStore(
                 settings.qdrant_url,

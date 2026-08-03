@@ -55,6 +55,17 @@ class Chunk:
     start: int = 0
     end: int = 0
     tenant: str = "local"
+    #: What the retriever ranked and KEPT this chunk by, and in which units. Two
+    #: fields rather than one because a bare float here would be uninterpretable:
+    #: 0.66 is a strong cosine and a meaningless reciprocal rank. `scored_by` is
+    #: "cosine" when a dense similarity decided it, "rrf" when a fusion did.
+    #:
+    #: Carried through composition and into the citation because the relevance
+    #: DECISION is part of the provenance. The alternative — a chunk that arrives
+    #: as bare text — is what let a lexical filter downstream overrule a semantic
+    #: retriever, with no number anywhere in the response to contradict it.
+    score: float = 0.0
+    scored_by: str = ""
 
     @property
     def id(self) -> str:
@@ -75,8 +86,12 @@ class Chunk:
     def cite(self, label: str) -> dict:
         """The chunk as a citation a caller can act on: where it came from,
         which revision, and the exact span — plus the id, so the same evidence
-        can be fetched again later."""
-        return {
+        can be fetched again later.
+
+        The retrieval score rides along when there is one, named by its units. A
+        reader who wants to know why a citation is in the list gets an answer, and
+        so does an operator tuning `ASSISTANT_MIN_SCORE` against real traffic."""
+        cited = {
             "id": label,
             "chunk_id": self.id,
             "source": self.source,
@@ -84,6 +99,11 @@ class Chunk:
             "offsets": [self.start, self.end],
             "snippet": self.text[:240],
         }
+        # Only when the store actually scored it: publishing `"score": 0.0` for a
+        # chunk nobody ranked invites exactly the misreading the units field is
+        # here to prevent.
+        return cited | {"score": round(self.score, 4), "scored_by": self.scored_by} \
+            if self.scored_by else cited
 
 
 def source_for(text: str) -> str:
@@ -178,20 +198,36 @@ class RagStore:
             out.append((i, dot / norm if norm else 0.0))
         return [i for i, s in sorted(out, key=lambda x: -x[1]) if s > 0]
 
-    def _rank(self, query: str, k: int) -> list[int]:
-        """TODO 3: fuse the two rankings with RRF and return the top k indices.
+    def _rank(self, query: str, k: int) -> list[tuple[int, float]]:
+        """TODO 3: fuse the two rankings with RRF and return the top k as
+        `(index, fused_score)` pairs, highest first.
 
         Reciprocal rank fusion scores a document by `1 / (60 + rank)` in each
         list it appears in, summed. It needs no score calibration between the
         two arms, which is the reason to prefer it over adding raw BM25 and
-        cosine numbers that live on different scales."""
+        cosine numbers that live on different scales.
+
+        Return the score along with the index, because the caller publishes it in
+        the citation and a number whose units nobody recorded is worse than no
+        number — see `Chunk.scored_by`."""
         raise NotImplementedError
 
     def search(self, query: str, k: int = 3) -> list[str]:
         """The text of the top k. Kept as strings because this is the Workshop-2
         interface and half the course calls it; `retrieve` is the same ranking
-        with the provenance attached."""
-        return [self.docs[i] for i in self._rank(query, k)]
+        with the provenance attached.
+
+        This store abstains on its own: both arms drop anything scoring zero, and
+        a question sharing no vocabulary with the corpus scores zero everywhere.
+        That is why it needs no threshold and a vector store does — and why every
+        offline test of "the assistant abstains" passed while the deployed stack
+        could not abstain at all."""
+        return [self.docs[i] for i, _ in self._rank(query, k)]
 
     def retrieve(self, query: str, k: int = 3) -> list[Chunk]:
-        return [self.chunks[i] for i in self._rank(query, k)]
+        # The fused rank, not a similarity, and labelled as such. Comparing this
+        # number to a cosine threshold is a category error the units prevent.
+        return [
+            replace(self.chunks[i], score=score, scored_by="rrf")
+            for i, score in self._rank(query, k)
+        ]

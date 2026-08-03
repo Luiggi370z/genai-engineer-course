@@ -403,9 +403,11 @@ assert doc_embedder.name == query_embedder.name, "mismatch -> recall craters"
       effort: { fast: 45, integration: 25, realistic: 80 },
       rung: "faded",
       proves: "implement",
-      task: "Write a 30-question golden set over your corpus — 15 meaning-based, 10 exact-match/jargon, 5 unanswerable (those test your “I don’t know” path). Score it two ways: a deterministic lexical tier that runs on every push, and an opt-in judged tier for the nightly run. Wrap tier 1 in pytest so a regression blocks the merge.",
+      task: "The repo ships six rows in `evals/golden.jsonl` (3 semantic, 2 exact, 1 unanswerable) — enough to prove the harness runs and far too few to trust a number from. Grow it to 30 questions over YOUR corpus: 15 meaning-based, 10 exact-match/jargon, 5 unanswerable (those test your “I don’t know” path). Score it two ways: a deterministic lexical tier that runs on every push, and an opt-in judged tier for the nightly run. Wrap tier 1 in pytest so a regression blocks the merge. Calibrating the judged tier against your own labels is Phase 3's job, not this one — here you are building the gate that a judge later gets compared to.",
       assesses: ["p2-o3"],
       solution: [
+        "The six shipped rows are a fixture, not a golden set. The unanswerable slice is one question, so its mean can only ever be 0.0 or 1.0 — that is not a measurement you can gate on. Ten per slice is roughly where a slice mean stops being anecdote, which is where the 30 comes from.",
+        "Write the questions from your own corpus, in the words a user would actually type. A golden set derived from the documents tests whether you can paste; the exact-match slice in particular has to contain the error codes and product names people really search for.",
         "Name the lexical metrics `*_nonllm` on purpose — they measure string similarity, not faithfulness. Honest naming now saves an embarrassing slide later.",
         "Keep the heavy judged tier in an optional dependency group. A fast gate that can be broken by someone else’s transitive dependency is not a fast gate.",
         "Reward correct abstention on the unanswerable five — never penalize an honest “not in the docs.”",
@@ -435,7 +437,17 @@ def test_lexical_bars():
     assert s["by_slice"]["exact"]["context_recall_nonllm"] >= 0.80
     assert s["by_slice"]["unanswerable"]["abstained"] == 1.0
 
-# Tier 2 (real judges, calibration, per-slice gating) is Phase 3's whole job.`,
+def test_the_golden_set_is_big_enough_to_gate_on():
+    """A FLOOR, not an equality. The shipped fixture has six rows and the
+    assignment is to reach 30; a test pinned at == 6 makes doing the assignment
+    turn the suite red, which teaches that growing your eval set is a breakage."""
+    slices = Counter(r["slice"] for r in load_golden("evals/golden.jsonl"))
+    assert sum(slices.values()) >= 6, "the shipped fixture is the floor"
+    assert set(slices) == {"semantic", "exact", "unanswerable"}, "no slice went missing"
+
+# Tier 2 runs the same golden set past a real judge — that is the next lesson.
+# CALIBRATING that judge against your own labels, and finding out how often it
+# disagrees with you, is Phase 3's whole job.`,
     },
     {
       id: "p2-e2",

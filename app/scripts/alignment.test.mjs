@@ -378,13 +378,19 @@ test("three checks from one earlier phase is blocked practice, not interleaved",
   );
 });
 
-/** One faded exercise assessing `px-o1`, at whatever mastery a test needs. */
-const provingTasks = (proves) => ({
+/**
+ * One faded exercise assessing `px-o1`, at whatever mastery a test needs.
+ *
+ * The default task text asks for a measurement so that these fixtures satisfy
+ * `operate-demands-numbers` and keep testing only the ladder. `task` is a
+ * parameter for the one test that needs the opposite.
+ */
+const provingTasks = (proves, task = "t, and record the elapsed seconds") => ({
   exercises: [
     {
       id: "px-e1",
       title: "e",
-      task: "t",
+      task,
       rung: "faded",
       proves,
       assesses: ["px-o1"],
@@ -393,7 +399,7 @@ const provingTasks = (proves) => ({
     {
       id: "px-e2",
       title: "b",
-      task: "t",
+      task,
       rung: "independent",
       proves,
       assesses: ["px-o1"],
@@ -408,7 +414,7 @@ const provingTasks = (proves) => ({
     proves,
     assesses: ["px-o1"],
     blocks: [],
-    deliverables: [{ id: "px-w-d1", text: "d" }],
+    deliverables: [{ id: "px-w-d1", text: `d — ${task}` }],
   },
 });
 
@@ -446,6 +452,51 @@ test("every ladder rung is ordered, so integrate does not satisfy operate", () =
     ...provingTasks("operate"),
   });
   assert.deepEqual(rules([met]), []);
+});
+
+test("an operate task that asks for no number does not reach operate", () => {
+  /**
+   * The rule an audit added after finding a blank-editor agent exercise claiming
+   * `operate` whose entire verification was "confirm it terminates and says so".
+   * That sentence is true of a loop its step cap stopped, of a loop its deadline
+   * stopped, and of a loop where the model gave up before either — three different
+   * systems, one indistinguishable claim. `operate` is the rung that produces
+   * evidence a stranger would accept, and only a number does that.
+   */
+  const vague = aligned({
+    objectives: [{ id: "px-o1", text: "**Instrument** the thing" }],
+    ...provingTasks("operate", "build it and confirm that it works"),
+  });
+  assert.ok(rules([vague]).includes("operate-demands-numbers"));
+
+  const measured = aligned({
+    objectives: [{ id: "px-o1", text: "**Instrument** the thing" }],
+    ...provingTasks("operate", "build it, then record the p95 latency before and after"),
+  });
+  assert.deepEqual(rules([measured]), []);
+});
+
+test("the numbers rule applies only at the operate rung", () => {
+  // `implement` and `integrate` are proven by working code, not by a measurement.
+  // Demanding numbers everywhere would push authors to sprinkle the word "count"
+  // into tasks that do not need one, which is how a gate becomes a ritual.
+  const lower = aligned({
+    objectives: [{ id: "px-o1", text: "**Consume** somebody else's API" }],
+    ...provingTasks("integrate", "build it and confirm that it works"),
+  });
+  assert.deepEqual(rules([lower]), []);
+});
+
+test("a reference implementation full of numbers does not satisfy the rule", () => {
+  // The hole worth closing before it is found: `code` is a solution the reader
+  // reads, not a demand the task makes, and a sample containing `score = 0.9`
+  // would otherwise let any `operate` task through.
+  const codeOnly = aligned({
+    objectives: [{ id: "px-o1", text: "**Instrument** the thing" }],
+    ...provingTasks("operate", "build it and confirm that it works"),
+  });
+  codeOnly.workshop.blocks = [{ kind: "code", code: "elapsed = record(count(scores))" }];
+  assert.ok(rules([codeOnly]).includes("operate-demands-numbers"));
 });
 
 test("a task must declare a mastery level, and it must be a real one", () => {

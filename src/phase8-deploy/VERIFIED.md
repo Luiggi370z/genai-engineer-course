@@ -1,6 +1,6 @@
 # Verification stamp — `phase8-deploy`
 
-**Last verified:** 2026-08-01
+**Last verified:** 2026-08-02
 **How:** every `after/` reference passed `make check` (ruff + pyright + pytest) on this date,
 and every `before/` scaffold passed lint + type with its tests failing by design.
 
@@ -52,6 +52,31 @@ is an **in-process** store — empty in a freshly started container regardless o
 what is in Qdrant. It now establishes its own precondition, and the fact it was
 hiding is worth stating plainly: restart the service while its primary is down
 and the fallback has nothing to fall back to.
+
+### What a grep over the whole response cannot see (2026-08-02)
+
+Third time these checks have been caught passing for the wrong reason, and this one
+was a single habit repeated twenty times: `curl ... | grep -qi reimburse`. The
+response body carries `answer`, `contexts`, `citations`, `memories` and `grounding`,
+so a grep for a word matches when the word is in a *retrieved context* and the
+assistant said "I don't know". Check 4 reported success for two audit rounds while
+the capstone's composer was discarding the very hit the embedder had just found. The
+check was measuring retrieval and reporting it as an answer.
+
+Assertions now go through `answer_says`, `grounded_in` and `cites`, which read one
+JSON field each, and every remaining whole-body `grep` is a *negative* assertion —
+where scanning everything is the point, and where the comment now says so.
+Positive claims about what a user sees must name the field the user sees. The
+semantic-recall check additionally prints the top citation's `score` and
+`scored_by`, since a relevance floor nobody can read is a number nobody will retune.
+
+`ASSISTANT_MIN_SCORE: "0.58"` is now in the base `docker-compose.yml`, measured
+against this corpus and `nomic-embed-text` (synonym-only true positive 0.6596; best
+off-topic neighbour 0.5097). Both numbers move with the corpus and the embedder,
+which is why the value sits in the compose file beside the measurement and not in
+the library. The release lane also runs from `docker compose down -v` into its own
+`QDRANT_COLLECTION`, because release numbers measured over whatever eleven earlier
+checks happened to ingest are numbers about the test run.
 
 ### The twenty minutes, and what was hiding inside them
 

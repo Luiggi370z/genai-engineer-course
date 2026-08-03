@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Callable, Iterator
+from dataclasses import replace
 from typing import Any
 
 from assistant import resilience
@@ -326,9 +327,18 @@ class QdrantStore:
         # RRF scores are reciprocal ranks, not similarities: the top hit of a
         # search that found nothing relevant still scores like a top hit. The
         # threshold therefore reads the DENSE arm's own score, which is a cosine
-        # similarity and does mean something. Off by default (0.0) because the
-        # right cut is corpus-specific and a wrong one abstains on good answers.
-        kept = [self._chunk(h.payload) for h in hits if h.payload]
+        # similarity and does mean something.
+        #
+        # Off by default (0.0) and set by the deployment, because the right cut is
+        # a property of the corpus and the embedder rather than of this code. What
+        # is NOT optional is that somebody decides: unset, this store cannot
+        # abstain, and `service.build_store` reports that as a degradation rather
+        # than leaving it to be discovered by an answer.
+        kept = [
+            replace(self._chunk(h.payload), score=h.score, scored_by="rrf")
+            for h in hits
+            if h.payload
+        ]
         if self.min_score > 0.0:
             kept = self._above_threshold(query, kept, tenant)
         if self.rerank and kept:
@@ -350,7 +360,15 @@ class QdrantStore:
         Vector search never abstains: ask an unrelated question and it returns
         the three least-unrelated documents in the corpus, with no signal that
         it found nothing. The composer then grounds an answer in them. This is
-        the gate that turns "the nearest thing I have" back into "I don't know".
+        the gate that turns "the nearest thing I have" back into "I don't know",
+        and it is the ONLY place in the request path where that judgement is made
+        — a second opinion further downstream has less information, not more, and
+        the one that was tried there filtered on shared words and threw away the
+        semantic hits the embedder existed to find.
+
+        The surviving chunks carry the cosine that kept them, replacing the fused
+        rank they arrived with. That number is the reason the citation is in the
+        answer, so it travels with the citation.
         """
         scored = self.client.query_points(
             self.collection,
@@ -360,8 +378,12 @@ class QdrantStore:
             score_threshold=self.min_score,
             query_filter=self._filter(tenant),
         ).points
-        relevant = {point.id for point in scored}
-        return [c for c in chunks if c.id in relevant]
+        cosine = {point.id: point.score for point in scored}
+        return [
+            replace(c, score=cosine[c.id], scored_by="cosine")
+            for c in chunks
+            if c.id in cosine
+        ]
 
 
 # --- generation: the Ollama tier -----------------------------------------------

@@ -42,7 +42,7 @@ export interface EvidenceManifest {
  * a claim is either backed by a file or it is not, and averaging the two would
  * let a wall of ticks dilute the absence of evidence into a respectable number.
  */
-export type Standing = "self-reported" | "partly-evidenced" | "evidence-backed";
+export type Standing = "self-reported" | "partly-evidenced" | "course-evidence-attached";
 
 export interface PhaseCompletion {
   id: string;
@@ -119,6 +119,20 @@ export function buildCompletion(
 /**
  * No evidence file means `self-reported`, however many boxes are ticked. That is
  * the whole rule, and it is deliberately not gradeable by clicking.
+ *
+ * The top standing is `course-evidence-attached`, and the name is careful because
+ * the earlier one — `evidence-backed` — claimed more than this function can check.
+ * Two independent things are being combined here: every workbook item is ticked
+ * (self-reported, one click each) and every claim in the capstone's evidence
+ * manifest is proven (measured, by a command). What does NOT exist is a mapping
+ * between the two. Nothing links item 137 to a particular claim, so "all boxes
+ * ticked AND all claims proven" cannot mean "every box is proven" — the honest
+ * reading is "this reader finished the workbook and the course's own evidence is
+ * attached to it", which is what the name now says.
+ *
+ * Building the mapping would be the better fix and a much larger one: 252 items
+ * against 13 claims, most of them learner work no command in this repo can
+ * observe. Renaming was chosen over implying a link that is not there.
  */
 export function standingOf(
   ticked: number,
@@ -126,7 +140,7 @@ export function standingOf(
   evidence: EvidenceManifest | null,
 ): Standing {
   if (!evidence || evidence.proven === 0) return "self-reported";
-  if (evidence.complete && total > 0 && ticked === total) return "evidence-backed";
+  if (evidence.complete && total > 0 && ticked === total) return "course-evidence-attached";
   return "partly-evidenced";
 }
 
@@ -135,8 +149,8 @@ const STANDING_MEANS: Record<Standing, string> = {
     "Everything here is a claim I made about my own work. Nothing on this page is backed by an artifact.",
   "partly-evidenced":
     "Some claims are backed by files the course generated; the unproven ones are listed with the command that would close them.",
-  "evidence-backed":
-    "Every claim on this page is backed by a file produced by a command a reader can rerun.",
+  "course-evidence-attached":
+    "Every workbook item is ticked — those are my own claims about my own work — and every claim the COURSE makes about its reference implementation is backed by a file a reader can regenerate. The two are not linked: no individual item here is proven by an artifact.",
 };
 
 /** Markdown, for pasting into a repo README where a reader will actually find it. */

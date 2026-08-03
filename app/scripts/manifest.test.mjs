@@ -69,9 +69,14 @@ test("partial evidence reads as partly-evidenced, not as a percentage", () => {
   assert.equal(standingOf(10, 10, parseEvidence(JSON.stringify(evidence()))), "partly-evidenced");
 });
 
-test("evidence-backed needs the boxes AND every claim", () => {
+test("the top standing needs the boxes AND every claim", () => {
+  // Named `course-evidence-attached` rather than `evidence-backed`, because the two
+  // conditions it combines are unconnected: the ticks are the reader's own claims
+  // and the manifest proves the COURSE's claims about its reference implementation.
+  // No item maps to a claim, so "both are true" cannot be read as "every item is
+  // proven" — and the old name invited exactly that reading.
   const proven = parseEvidence(JSON.stringify(allProven()));
-  assert.equal(standingOf(10, 10, proven), "evidence-backed");
+  assert.equal(standingOf(10, 10, proven), "course-evidence-attached");
   assert.equal(standingOf(9, 10, proven), "partly-evidenced");
 });
 

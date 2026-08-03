@@ -104,11 +104,21 @@ sequenceDiagram
 ```
 
 The same pipeline serves `/ask/stream` as SSE, and the output gate is the same
-gate: `output_gate.py` holds a window back so a chunk reaching the client has
-already been screened, rather than apologizing for one that was not. The window
-is derived from the output patterns themselves — each declares the longest span
-it can match, and the gate takes the maximum — because the earlier fixed 256
-characters were a guess that an unbounded email pattern outgrew (ADR-0006). A
+gate: `output_gate.py` holds text back so a chunk reaching the client has already
+been screened, rather than apologizing for one that was not. What it holds is
+governed by two bounds, and it releases up to whichever is tighter: a **span**
+bound, `HOLDBACK_CHARS`, derived from the patterns themselves (each declares its
+longest possible match, and the gate takes the maximum, because a fixed 256 was a
+guess an unbounded email pattern outgrew); and a **token** bound, the start of the
+trailing run of characters that no pattern's charset can cross. The second exists
+because the first is a statement about what can *match* and the leak was about what
+gets *released* — a 1000-character email address matches on its last 64 characters
+and the 600 in front of it belong to no match at all. Held prose costs nothing, since
+prose is full of delimiters; an unbroken adversarial token buffers in full, which is
+the correct behaviour for text the gate cannot yet classify. Both bounds are proved
+from the compiled patterns in the test suite rather than trusted, and the property is
+stated over candidate runs rather than match spans, because the first version of that
+test asserted the weaker property and passed against the leaking gate (ADR-0006). A
 stream that dies mid-answer ends with `truncated: true` rather than being
 presented as complete. A replayed `/approve` is deduplicated by `Idempotency-Key`, and a
 grant is claimed atomically by the run that spends it, so "approved once" means
@@ -163,14 +173,31 @@ without an error anywhere.
 The Qdrant search itself runs both arms of phase 2: a dense prefetch and a sparse
 one, fused by Qdrant's own RRF rather than in Python, because an order number
 carries no meaning for an embedder to place and a synonym carries no token for a
-keyword index to match. `ASSISTANT_MIN_SCORE` puts a floor under the dense
-similarity, which is what lets the composer abstain — vector search returns its
-three least-unrelated documents for a question about something absent from the
-corpus, and without a floor those become evidence. `ASSISTANT_RERANK_MODEL` adds
-a cross-encoder over the fused candidates, off by default and degrading to plain
-retrieval when the optional dependency is missing. `/health` names all three
-(`tier.embed`, `tier.retrieval`, `tier.rerank`), because a stack running on the
-hash vector is indistinguishable from a working one by every other probe.
+keyword index to match. `ASSISTANT_RERANK_MODEL` adds a cross-encoder over the
+fused candidates, off by default and degrading to plain retrieval when the optional
+dependency is missing. `/health` names each tier (`tier.embed`, `tier.retrieval`,
+`tier.rerank`), because a stack running on the hash vector is indistinguishable from
+a working one by every other probe.
+
+**Relevance is a retrieval decision, and it is only made once.** Vector search never
+returns nothing: ask about something absent from the corpus and you get its three
+least-unrelated documents, at low scores, in the same shape a good answer arrives in.
+`ASSISTANT_MIN_SCORE` puts a floor under the dense similarity, and it is what lets
+the assistant abstain at all — `0.58` in the deployed stack, measured against that
+corpus (a synonym-only true positive at 0.66, the best off-topic neighbour at 0.51),
+and a store configured without it now reports `relevance` in `degraded` with
+`tier.threshold: "none"` instead of quietly grounding on noise.
+
+That floor is the **only** relevance test on the document path. There was briefly a
+second one — the composer re-checked each context for words shared with the question
+before letting it answer — and it broke the thing the embedder was there for: a
+question phrased entirely in synonyms retrieved the right page and then had it thrown
+away for using different vocabulary. A filter can only use what its layer can see,
+and all a composer can see is text. So `contexts` reaching a composer now means "this
+is the evidence"; empty means retrieval found nothing above the floor. `Chunk.score`
+and `Chunk.scored_by` travel into the citation, so an answer shows the number that
+admitted its evidence (ADR-0012, and ADR-0008 for why memory — recalled lexically —
+keeps a lexical filter of its own).
 
 Everything in that sequence runs inside **one budget**. A request carries a
 deadline and a "the caller left" flag together (`deadline.py`), both installed at

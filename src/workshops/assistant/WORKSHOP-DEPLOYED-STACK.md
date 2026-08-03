@@ -165,6 +165,20 @@ debug at 3 a.m. Take it in any order; each item is independently green-able.
 - [ ] `ASSISTANT_MIN_SCORE` puts a floor under the **dense** score, not the fused one.
       Fused scores are reciprocal ranks: the top hit of a search that found nothing
       relevant still scores like a top hit
+- [ ] The floor is **set, and it is measured**. `0.58` in `docker-compose.yml`, from a
+      synonym-only true positive at 0.66 and the best off-topic neighbour at 0.51. A vector
+      store with no floor reports `relevance` in `degraded` and `tier.threshold: "none"`,
+      and `require_real_tiers` refuses to publish release numbers measured without one —
+      recall scored against a store that cannot say "nothing here" is not a recall number
+- [ ] That floor is the **only** relevance test on the document path. Nothing downstream
+      re-checks a retrieved chunk for words shared with the question. A word-overlap filter
+      standing behind a semantic retriever throws away exactly the hits it was bought to
+      find, and it is invisible from the API: "how quickly do i get money back for a work
+      trip" retrieves the travel-expenses page at 0.66, returns it in `contexts`, and
+      answers "I don't know"
+- [ ] Each citation carries `score` and `scored_by`, so an answer shows the number that
+      admitted its evidence. `scored_by` matters more than `score` — `cosine` and `rrf` are
+      different units and a client comparing across them is reading noise
 - [ ] A failure is **classified before it is retried**: `TypeError` and a 4xx surface on
       the first attempt, a dead socket gets another go. `retry on Exception` buys three
       times the latency before the same 500, with the traceback pointing at the third
@@ -284,7 +298,8 @@ with a TestClient and no network. Each real adapter turns on with one env var
 the deterministic hash vector — it matches on shared vocabulary, so
 "reimbursement" will not find a page about "refunds"), `ASSISTANT_MIN_SCORE` (the
 relevance floor that lets retrieval return nothing instead of the nearest thing
-it has), `ASSISTANT_RERANK_MODEL` (an optional cross-encoder over the fused
+it has — the deployed stack sets `0.58`, and a vector store without one is reported
+as degraded), `ASSISTANT_RERANK_MODEL` (an optional cross-encoder over the fused
 candidates), `OLLAMA_HOST`,
 `MCP_SERVER`, `ASSISTANT_DB`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, plus the optional hardening/connector vars —
@@ -327,7 +342,16 @@ the same spans arriving at a real otel-collector **outside the process**.
       hardened tool output, gated tools behind `/approve`, RAG contexts, memory
       writes, spans — and the fast tests prove each seam offline
 - [ ] `/ask/stream` streams the same gated pipeline as SSE, grounded answers carry
-      structured citations, and the JWT gate rejects missing, expired,
+      structured citations, and **nothing the gate releases can belong to a token it
+      later blocks**. Two bounds, tighter one wins: the longest span any output pattern
+      can match, and the start of the trailing character run no pattern's charset can
+      cross. Only the first is intuitive and only the first was there — a 1000-character
+      email address matches on its last 64 characters, which leaves 600 characters of
+      address that are part of no match and were released. The suite derives both bounds
+      from the compiled patterns and states the property over candidate *runs*, because
+      the version stated over match *spans* passed 300 out of 300 cases against the
+      leaking gate (`tests/test_stream.py`, ADR-0006)
+- [ ] The JWT gate rejects missing, expired,
       **never-expiring**, subject-less, wrong-audience, wrong-issuer and
       wrong-scope tokens — in both the shared-secret and JWKS lanes, and against
       an algorithm-confusion attempt (all proven offline in `tests/test_auth.py`)

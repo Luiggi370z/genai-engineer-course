@@ -49,6 +49,20 @@ services:
       # value starts a new collection instead of reading the old vectors as if
       # they meant the same thing.
       ASSISTANT_EMBED_MODEL: nomic-embed-text
+      # The floor that lets a vector store say "nothing here". Without it,
+      # nearest-neighbour search answers every question with its three
+      # least-unrelated rows, and the composer grounds an answer in them — the
+      # deployed stack cited three refund policies at a question about timezones.
+      #
+      # 0.58 is measured, not chosen. Against this corpus and this embedder, a
+      # question answered in entirely different words ("how quickly do i get money
+      # back for a work trip" -> the travel-expenses page) scores 0.66, and the
+      # nearest document to a question the corpus does not answer scores 0.51.
+      # 0.58 splits that gap with roughly equal margin on each side. Both numbers
+      # move when the corpus or the embedder does, which is why this is a
+      # deployment setting and not a constant in the code — see WORKSHOP-DEPLOYED-STACK.md
+      # for the measurement, and re-run it before trusting this value elsewhere.
+      ASSISTANT_MIN_SCORE: "0.58"
       # How long one composition may take before the offline stitcher answers
       # instead. The library default is 60 seconds, which suits a model with a
       # GPU under it; this stack does not have one. Docker Desktop exposes no

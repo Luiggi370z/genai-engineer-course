@@ -187,13 +187,23 @@ def test_a_stream_that_errors_mid_flight_also_raises_truncated():
     assert "brain" in seen
 
 
-def test_the_degraded_composer_does_not_fabricate_grounding():
-    """A vector store returns the nearest neighbours of ANY question. When the
-    model tier is down, the offline fallback must not dress an unrelated snippet
-    up as an answer — no shared content word, no answer."""
-    unrelated = ["approved refunds are processed within five business days"]
-    assert offline_compose("what is the ceo home postal address", unrelated, []) == ABSTAIN
-    assert "refunds" in offline_compose("how long do refunds take", unrelated, [])
+def test_the_degraded_composer_answers_from_whatever_retrieval_kept():
+    """The fallback composer trusts retrieval, including about relevance.
+
+    This test used to assert the opposite — that an unrelated snippet produced an
+    abstention — and it was enforcing a bug. The check it pinned was word overlap
+    between question and document, which is a lexical test standing downstream of
+    a semantic retriever: "how quickly do i get money back for a work trip" shares
+    no word longer than three characters with "staff are reimbursed for travel
+    expenses", so the embedder found the answer and this composer threw it away.
+
+    Deciding relevance is retrieval's job because retrieval has the scores
+    (`ASSISTANT_MIN_SCORE`). An empty list means "nothing relevant"; a non-empty
+    one means "this is the evidence", and the composer's job is to use it."""
+    kept = ["staff are reimbursed for travel expenses within ten business days"]
+    answer = offline_compose("how quickly do i get money back for a work trip", kept, [])
+    assert "reimbursed" in answer, "a synonym-only hit is exactly what semantic recall is for"
+    assert offline_compose("anything at all", [], []) == ABSTAIN
 
 
 # --- load shedding ------------------------------------------------------------

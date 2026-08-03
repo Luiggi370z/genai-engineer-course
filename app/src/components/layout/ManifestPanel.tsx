@@ -24,10 +24,16 @@ const STANDING_COPY = {
     tone: "var(--color-graphite)",
     say: "Some claims are backed by artifacts your own commands produced. The rest are listed with the command that would close them.",
   },
-  "evidence-backed": {
-    label: "evidence-backed",
+  // Named for what it can actually check. The previous label was
+  // "evidence-backed" and the line under it said every claim here is backed by a
+  // file — but the two halves of this standing are unconnected: the workbook items
+  // are your own ticks and the manifest proves the COURSE's claims about its own
+  // reference implementation. No item on this page maps to a claim in that file, so
+  // "every claim here is backed" was overstating a real thing into a false one.
+  "course-evidence-attached": {
+    label: "course evidence attached",
     tone: "var(--color-ink)",
-    say: "Every claim here is backed by a file a reader can regenerate by rerunning one command.",
+    say: "Every item is ticked — your claims about your own work — and the course's evidence manifest is attached and complete. Those are two separate facts: the manifest proves the reference implementation's claims, not your items.",
   },
 } as const;
 

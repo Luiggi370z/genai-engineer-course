@@ -1,6 +1,7 @@
 # ADR-0006 — A holdback window on the output stream
 
-**Status:** accepted (amended — see "Amendment: the bound is derived, not declared")
+**Status:** accepted (amended twice — the second amendment is the one that
+actually closed the leak; read to the end before copying anything here)
 
 ## Context
 
@@ -69,12 +70,59 @@ it loudly and unacceptable on the request path.
 The general lesson is worth more than the fix. A safety property written in a
 comment is enforced by nobody. This one is now enforced by arithmetic.
 
+## Amendment 2: a span bound is not enough — the unit is the token
+
+The amendment above is sound and it did not close the leak. It bounded the span a
+pattern can *match* and left unexamined the question of what must not be
+*released*, which are not the same set of characters.
+
+Bounding the email pattern to 64 characters of local part means an over-long
+address still matches — on its **last** 64 characters. The hundreds of characters
+in front of that are part of no match at all. Nothing held them, because the whole
+release rule was phrased in terms of matches. Measured on the shipped gate: a
+500-character local part released 108 characters of itself before blocking, and a
+1000-character one released 608. The second audit found it by trying a longer
+address than the regression test used, which is exactly how the first one was
+found.
+
+The mistake was the same both times, and naming it is the point of this amendment:
+the gate was reasoning about **matches** when the thing that must not escape is a
+**candidate**. Before the `@` arrives, a run of characters is either a word or the
+front half of an address and the gate cannot tell which.
+
+So the release rule now takes the tighter of two bounds:
+
+1. **the span bound** — a character older than `HOLDBACK_CHARS` cannot be extended
+   into a new match, because no pattern can match that far; and
+2. **the token bound** — a character before the start of the trailing
+   *unterminated* candidate run cannot belong to a match that is still forming,
+   because no pattern can match across a `DELIMITER` (`[^\w.+@-]`, the complement
+   of every class the patterns use).
+
+Either alone would suffice today. Both are kept so that a future edit has to break
+two independent invariants to leak, and both are proved mechanically rather than
+asserted: `test_stream.py` derives each pattern's true maximum span from its
+compiled form, and walks its parse tree to prove it can consume no delimiter. A
+pattern with a space in it fails the suite instead of quietly widening the hole.
+
+**The test was wrong in the same way the code was.** The first version of the new
+property test asserted that released text never overlaps a span `guardrails.PII`
+can match — and it passed against the OLD, leaking rule, on 300 generated cases
+out of 300. Of course it did: being outside every match span is precisely how the
+leaked bytes got out. The property has to be stated over the candidate RUN
+containing the match, and once it was, the old rule failed 55 of those cases with
+a worst leak of 1125 characters. A property test asserting the wrong property is
+more dangerous than no test, because it is evidence.
+
 ## Alternatives considered
 
-Full buffering (correct, and throws away the feature). A stateful incremental
-DLP scanner that tracks partial-match state per chunk (strictly more general,
-and for a bounded pattern set it computes exactly the window derived above, at
-considerably more complexity). A rolling redactor that rewrites PII in flight
+Full buffering (correct, and throws away the feature — though note that the token
+bound *degrades* to full buffering for a single unbroken token, which is the right
+behaviour precisely when that is what safety requires). A stateful incremental DLP
+scanner that tracks per-pattern partial-match state across chunks (strictly more
+general; the token bound is the cheap special case that works because every pattern
+here is delimiter-free, and the general machine would be the answer if one were
+not). A rolling redactor that rewrites PII in flight
 instead of blocking (diverges from `/ask`, which blocks — two gates with two
 verdicts is worse than one gate). Screening each chunk in isolation (catches
 nothing: a pattern straddling a chunk boundary is invisible to both halves).
@@ -88,3 +136,16 @@ widened from 256 to 384 when the bound became real, which is the honest price of
 the guarantee the original number was only claiming. Both are accepted and
 measurable, and `tier.stream` on `/health` reports which mode is live so an
 operator can tell from outside the process.
+
+The token bound adds no cost to ordinary prose, which is full of delimiters — it
+holds the word currently being written. It costs everything on adversarial input: a
+single unbroken 4000-character token is buffered in full until something terminates
+it. That is the intended shape. The characters a streaming safety gate cannot
+release are exactly the characters it cannot yet classify.
+
+Three attempts on one property is the real consequence worth recording. Each fix
+was verified against the case that had just failed, and each was beaten by the next
+case nobody had thought of. What ended it was not a better number but a different
+question — asking what the gate is *holding* rather than what it can *match* — and
+a property test over generated input that had to itself be corrected before it could
+see the bug.

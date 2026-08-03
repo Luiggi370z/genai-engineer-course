@@ -628,7 +628,7 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       effort: { fast: 45, integration: null, realistic: 75 },
       rung: "faded",
       proves: "operate",
-      task: "Write structural checks over the compose file (parsed YAML: pinned images, a healthcheck per service, health-gated depends_on, one published port), watch them fail on the shipped first draft, then fix the wiring until the whole stack — capstone assistant, MCP server, Qdrant, Ollama — is one trustworthy `docker compose up`, zero API keys.",
+      task: "Write structural checks over the compose file (parsed YAML: pinned images, a healthcheck per service, health-gated depends_on, one published port), watch them fail on the shipped first draft, then fix the wiring until the whole stack — capstone assistant, MCP server, Qdrant, Ollama — is one trustworthy `docker compose up`, zero API keys. Then time it, from `docker compose down -v` to the first answer, and record how long each service took to report healthy. Cold boot is the number a reviewer experiences and the one nobody measures: a model pull can take twenty minutes, and knowing that is the difference between a stack that is slow and a stack somebody reports as broken.",
       assesses: ["p6-o1"],
       needs: ["p3-o2", "p5-o3"],
       solution: [

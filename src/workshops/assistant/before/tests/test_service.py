@@ -25,6 +25,9 @@ def test_health_reports_the_offline_tier():
         "auth": "off", "connectors": "stubs", "stream": "safe-buffered",
         "guard": "regex-only", "embed": "hash (not semantic)",
         "retrieval": "bm25", "rerank": "off", "mcp_ungated": 0,
+        # BM25 abstains by scoring zero, so there is no number to set here. A
+        # vector store reports its floor or reports that it has none.
+        "threshold": "inherent",
     }
     assert body["spans_recorded"] == 0  # nothing has run yet
 

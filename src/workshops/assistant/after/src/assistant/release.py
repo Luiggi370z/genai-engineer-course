@@ -206,7 +206,7 @@ def build_judge(model: str, host: str | None) -> Judge:
     return RagasJudge()
 
 
-def require_real_tiers(assistant: Assistant) -> dict[str, str | int]:
+def require_real_tiers(assistant: Assistant) -> dict[str, str | float | int]:
     """Refuse to publish a number the offline tier produced.
 
     Every one of these is something that fails OPEN in normal operation, which is
@@ -226,6 +226,12 @@ def require_real_tiers(assistant: Assistant) -> dict[str, str | int]:
         wrong.append("embed=hash (want a real embedder via ASSISTANT_EMBED_MODEL)")
     if assistant.settings.rerank_model is None:
         wrong.append("rerank=off (want ASSISTANT_RERANK_MODEL set)")
+    # A recall number measured on a store that cannot abstain is not a recall
+    # number. Without a floor every question retrieves its three nearest rows, so
+    # the retrieval metrics are computed over a system that never says "nothing
+    # here" — which is most of what they are supposed to be measuring.
+    if not assistant.settings.min_score:
+        wrong.append("threshold=none (want ASSISTANT_MIN_SCORE set, see docker-compose.yml)")
     if assistant.degraded:
         wrong.append(f"degraded={dict(assistant.degraded)}")
     if wrong:
@@ -234,7 +240,7 @@ def require_real_tiers(assistant: Assistant) -> dict[str, str | int]:
             + "\n  ".join(wrong)
             + "\n\nBoot the stack (src/phase8-deploy/01-compose/after) and export "
             "QDRANT_URL, OLLAMA_HOST, ASSISTANT_EMBED_MODEL, ASSISTANT_RERANK_MODEL, "
-            "ASSISTANT_DB. See docs/RELEASE-CHECKLIST.md."
+            "ASSISTANT_MIN_SCORE, ASSISTANT_DB. See docs/RELEASE-CHECKLIST.md."
         )
     return tier
 

@@ -1,4 +1,6 @@
 """Tier 1 gate: deterministic, offline, runs on every PR."""
+from collections import Counter
+
 from src.harness import build_dataset, evaluate_nonllm, load_golden
 
 GOLDEN = "evals/golden.jsonl"
@@ -34,9 +36,24 @@ def _pipeline(q: str):
 
 
 def test_golden_set_loads_with_slices():
+    """A FLOOR on the row count, not an equality.
+
+    Six rows is what this repo ships — three semantic, two exact, one unanswerable.
+    Enough to prove the harness loads, scores, slices and gates; nowhere near enough
+    to gate a real system on. The assignment is to grow it to thirty over your own
+    corpus, so `== 6` would mean doing the assignment turns this suite red, and the
+    lesson a red suite teaches is "do not add questions". Ten per slice is roughly
+    where a slice mean stops being anecdote; at one row, the unanswerable slice is
+    either 0.0 or 1.0 and nothing in between.
+
+    What IS pinned is the shape: all three slices present, the unanswerable one
+    included, because that is the slice people quietly drop when their abstention
+    path starts failing.
+    """
     g = load_golden(GOLDEN)
-    assert len(g) == 6
-    assert {r["slice"] for r in g} == {"semantic", "exact", "unanswerable"}
+    assert len(g) >= 6, "the shipped fixture is the floor, not the target"
+    counts = Counter(r["slice"] for r in g)
+    assert set(counts) == {"semantic", "exact", "unanswerable"}, f"a slice went missing: {counts}"
 
 
 def test_nonllm_gate_passes_on_a_good_pipeline():

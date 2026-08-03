@@ -109,28 +109,21 @@ def memory_prompt(goal: str, memories: list[str]) -> str:
 def _shares_a_content_word(goal: str, context: str) -> bool:
     """Lexical overlap on words long enough to mean something. A goal with no
     content words at all cannot be judged, so its contexts get the benefit of
-    the doubt rather than a reflexive abstention."""
+    the doubt rather than a reflexive abstention.
+
+    Used for MEMORIES only, and that limit is the whole lesson of this module's
+    history. It is the right test for a memory because memory recall is itself
+    lexical (`memory.overlap`) — the filter speaks the same language as the store
+    it is filtering. It was briefly applied to retrieved documents too, and that
+    was wrong for exactly the same reason: it spoke a different language from the
+    retriever, and the retriever was the one that had been made semantic.
+    """
     words = {w for w in goal.lower().split() if len(w) > 3}
     if not words:
         return True
     lowered = context.lower()
     return any(w in lowered for w in words)
 
-
-def relevant_contexts(goal: str, contexts: list | None) -> list:
-    """The retrieved contexts that could plausibly answer THIS question.
-
-    The same filter as `relevant_memories`, and it has to be applied in the same
-    places, because "we retrieved something" and "we retrieved an answer" are
-    different facts. BM25 conflates them harmlessly — no overlap, no hit — but a
-    vector store returns the nearest neighbours of any question, so with Qdrant
-    behind it `contexts` is never empty. The deployed stack answered a timezone
-    question with "I don't know [c1][c2]" while the caller's own timezone sat two
-    fields away in the same response: the documents were present, irrelevant, and
-    still counted as the evidence class, which sent the question to the prompt
-    that demands citations instead of the one that can use a memory.
-    """
-    return [ctx for ctx in contexts or [] if _shares_a_content_word(goal, str(ctx))]
 
 def relevant_memories(goal: str, memories: list[str] | None) -> list[str]:
     """The memories that could plausibly answer THIS question.
@@ -158,12 +151,22 @@ def grounding_of(
     citation by design (ADR-0008). Collapsing them leaves the caller unable to
     tell "the handbook says" from "you said".
 
-    Relevance, not presence. `if contexts:` was true of every request the moment
-    the store became a vector index, which made "documents" the answer to a
-    question nobody had asked and made the memory class unreachable in the
-    deployed stack while passing every offline test.
+    A context that came back IS evidence, and this function does not second-guess
+    that. It used to: a vector store returns the nearest neighbours of any
+    question, so `if contexts:` was true of every request and "documents" became
+    the answer to questions nobody had asked. The fix attempted here was a lexical
+    relevance filter, and it broke the more important promise — a document that
+    answers the question in different words is precisely what semantic retrieval
+    is for, and a word-overlap test at this layer threw those away after the
+    embedder had gone to the trouble of finding them.
+
+    Relevance belongs to the retriever, which is the only component holding the
+    scores to judge it with (`adapters.QdrantStore.search`, `ASSISTANT_MIN_SCORE`).
+    A store that cannot abstain is a broken store, not something for the composer
+    to paper over — and `/health` reports the floor so an operator can see whether
+    one is set.
     """
-    if relevant_contexts(goal, contexts):
+    if contexts:
         return "documents"
     if state:
         return "tools"
@@ -182,11 +185,13 @@ def offline_compose(
     context plus any tool outputs in `state`; return ABSTAIN when there is nothing
     to ground an answer in.
 
-    "Nothing to ground in" includes a context that shares no content word with
-    the question (`relevant_contexts` above): a vector store returns the nearest
-    neighbours of ANY query, and when this composer runs as the degraded
-    fallback for the model tier, answering an unrelated snippet is fabricated
-    grounding — the one failure an abstaining assistant exists to prevent.
+    "Nothing to ground in" means an EMPTY `contexts` list, and resist the urge to
+    make it mean more than that. Retrieval decides relevance, because retrieval is
+    what holds the scores: BM25 abstains by scoring zero, and the vector store
+    abstains at `ASSISTANT_MIN_SCORE`. A second opinion here would have only the
+    text to work from, and the only judgement available from text alone is "do
+    these share a word" — which throws away every document that answers the
+    question in different words. That is what the embedder was for.
 
     Three classes of evidence, in order. A grounded context answers, with tool
     output in parentheses and memories appended in brackets. Tool output alone
@@ -215,23 +220,19 @@ def model_composer(host: str, model: str) -> Composer:
         memories: list[str] | None = None,
     ) -> str:
         recalled = relevant_memories(goal, memories)
-        grounded = relevant_contexts(goal, contexts)
-        if not grounded and not state and not recalled:
+        if not contexts and not state and not recalled:
             return ABSTAIN
         from assistant.adapters import ollama_generate
 
         # Memory-only questions get their own prompt, because the grounded one
-        # asks for [c#] citations and there is nothing here to number.
-        #
-        # Keyed on RELEVANT contexts rather than on any: a vector store hands
-        # back three neighbours for "which timezone should we schedule in", and
-        # the grounded prompt then instructs the model to answer from those and
-        # cite them — so it abstains, correctly, on evidence that was never the
-        # evidence. The memory it needed was in the prompt the whole time, in a
-        # block the instructions did not permit it to use.
+        # asks for [c#] citations and there is nothing here to number. Sending
+        # them to the grounded prompt is how "which timezone should we schedule
+        # in" got answered with "I don't know [c1][c2]" while the caller's own
+        # timezone sat in the same response: the instructions permitted the model
+        # to use only the documents, and the documents were about refunds.
         prompt = (
             memory_prompt(goal, recalled)
-            if not grounded and not state
+            if not contexts and not state
             else grounded_prompt(goal, contexts, state, memories)
         )
         return ollama_generate(prompt, host=host, model=model)
@@ -268,8 +269,7 @@ def model_stream_composer(host: str, model: str) -> StreamComposer:
         memories: list[str] | None = None,
     ) -> Iterator[str]:
         recalled = relevant_memories(goal, memories)
-        grounded = relevant_contexts(goal, contexts)
-        if not grounded and not state and not recalled:
+        if not contexts and not state and not recalled:
             yield ABSTAIN
             return
         from assistant.adapters import ollama_stream
@@ -279,7 +279,7 @@ def model_stream_composer(host: str, model: str) -> StreamComposer:
         # and nobody can explain.
         prompt = (
             memory_prompt(goal, recalled)
-            if not grounded and not state
+            if not contexts and not state
             else grounded_prompt(goal, contexts, state, memories)
         )
         yield from ollama_stream(prompt, host=host, model=model)

@@ -11,10 +11,16 @@ contexts). This is the first lesson of Phase 2 on purpose — measure before you
 ## Do this
 
 ```bash
-make setup && make test     # 4 failing tests — read them, they are the spec
+make setup && make test     # 18 failing tests — read them, they are the spec
 $EDITOR src/harness.py      # TODOs 1-5: load the golden set, two non-LLM metrics, dataset builder
+$EDITOR src/ragas_eval.py   # TODOs 2-3 are offline: as_score and aggregate
 make check                  # green: ruff + pyright + pytest, all offline
 ```
+
+Fourteen of those eighteen are in `tests/test_gate.py`, and they need no judge, no
+network and no `ragas` install — tier 2's arithmetic, testable on its own. Do them
+alongside `harness.py`; the rest of `ragas_eval.py` (TODOs 1, 4, 5, 6) needs Ollama
+and is the optional lane at the bottom of this file.
 
 ## What the first failure means
 
@@ -23,11 +29,31 @@ It's asking you to read `evals/golden.jsonl` (one JSON dict per line) and keep
 the `slice` field — `semantic` / `exact` / `unanswerable`. Slicing is the point
 of the harness: a failure tells you *where* retrieval is weak, not just that it is.
 
+## Six rows here, thirty in yours
+
+`evals/golden.jsonl` ships **six** rows: three `semantic`, two `exact`, one
+`unanswerable`. It is a fixture whose only job is to make the harness runnable while
+you build it. Slices this thin cannot tell a regression apart from one unlucky
+question — the unanswerable slice is a single row, so its mean is either 0.0 or 1.0.
+
+The workbook exercise asks for **thirty** over your own corpus: 15 semantic, 10
+exact-match, 5 unanswerable. Do that after `make check` is green — get the harness
+working against the fixture first, then replace the fixture with questions your users
+would actually type. Notice that the test asserts `len(g) >= 6` rather than `== 6`,
+which is what lets you grow the set without turning the suite red.
+
+Tier 2 below runs the same set past a real judge. Working out whether to *believe*
+that judge — labelling rows yourself and measuring how often it agrees — is
+calibration, and Phase 3 is where you do it.
+
 ## Done when
 
 - [ ] `make check` is green (lint, types, fast tests).
 - [ ] `test_gate_catches_a_regression` passes: a pipeline that retrieves nothing
       scores below the 0.60 context-recall bar.
+- [ ] `tests/test_gate.py` is green, including the NaN case. A judge that returns
+      NaN passes every threshold — `nan < 0.85` is `False` — so a gate holding one
+      has stopped gating and still prints a number.
 - [ ] The metrics keep their honest `*_nonllm` names — they measure lexical
       similarity, never report them as faithfulness.
 

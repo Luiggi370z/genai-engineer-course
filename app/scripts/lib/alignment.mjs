@@ -54,6 +54,77 @@ export const MASTERY = ["understand", "implement", "integrate", "operate"];
 export const RANK = new Map(MASTERY.map((level, i) => [level, i]));
 
 /**
+ * Words that turn "it works" into a number somebody else could check.
+ *
+ * `operate` is the top of the ladder and it means the reader ran the thing and
+ * knows what it did — which is only distinguishable from `integrate` by a
+ * measurement. The audit that added this rule found a blank-editor agent exercise
+ * claiming `operate` whose whole verification was "confirm it terminates and says
+ * so": true of a loop stopped by its cap, of one stopped by its deadline, and of
+ * one where the model happened to give up before either limit was reached. Three
+ * different systems, one indistinguishable sentence, and only a step count and an
+ * elapsed time can tell them apart.
+ *
+ * Deliberately a word list and not a judgement. A gate that tried to assess
+ * whether a task's verification was rigorous would be a language model with a
+ * false-positive rate; this one asks the narrower question of whether the task
+ * asks for a number at all, which is mechanical, and leaves the rest to review.
+ */
+export const MEASUREMENT_WORDS = [
+  "measure",
+  "record",
+  "count",
+  "elapsed",
+  "latency",
+  "percentile",
+  "p95",
+  "p99",
+  "throughput",
+  "budget",
+  "number",
+  "numbers",
+  "table of numbers",
+  "before and after",
+  "how many",
+  "how long",
+  "seconds",
+  "tokens",
+  "cost",
+  "rate",
+  "score",
+];
+
+/**
+ * Every piece of PROSE a task addresses to its reader.
+ *
+ * Exercises carry theirs in `task` and `solution`; workshops have neither and
+ * carry theirs in `blocks`. Both are collected, and `code` blocks are deliberately
+ * not: a reference implementation that happens to contain a variable called
+ * `score` would satisfy the rule below without ever asking the reader for
+ * anything, and a gate with that hole is a gate authors learn to feed.
+ */
+function proseOf(item) {
+  const parts = [item.task ?? "", ...(item.solution ?? [])];
+  // A workshop's real "done when" list. This is where an `operate` workshop says
+  // what the reader must be holding at the end, so it is exactly where a demand
+  // for numbers belongs.
+  for (const deliverable of item.deliverables ?? []) parts.push(deliverable.text ?? "");
+  for (const block of item.blocks ?? []) {
+    if (block.kind === "code") continue;
+    parts.push(block.title ?? "", block.text ?? "");
+    for (const node of block.nodes ?? []) parts.push(node.label ?? "", node.sub ?? "");
+    for (const row of block.items ?? []) parts.push(typeof row === "string" ? row : "");
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+/** Whether a task asks its reader to come away holding a number. */
+export function demandsAMeasurement(item) {
+  const prose = proseOf(item);
+  return MEASUREMENT_WORDS.some((word) => prose.includes(word));
+}
+
+/**
  * The mastery floor each objective verb demands.
  *
  * Keyed by **verb**, not by Bloom level, and the difference is the whole point.
@@ -244,6 +315,15 @@ export function audit({ phases }) {
           "mastery-declared",
           item.id,
           `${what} declares proves="${item.proves ?? ""}" — must be one of ${MASTERY.join(", ")}`,
+        );
+      }
+      if (item.proves === "operate" && !demandsAMeasurement(item)) {
+        fail(
+          "operate-demands-numbers",
+          item.id,
+          `${what} claims proves="operate" but asks for no measurement — an operate task must ` +
+            `require numbers (${MEASUREMENT_WORDS.join(", ")}), because "confirm it works" is a ` +
+            "claim the reader grades themselves",
         );
       }
       // A prerequisite must already have been taught, which means an earlier phase.
