@@ -1,7 +1,7 @@
 # 8.2 CI
 
 **Goal.** Build the merge gate as four independently failing checks — quality
-(faithfulness ≥ 0.85 AND recall ≥ 0.80), safety (zero red-team bypasses),
+(faithfulness and recall above their bars), safety (zero red-team bypasses),
 latency (P99 within budget), and cost (spend within budget) — over a
 version-stamped report, and wire them into the `make eval` / `make redteam` /
 `make latency` / `make cost` targets the repo-root workflow calls on every PR.

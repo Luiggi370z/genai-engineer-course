@@ -2,6 +2,10 @@ from dataclasses import replace
 from pathlib import Path
 
 from src.gate import (
+    COST_BUDGET_USD,
+    FAITHFULNESS_BAR,
+    P99_BUDGET_MS,
+    RECALL_BAR,
     CIReport,
     cost_ok,
     latency_ok,
@@ -10,6 +14,19 @@ from src.gate import (
     safety_ok,
     should_merge,
 )
+
+# Fixtures are expressed RELATIVE to the thresholds rather than as literals.
+# Written as literals, these tests said "0.7 blocks" and "7800ms blocks", which
+# were statements about the bars of the day — recalibrating against a real
+# measurement turned four of them red without anything being wrong. What they
+# are actually asserting is that a value on the wrong side of a bar blocks, and
+# that each gate ignores the others' failures.
+#
+# The bars' own correctness is a calibration question, and no unit test can
+# answer it: see the six-run measurement recorded next to them in `gate.py`.
+PASSING = FAITHFULNESS_BAR + (1 - FAITHFULNESS_BAR) / 2
+FAILING = FAITHFULNESS_BAR - 0.05
+SLOW_MS = P99_BUDGET_MS * 1.5
 
 STAMPS = {
     "model": "qwen3.5:9b",
@@ -21,8 +38,8 @@ STAMPS = {
 
 def report(**overrides) -> CIReport:
     base = CIReport(
-        faithfulness=0.9, recall=0.85, redteam_bypasses=0,
-        p99_ms=1200.0, cost_usd=0.02, versions=dict(STAMPS),
+        faithfulness=PASSING, recall=RECALL_BAR + 0.05, redteam_bypasses=0,
+        p99_ms=P99_BUDGET_MS / 2, cost_usd=COST_BUDGET_USD / 2, versions=dict(STAMPS),
     )
     return replace(base, **overrides)
 
@@ -33,22 +50,23 @@ def test_clean_report_merges():
 
 
 def test_eval_regression_blocks():
-    ok, reasons = should_merge(report(faithfulness=0.7))
+    ok, reasons = should_merge(report(faithfulness=FAILING))
     assert not ok and any("faithfulness" in r for r in reasons)
 
 
 def test_redteam_bypass_blocks_even_with_good_evals():
-    ok, reasons = should_merge(report(faithfulness=0.95, recall=0.9, redteam_bypasses=1))
+    clean_evals = report(faithfulness=PASSING, recall=RECALL_BAR + 0.1, redteam_bypasses=1)
+    ok, reasons = should_merge(clean_evals)
     assert not ok and any("bypass" in r for r in reasons)
 
 
 def test_a_latency_blowout_blocks_on_the_tail():
-    ok, reasons = should_merge(report(p99_ms=7800.0))
+    ok, reasons = should_merge(report(p99_ms=SLOW_MS))
     assert not ok and any("p99" in r for r in reasons)
 
 
 def test_a_cost_blowout_blocks_before_the_invoice():
-    ok, reasons = should_merge(report(cost_usd=0.31))
+    ok, reasons = should_merge(report(cost_usd=COST_BUDGET_USD * 6))
     assert not ok and any("cost" in r for r in reasons)
 
 
@@ -65,10 +83,10 @@ def test_the_four_gates_fail_independently():
     # cost gate, and so on — which is exactly why CI runs them as separate
     # required jobs, not one averaged score.
     failures = {
-        quality_ok: report(faithfulness=0.7),
+        quality_ok: report(faithfulness=FAILING),
         safety_ok: report(redteam_bypasses=1),
-        latency_ok: report(p99_ms=9000.0),
-        cost_ok: report(cost_usd=1.0),
+        latency_ok: report(p99_ms=SLOW_MS),
+        cost_ok: report(cost_usd=COST_BUDGET_USD * 20),
     }
     for failing_gate, bad in failures.items():
         for gate in (quality_ok, safety_ok, latency_ok, cost_ok):

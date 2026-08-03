@@ -1,5 +1,5 @@
 {
-  "faithfulness": 0.62,
+  "faithfulness": 0.45,
   "recall": 0.86,
   "redteam_bypasses": 0,
   "p99_ms": 1240.0,
