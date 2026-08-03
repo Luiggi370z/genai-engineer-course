@@ -172,7 +172,18 @@ debug at 3 a.m. Take it in any order; each item is independently green-able.
       store with no floor reports `relevance` in `degraded` and `tier.threshold: "none"`,
       and `require_real_tiers` refuses to publish release numbers measured without one —
       recall scored against a store that cannot say "nothing here" is not a recall number
-- [ ] That floor is the **only** relevance test on the document path. Nothing downstream
+- [ ] **Admission is per arm.** The cosine floor judges dense candidates; a sparse
+      candidate is admitted when a distinctive query term — one carrying a digit, or
+      written in caps — appears in it verbatim. Applying the cosine floor to both arms
+      looks tidier and silently disables hybrid retrieval: `ZX-99417` scored 0.535 dense
+      against a floor of 0.58, on the one document that contained it exactly. The chunk
+      carries the arm that admitted it in `scored_by`, because 1.96 read as a cosine is
+      worse than no number
+- [ ] The sparse rule stays **narrow on purpose**. Admitting on any shared word would
+      restore the failure the floor was added to fix, from the other direction: "work"
+      appears verbatim across an office corpus, and a system that admits on it never
+      abstains again
+- [ ] Admission is the **only** relevance test on the document path. Nothing downstream
       re-checks a retrieved chunk for words shared with the question. A word-overlap filter
       standing behind a semantic retriever throws away exactly the hits it was bought to
       find, and it is invisible from the API: "how quickly do i get money back for a work
@@ -299,9 +310,10 @@ with a TestClient and no network. Each real adapter turns on with one env var
 (`settings.py`): `QDRANT_URL`, `ASSISTANT_EMBED_MODEL` (real embeddings instead of
 the deterministic hash vector — it matches on shared vocabulary, so
 "reimbursement" will not find a page about "refunds"), `ASSISTANT_MIN_SCORE` (the
-relevance floor that lets retrieval return nothing instead of the nearest thing
-it has — the deployed stack sets `0.58`, and a vector store without one is reported
-as degraded), `ASSISTANT_RERANK_MODEL` (an optional cross-encoder over the fused
+dense relevance floor that lets retrieval return nothing instead of the nearest
+thing it has — the deployed stack sets `0.58`, the sparse arm is admitted by exact
+identifier match instead, and a vector store without a floor is reported as
+degraded), `ASSISTANT_RERANK_MODEL` (an optional cross-encoder over the fused
 candidates), `OLLAMA_HOST`,
 `MCP_SERVER`, `ASSISTANT_DB`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, plus the optional hardening/connector vars —

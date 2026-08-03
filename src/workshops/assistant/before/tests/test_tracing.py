@@ -307,6 +307,74 @@ def test_a_streamed_answer_meters_the_same_tokens_as_the_batched_one():
     assert compose_out(streamed) != 2 * compose_out(batched)
 
 
+def compose_span_of(made: Assistant):
+    return made.rec.named(observe.COMPOSE_SPAN)[0]
+
+
+def test_provider_token_counts_survive_the_stream_worker_thread():
+    """A cost measurement that quietly downgraded itself in exactly one code path.
+
+    `fallback_stream` drains the primary composer on a worker thread so a stalled
+    model cannot hold the request open forever. The Ollama adapter reports the
+    provider's own `prompt_eval_count` and `eval_count` through a ContextVar — and
+    a ContextVar set on a worker thread is invisible to the thread that will do the
+    metering. The batch path already knew this and copies its context back on
+    success; the streaming path did not, so every streamed answer was billed on a
+    word-split estimate while the exact numbers existed and were thrown away.
+
+    Nothing failed. The span said `estimated` and the arithmetic was consistent, so
+    the only symptom was a number being wrong — which is why this asserts the
+    provider's counts exactly rather than comparing two paths to each other.
+    """
+    from assistant import usage
+    from assistant.fallbacks import fallback_stream
+
+    def reports_its_own_counts(goal, contexts, state, memories=None):
+        yield "Refunds are processed "
+        yield "within five business days."
+        # Where the real adapter reports: on the final part, in this thread.
+        usage.report(111, 7)
+
+    made = assistant()
+    made.stream_compose = fallback_stream(reports_its_own_counts, lambda *_: None)
+    list(made.ask_stream("how long do refunds take", "alice"))
+
+    span = compose_span_of(made)
+    assert attr(span, observe.TOKENS_SOURCE) == "counted", (
+        "the provider's numbers were produced and then lost at the thread boundary"
+    )
+    assert attr(span, observe.TOKENS_IN) == 111
+    assert attr(span, observe.TOKENS_OUT) == 7
+
+
+def test_a_truncated_stream_says_its_counts_are_an_estimate():
+    """The property the fix could break, in the direction that matters.
+
+    A stream that dies mid-answer has no provider totals — the provider never sent
+    them. The tempting fix is to hand back whatever the worker had; the honest one
+    is to meter the fragment that escaped and let the span say `estimated`. A
+    truncated answer billed as `counted` is worse than one billed high, because
+    `counted` is the word that stops anyone looking.
+    """
+    from assistant import usage
+    from assistant.fallbacks import fallback_stream
+
+    def dies_mid_answer(goal, contexts, state, memories=None):
+        yield "Refunds are processed "
+        usage.report(111, 7)  # reported, then the stream dies before it ends
+        raise RuntimeError("the model went away")
+
+    made = assistant()
+    made.stream_compose = fallback_stream(dies_mid_answer, lambda *_: None)
+    frames = list(made.ask_stream("how long do refunds take", "alice"))
+    done = json.loads(frames[-1].split("data: ", 1)[1])
+    assert done["truncated"] is True
+
+    span = compose_span_of(made)
+    assert attr(span, observe.TOKENS_SOURCE) == "estimated"
+    assert attr(span, observe.TOKENS_OUT) == measure_usage("", done["answer"]).tokens_out
+
+
 def test_a_truncated_stream_meters_what_escaped_and_not_twice_over():
     """The truncated branch double-counted the same way the completed one did.
 

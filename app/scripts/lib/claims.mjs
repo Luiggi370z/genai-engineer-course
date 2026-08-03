@@ -89,29 +89,68 @@ export const MARKER = {
   close: "<!-- /canonical:hardware -->",
 };
 
-export function tableFindings({ file, markdown, expected }) {
-  const start = markdown.indexOf(MARKER.open);
-  const end = markdown.indexOf(MARKER.close);
+/** The same markers around the prerequisite list, which drifted the same way. */
+export const PREREQ_MARKER = {
+  open: "<!-- canonical:prerequisites -->",
+  close: "<!-- /canonical:prerequisites -->",
+};
+
+function blockFindings({ file, markdown, expected, marker, rule, what, origin }) {
+  const start = markdown.indexOf(marker.open);
+  const end = markdown.indexOf(marker.close);
   if (start === -1 || end === -1) {
     return [
       {
-        rule: "canonical-table",
+        rule,
         subject: file,
-        message: `no ${MARKER.open} … ${MARKER.close} block — the hardware table here cannot be checked`,
+        message: `no ${marker.open} … ${marker.close} block — the ${what} here cannot be checked`,
       },
     ];
   }
-  const found = markdown.slice(start + MARKER.open.length, end).trim();
+  const found = markdown.slice(start + marker.open.length, end).trim();
   if (found !== expected.trim()) {
     return [
       {
-        rule: "canonical-table",
+        rule,
         subject: file,
-        message: `the hardware table has drifted from src/data/reference.ts. Replace the block with:\n\n${expected}\n`,
+        message: `the ${what} has drifted from ${origin}. Replace the block with:\n\n${expected}\n`,
       },
     ];
   }
   return [];
+}
+
+export function tableFindings({ file, markdown, expected }) {
+  return blockFindings({
+    file,
+    markdown,
+    expected,
+    marker: MARKER,
+    rule: "canonical-table",
+    what: "hardware table",
+    origin: "src/data/reference.ts",
+  });
+}
+
+/**
+ * The prerequisite list in a README is the one `intro.ts` publishes.
+ *
+ * Same rule, different registry, and it exists because the two drifted apart in
+ * exactly the way a table cannot be trusted not to: the workbook asked for
+ * OAuth, a cloud, SQL, design patterns and light maths; both READMEs asked for
+ * five skills and no split between "required" and "nice to have". Nobody was
+ * lying — there was simply no place where the two had to agree.
+ */
+export function prerequisiteFindings({ file, markdown, expected }) {
+  return blockFindings({
+    file,
+    markdown,
+    expected,
+    marker: PREREQ_MARKER,
+    rule: "canonical-prerequisites",
+    what: "prerequisite list",
+    origin: "src/data/intro.ts",
+  });
 }
 
 /**

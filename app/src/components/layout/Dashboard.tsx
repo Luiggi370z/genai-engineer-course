@@ -230,18 +230,32 @@ export function Dashboard({
 
       <section className="mt-12">
         <SectionLabel kicker="Quick self-check before Phase 1" title="Prerequisites" />
-        <div className="divide-y divide-line/50 rounded-lg border border-line bg-card py-1.5">
-          {prerequisites.map((item) => (
-            <CheckItem
-              key={item.id}
-              id={item.id}
-              text={item.text}
-              checked={!!progress[item.id]}
-              onToggle={onToggle}
-              accent="var(--color-ink)"
-            />
-          ))}
-        </div>
+        {(
+          [
+            ["required", "Required — assumed on day one"],
+            ["helpful", "Helpful, not required — each one is taught here or has a way around it"],
+          ] as const
+        ).map(([need, heading]) => (
+          <div key={need} className="mt-3 first:mt-0">
+            <h3 className="mb-1.5 text-[12px] font-semibold tracking-wide text-graphite">
+              {heading}
+            </h3>
+            <div className="divide-y divide-line/50 rounded-lg border border-line bg-card py-1.5">
+              {prerequisites
+                .filter((item) => item.need === need)
+                .map((item) => (
+                  <CheckItem
+                    key={item.id}
+                    id={item.id}
+                    text={item.text}
+                    checked={!!progress[item.id]}
+                    onToggle={onToggle}
+                    accent="var(--color-ink)"
+                  />
+                ))}
+            </div>
+          </div>
+        ))}
       </section>
 
       <section className="mt-12 mb-16">

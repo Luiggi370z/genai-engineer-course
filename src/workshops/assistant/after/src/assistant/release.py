@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,18 +47,35 @@ from pathlib import Path
 from assistant import observe, report
 from assistant.core import Assistant
 from assistant.evals import Judge
-from assistant.provenance import source_id  # stdlib-only: the gate imports it alone
+from assistant.provenance import (  # stdlib-only: the gate imports these alone
+    source_id,
+    source_root,
+)
 from assistant.service import build_assistant
 from assistant.settings import Settings
 
-#: The versioned Phase 6 dataset, from the capstone's own directory. Relative
-#: because the whole point is that it is ONE dataset: a copy in this workshop
-#: would drift from the lesson that maintains it, and the drift would be
-#: invisible — both files would still parse.
-REDTEAM = (
-    Path(__file__).resolve().parents[5]
-    / "phase6-design-defend/01-red-team/after/evals/redteam.jsonl"
-)
+#: The versioned Phase 6 dataset, relative to the course root. The whole point is
+#: that it is ONE dataset: a copy in this workshop would drift from the lesson that
+#: maintains it, and the drift would be invisible — both files would still parse.
+REDTEAM_RELATIVE = "phase6-design-defend/01-red-team/after/evals/redteam.jsonl"
+
+
+def redteam_path() -> Path:
+    """Where that dataset is, or a refusal that names what is missing.
+
+    A function rather than a module constant because resolving it used to be
+    import-time work — and import-time work that assumes a directory layout is how
+    this module became unimportable inside its own image. The release lane runs
+    from a checkout by definition; the container never runs it, and now says so
+    instead of failing to load.
+    """
+    root = source_root()
+    if root is None:
+        raise SystemExit(
+            f"the red team lives in the course checkout at {REDTEAM_RELATIVE}, and "
+            "this process cannot see one — run the release lane from the repository."
+        )
+    return root / REDTEAM_RELATIVE
 
 #: A landed injection may not reach these. The bar is containment, not detection:
 #: the filter is allowed to miss, the gate is not allowed to open.
@@ -77,7 +95,8 @@ class RedTeamRow:
         return self.category == "benign"
 
 
-def load_redteam(path: Path = REDTEAM) -> list[RedTeamRow]:
+def load_redteam(path: Path | None = None) -> list[RedTeamRow]:
+    path = path or redteam_path()
     if not path.exists():
         raise SystemExit(
             f"the red-team dataset is not at {path}.\n"
@@ -407,6 +426,27 @@ def measure(judge_model: str = "qwen3-coder:30b") -> tuple[str, report.Measured]
     return page, measured
 
 
+EVIDENCE_BINDING = "release-report.json sha256:"
+
+
+def bind_to_report(page: str, body: str) -> str:
+    """Staple the page to the exact numbers it quotes.
+
+    The Markdown is what a human reads and the JSON is what the gate reads, and
+    until now nothing stopped the two from describing different runs: re-measure,
+    commit the new JSON, forget the page, and every check still passes while the
+    release notes quote last week's faithfulness. The digest is taken over the
+    bytes written beside it, so that becomes a detectable state instead of an
+    unlucky one.
+    """
+    digest = hashlib.sha256(body.encode()).hexdigest()
+    return page.rstrip("\n") + (
+        f"\n\n---\n\nThese numbers are `{EVIDENCE_BINDING}{digest}`. `release.yml` "
+        "recomputes that digest over the committed JSON and refuses to publish a page "
+        "bound to different numbers.\n"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="full-fidelity release evidence")
     parser.add_argument("--out", default="evidence/RELEASE-EVIDENCE.md")
@@ -423,7 +463,10 @@ def main() -> int:
         print(source_id())
         return 0
     page, measured = measure(args.judge)
-    for path, body in ((args.out, page), (args.json, report.dump(measured))):
+    # Dumped once and both written and hashed, so the digest in the page is over
+    # the bytes on disk rather than over a second, hopefully identical, dump.
+    data = report.dump(measured)
+    for path, body in ((args.out, bind_to_report(page, data)), (args.json, data)):
         target = Path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(body)

@@ -541,11 +541,19 @@ class Assistant:
                 # `done` frame carrying the text so far, `truncated: true` and the
                 # reason, before you break.
                 #
-                # Per FRAME, because that is the only place a long generation can
-                # be stopped at all. A client that closed the tab thirty seconds
-                # ago is still being generated for otherwise — and under load
-                # that is the failure that compounds, because the tokens nobody
-                # reads are the tokens that slow down the callers who stayed.
+                # Then pass `check=deadline.check` to `gated_chunks` above as well.
+                # Both, because they are different moments, and one of them is not
+                # optional: this loop only runs when the gate RELEASES something,
+                # and the gate holds an unbroken token without releasing anything.
+                # A check that runs between frames therefore runs zero times during
+                # exactly the stream that most needs stopping — measured at 9.2
+                # seconds of buffering and re-screening for 800 chunks nobody was
+                # ever going to read.
+                #
+                # A client that closed the tab thirty seconds ago is still being
+                # generated for otherwise — and under load that is the failure that
+                # compounds, because the tokens nobody reads are the tokens that
+                # slow down the callers who stayed.
                 #
                 # Breaking in silence is the trap. The client has half an answer
                 # rendered, and a stream that simply stops looks exactly like a

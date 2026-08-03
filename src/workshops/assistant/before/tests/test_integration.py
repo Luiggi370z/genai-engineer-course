@@ -109,6 +109,74 @@ def test_the_relevance_threshold_returns_nothing_rather_than_the_nearest_thing()
     assert store.search("the office is closed on public holidays", k=3)
 
 
+DEPLOYED_FLOOR = 0.58
+"""What `docker-compose.yml` actually sets. The two tests below run at it rather
+than at a number chosen to make them pass, because the defect they cover was
+invisible at the default of 0.0 and certain at this one."""
+
+
+def _floor_store(collection: str):
+    pytest.importorskip("qdrant_client")
+    url = os.getenv("QDRANT_URL")
+    if not url:
+        pytest.skip("set QDRANT_URL to run the admission checks")
+
+    from assistant.adapters import QdrantStore
+
+    store = QdrantStore(url, collection=collection, min_score=DEPLOYED_FLOOR)
+    store.add([
+        "refunds for approved claims are processed within five business days",
+        "order ZX-99417 was shipped on tuesday and delivered on thursday",
+        "the office is closed on public holidays",
+    ])
+    return store
+
+
+def test_an_exact_identifier_survives_the_deployed_relevance_floor():
+    """Hybrid retrieval, undone by the gate meant to protect it.
+
+    The sparse arm exists precisely because an order number carries no meaning an
+    embedder can place. It found this document and RRF ranked it first — and then
+    admission re-queried the DENSE arm alone and dropped everything under 0.58.
+    Measured here: cosine 0.535 against a floor of 0.58, sparse score 1.962 and
+    the only hit on that arm. The one document that certainly answered the
+    question was discarded by the one number that could not see why.
+
+    So admission asks each arm about its own candidates. A cosine floor is the
+    right question for dense evidence and a meaningless one for an exact match.
+    """
+    store = _floor_store("assistant_exact_floor_test")
+    hits = store.search("ZX-99417", k=3)
+    assert hits, (
+        f"the exact identifier was dropped at min_score={DEPLOYED_FLOOR} — a "
+        "dense-only floor cannot judge a sparse match"
+    )
+    assert "ZX-99417" in hits[0].text
+    assert hits[0].scored_by == "sparse", (
+        "the admitting arm has to travel with the chunk: a sparse score read as a "
+        f"cosine is nonsense, and this one is {hits[0].score}"
+    )
+
+
+def test_the_floor_still_abstains_now_that_the_sparse_arm_can_admit():
+    """The property the fix could break, and the reason it is a rule about
+    identifiers rather than about shared words.
+
+    Round 4 removed a lexical filter that was throwing away semantic hits; round 5
+    added a dense floor that threw away lexical ones. A sparse arm allowed to admit
+    on any shared token would complete the circle — "work" appears verbatim in half
+    this corpus — so it may only admit on a term a cosine cannot represent: one
+    carrying a digit, or written in caps.
+    """
+    store = _floor_store("assistant_exact_floor_test")
+    assert store.search("quarterly revenue by region", k=3) == [], (
+        "an unanswerable question must still return nothing"
+    )
+    assert store.search("how does photosynthesis work", k=3) == [], (
+        "'work' appears verbatim in this corpus and must not be enough to admit"
+    )
+
+
 def test_ollama_generation_adapter():
     pytest.importorskip("ollama")
     host = os.getenv("OLLAMA_HOST")

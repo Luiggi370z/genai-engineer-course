@@ -102,6 +102,10 @@ def relevance_gap(settings: Settings) -> str | None:
     evidence for a question nobody asked. `ASSISTANT_MIN_SCORE` is the only place
     that judgement can be made, because it is the only place the scores exist.
 
+    It sets the DENSE arm's floor. The sparse arm is admitted by an exact-identifier
+    rule instead, which needs no configuration — so this setting being unset means
+    semantic retrieval cannot abstain, not that nothing can be retrieved.
+
     A predicate rather than an inline `if` so the rule can be tested without a
     Qdrant to connect to — the condition is worth a test, and reaching it through
     `build_assistant` needs the store the condition is about.

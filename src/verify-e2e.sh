@@ -12,6 +12,7 @@
 #   ./verify-e2e.sh --model TAG  override the chat model tag (implies --ci)
 #   ./verify-e2e.sh --list       print the checks and exit
 #   ./verify-e2e.sh --print-commit  print the commit this run would expect, and exit
+#   ./verify-e2e.sh --attest PATH   on a COMPLETE pass, record what ran, where (see below)
 #
 # Needs Docker and disk for two Ollama models (~6 GB on first boot). Everything else
 # in this repo verifies offline; this is the one script that proves the composed
@@ -129,6 +130,10 @@ set -euo pipefail
 # Resolved BEFORE the cd below, because `--help` reads this file's own header and a
 # relative $0 stops resolving the moment the working directory changes.
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+SRC_ROOT="$(dirname "$SELF")"
+# Where the caller was standing. `--attest evidence/e2e.json` has to mean what it
+# means in their shell, not what it means three directories down from it.
+INVOKED_FROM="$PWD"
 
 cd "$(dirname "$0")/phase8-deploy/01-compose/after" || exit 1
 
@@ -173,6 +178,7 @@ ONLY=0
 BUILD="--build"
 HOST_MODEL=0
 PRINT_COMMIT=0
+ATTEST=""
 CI_LANE=0
 CI_MODEL="qwen3.5:1.7b" # registered in app/src/data/reference.ts as the ci-tier chat tag
 
@@ -186,6 +192,8 @@ while (($#)); do
     --model) CI_LANE=1; CI_MODEL="${2:?--model needs a tag}"; shift ;;
     --model=*) CI_LANE=1; CI_MODEL="${1#*=}" ;;
     --print-commit) PRINT_COMMIT=1 ;;
+    --attest) ATTEST="${2:?--attest needs a path}"; shift ;;
+    --attest=*) ATTEST="${1#*=}" ;;
     --from) FROM="${2:?--from needs a check number}"; shift ;;
     --from=*) FROM="${1#*=}" ;;
     --only) ONLY="${2:?--only needs a check number}"; shift ;;
@@ -205,6 +213,14 @@ done
 [[ "$FROM" =~ ^[0-9]+$ && "$ONLY" =~ ^[0-9]+$ ]] || die "--from/--only take a number"
 ((ONLY)) && FROM="$ONLY"
 ((FROM >= 1 && FROM <= TOTAL)) || die "--from/--only must be between 1 and $TOTAL"
+# Refused here rather than after the run, because the answer does not depend on
+# how the run goes: an attestation says "every check passed against this source",
+# and a resumed run inherits state from an earlier one whose source may differ.
+# Finding that out twenty minutes in would just teach people to pass --from anyway.
+if [[ -n "$ATTEST" ]] && { ((FROM > 1)) || ((ONLY)); }; then
+  die "--attest records a complete pass; --from/--only make it a partial one"
+fi
+if [[ -n "$ATTEST" && "$ATTEST" != /* ]]; then ATTEST="$INVOKED_FROM/$ATTEST"; fi
 
 # The model lane, announced rather than inferred. A run that quietly used a
 # different inference path than the reader assumes is worse than a slow one, so
@@ -422,6 +438,19 @@ answer_says() {
   grep -qi -- "$1" <<<"$(jget /tmp/e2e-ask.json answer)" || die "$2"
 }
 
+# answer_lacks PATTERN MESSAGE — the pattern does NOT appear in the answer.
+#
+# The other half of `answer_says`, and it is not redundant. An alternation like
+# "reimburse\|expense\|ten business days" passes on "I cannot determine the
+# timing, but this concerns an expense policy" — a refusal that happens to
+# contain a topic word. Requiring the fact and forbidding the hedge are two
+# different assertions, because an answer can satisfy the first by accident.
+answer_lacks() {
+  if grep -qi -- "$1" <<<"$(jget /tmp/e2e-ask.json answer)"; then
+    die "$2"
+  fi
+}
+
 # grounded_in KIND — the answer was built from the evidence class it claims.
 #
 # `grounding` is the field that separates "the model knew this" from "the corpus
@@ -466,6 +495,36 @@ check() {
 
 # ---------------------------------------------------------------------------
 
+# A container that fell over, named as soon as it happens instead of twenty
+# minutes later.
+#
+# Every service in this stack is `restart: unless-stopped`, which means a crash
+# looks exactly like a slow start from outside: nothing answers, and the readiness
+# loop keeps polling. Round 5 spent the full BOOT_TIMEOUT on an assistant that was
+# dying during module import once every few seconds, then reported "stack did not
+# become healthy" — true, useless, and twenty minutes after the traceback existed.
+#
+# Under `unless-stopped` there is no healthy path to a restart during boot, so
+# RestartCount > 0 is a crash by definition, whatever the container is doing now.
+die_if_crashed() {
+  local svc cid status restarts
+  for svc in $($COMPOSE ps --services 2>/dev/null); do
+    cid=$($COMPOSE ps -q "$svc" 2>/dev/null) || continue
+    [[ -n "$cid" ]] || continue # defined but not started in this lane
+    status=$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo gone)
+    restarts=$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)
+    case "$status" in
+      restarting | exited | dead) ;;
+      *) [[ "$restarts" == 0 ]] && continue ;;
+    esac
+    echo
+    $COMPOSE logs --tail 40 "$svc" 2>&1 || true
+    printf '\nThis is a crash, not a slow start: nothing in this stack restarts on\n'
+    printf 'purpose, so the stack will never become ready. The cause is above.\n'
+    die "the $svc container is $status after $restarts restart(s)"
+  done
+}
+
 # Not run through `check`: every other check needs the stack up and a token in
 # hand, so booting is a precondition rather than a step you can skip. It is cheap
 # to repeat — compose reuses the layers and the containers it already has.
@@ -476,6 +535,7 @@ boot() {
   $COMPOSE up $BUILD --detach
   local deadline=$((SECONDS + BOOT_TIMEOUT))
   until curl -sf "$BASE/health" -o /tmp/e2e-health.json 2>/dev/null; do
+    die_if_crashed
     ((SECONDS < deadline)) || die "stack did not become healthy in ${BOOT_TIMEOUT}s"
     sleep 5
   done
@@ -487,6 +547,9 @@ boot() {
   # that was merely cold: the composer timed out loading a 9B, the offline
   # fallback answered, and the run recorded a degraded answer as the model's.
   until curl -sf "$BASE/ready" -o /tmp/e2e-ready.json 2>/dev/null; do
+    # Also here, not only above: a container that answers /health and then dies
+    # warming a model would otherwise sit in this loop until the same deadline.
+    die_if_crashed
     ((SECONDS < deadline)) || die "the model tier never warmed up in ${BOOT_TIMEOUT}s — $(curl -s "$BASE/ready")"
     sleep 5
   done
@@ -621,23 +684,27 @@ EOF
   as "$ALICE" -X POST "$BASE/ingest" -H 'content-type: application/json' \
     -d '{"docs": [{"text": "staff are reimbursed for travel expenses within ten business days of filing",
                    "source": "expenses.md"}]}' >/dev/null
-  # Not one word in common with the document except "for". A hash embedder scores
-  # this at zero; a real one puts it first.
+  # Two questions about one document, because RETRIEVAL and COMPOSITION fail for
+  # different reasons and an assertion with two reasons to fail cannot tell you
+  # which one happened.
+  #
+  # First, retrieval. Not one word in common with the document except "for". A
+  # hash embedder scores this at zero; a real one puts it first. What this proves
+  # is that the right chunk came back and was cited — and only that. It is
+  # deliberately NOT asked to state the fact: measured over 20 trials on
+  # `qwen3.5:9b`, this phrasing answers 15 times and refuses 5, because the model
+  # decides "travel expenses" is not specifically "a work trip". That refusal is
+  # a judgment about wording, not a defect in the stack, and a release gate that
+  # fires on it one run in four is a gate nobody trusts.
   ask "how quickly do i get money back for a work trip" \
     || die "the synonym question was refused"
-  # Three assertions where there used to be one, and the one was `grep -qi
-  # reimburse` over the entire response. That passed while the answer was "I don't
-  # know": the document was in `contexts`, the word was in the file, and the check
-  # never looked at what the assistant said. A lexical filter in the composer was
-  # discarding the very hit the embedder had just found, and this check reported
-  # success for two audit rounds.
-  #
-  # The order matters. `grounded_in documents` fails first and most clearly if the
-  # relevance floor is wrong; `answer_says` fails if composition threw the evidence
-  # away; `cites` fails if the answer came from somewhere else entirely.
+  # `grounded_in` used to be one assertion, `grep -qi reimburse` over the entire
+  # response. That passed while the answer was "I don't know": the document was
+  # in `contexts`, the word was in the file, and the check never looked at what
+  # the assistant said. A lexical filter in the composer was discarding the very
+  # hit the embedder had just found, and this check reported success for two
+  # audit rounds.
   grounded_in documents
-  answer_says "reimburse\|expense\|ten business days" \
-    "semantic recall reached retrieval but not the answer: $(jget /tmp/e2e-ask.json answer)"
   cites expenses.md
   # And the score that kept it, in its own units — the number the floor was
   # compared against, published so an operator can retune it from real traffic
@@ -649,8 +716,29 @@ ok = top.get("scored_by") == "cosine" and isinstance(top.get("score"), float)
 print(f"  top citation: {top['source']} at {top.get('score')} ({top.get('scored_by')})")
 sys.exit(0 if ok else 1)
 EOF
+  echo "semantic recall works: a question sharing no vocabulary with the document retrieved it"
+  # Now composition, asked plainly so the only thing left to fail is whether the
+  # assistant will say what it just retrieved. The old assertion here accepted
+  # "reimburse\|expense\|ten business days", which "I cannot determine the timing,
+  # but this concerns an expense policy" satisfies — a refusal wearing the
+  # vocabulary of an answer. The question asks how long; the only correct response
+  # contains the duration. Measured 40/40 on this phrasing, batch and streamed.
+  ask "how long does it take to be reimbursed for travel expenses" \
+    || die "the direct question was refused"
+  answer_says "ten business days\|10 business days" \
+    "the answer never states the reimbursement time: $(jget /tmp/e2e-ask.json answer)"
+  # And it must not hedge while stating it. Until the refusal became a sentinel
+  # the model stripped out of the reply, this is what came back 6 to 8 times in
+  # 10: the fact, the citation, and then "I don't know — that isn't in what I can
+  # see." A reader served both has been told nothing.
+  answer_lacks "i don't know\|i do not know\|cannot determine\|unable to determine" \
+    "the answer states the fact and abstains in the same breath: $(jget /tmp/e2e-ask.json answer)"
+  # The sentinel is an internal protocol. If one ever reaches a client, the filter
+  # in `stop_at_refusal` has a hole in it.
+  answer_lacks "NO_ANSWER" \
+    "the refusal sentinel leaked into the answer: $(jget /tmp/e2e-ask.json answer)"
+  cites expenses.md
   echo "grounded answer came back with contexts, citations, and streamed through the gate"
-  echo "semantic recall works: a question sharing no vocabulary with the document answered it"
 }
 
 check_5() {
@@ -1084,6 +1172,56 @@ if ((SKIPPED)); then
     "$RAN" "$SKIPPED"
 else
   printf '\nE2E: all %s checks passed, every one of them through the gate\n' "$RAN"
+fi
+
+# The attestation. Written only here, at the bottom of a run that reached the
+# bottom, because everything above `exit`s on failure — reaching this line IS the
+# claim, and there is no other way to get a file out of this script.
+#
+# It exists because `RELEASE-EVIDENCE.md` says "the deployed stack passes its
+# end-to-end suite" and nothing checked that anyone had run it. The release gate
+# reads this file and refuses to publish when `source` is not the source it is
+# about to tag, so an evidence set stapled to different code fails loudly instead
+# of quietly describing a build nobody made.
+#
+# `source` comes from the checkout rather than the container on purpose: inside
+# the image there is no course tree, `source_root()` correctly returns None and
+# `source_id()` answers `unbound`. The binding is a property of the code that was
+# built, not of the filesystem it was copied into.
+if [[ -n "$ATTEST" ]]; then
+  ((SKIPPED == 0)) || die "internal: refusing to attest a run with $SKIPPED skipped checks"
+  # PYTHONPATH=src, exactly as the Makefile runs it: the capstone is a src-layout
+  # project that is never installed into its own venv, so `-m assistant.release`
+  # without it is a ModuleNotFoundError — at the very end of a complete run,
+  # having thrown away the twenty-five minutes that earned the attestation.
+  attest_source=$(cd "$SRC_ROOT/workshops/assistant/after" \
+    && PYTHONPATH=src uv run python -m assistant.release --print-source-id) \
+    || die "could not read the source id — attestation needs the checkout, not just the stack"
+  attest_model=$($COMPOSE exec -T assistant python -c \
+    'from assistant.settings import Settings; print(Settings.from_env().ollama_model)') \
+    || die "the stack could not say which chat model it was configured with"
+  mkdir -p "$(dirname "$ATTEST")"
+  ATTEST_SOURCE="$attest_source" ATTEST_MODEL="$attest_model" ATTEST_COMMIT="$GIT_SHA" \
+  ATTEST_LANE="$MODEL_LANE" ATTEST_RAN="$RAN" ATTEST_TOTAL="$TOTAL" \
+    python3 - "$ATTEST" <<'EOF'
+import datetime as dt, json, os, sys
+
+json.dump(
+    {
+        "source": os.environ["ATTEST_SOURCE"].strip(),
+        "commit": os.environ["ATTEST_COMMIT"].strip(),
+        "lane": os.environ["ATTEST_LANE"].strip(),
+        "model": os.environ["ATTEST_MODEL"].strip(),
+        "checks_run": int(os.environ["ATTEST_RAN"]),
+        "checks_total": int(os.environ["ATTEST_TOTAL"]),
+        "finished_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat(),
+    },
+    open(sys.argv[1], "w"),
+    indent=2,
+)
+open(sys.argv[1], "a").write("\n")
+EOF
+  printf 'attested: %s (source %s, model %s)\n' "$ATTEST" "$attest_source" "$attest_model"
 fi
 # Repeated at the end because that is where a green line gets pasted into a pull
 # request, and "all 15 passed" means something different on each lane. The CI lane

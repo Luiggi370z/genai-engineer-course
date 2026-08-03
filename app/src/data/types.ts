@@ -83,7 +83,15 @@ export interface Checkable {
   text: string;
 }
 
-export type Prerequisite = Checkable;
+/**
+ * `need` is the difference between "you will be lost without this" and "this
+ * will save you an afternoon". Nine unqualified bullets read as nine gates, and
+ * a reader who has never touched a cloud closes the page — so the split is part
+ * of the content, not presentation.
+ */
+export interface Prerequisite extends Checkable {
+  need: "required" | "helpful";
+}
 
 export interface Myth {
   title: string;

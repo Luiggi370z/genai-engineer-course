@@ -5,8 +5,10 @@ import {
   datasetFindings,
   MARKER,
   modelFindings,
+  PREREQ_MARKER,
   parseIsoDate,
   pinFindings,
+  prerequisiteFindings,
   priceFindings,
   readDataset,
   STALE_DAYS,
@@ -87,6 +89,32 @@ test("a table that matches the registry passes; one that drifted does not", () =
 
 test("a file with no markers cannot be checked, and says so", () => {
   const [finding] = tableFindings({ file: "README.md", markdown: "no table here", expected: "x" });
+  assert.match(finding.message, /cannot be checked/);
+});
+
+test("a prerequisite list that drifted from intro.ts is caught the same way", () => {
+  const expected = "**Required — assumed on day one.**\n\n- **Python (comfortable)** — pytest";
+  const good = `intro\n${PREREQ_MARKER.open}\n${expected}\n${PREREQ_MARKER.close}\nrest`;
+  assert.deepEqual(prerequisiteFindings({ file: "README.md", markdown: good, expected }), []);
+
+  // The actual round-5 drift: a README quietly asking for less than the workbook.
+  const dropped = `${PREREQ_MARKER.open}\n- **Python (comfortable)** — pytest\n${PREREQ_MARKER.close}`;
+  const [finding] = prerequisiteFindings({ file: "README.md", markdown: dropped, expected });
+  assert.equal(finding.rule, "canonical-prerequisites");
+  assert.match(finding.message, /has drifted from src\/data\/intro\.ts/);
+  assert.ok(finding.message.includes(expected), "the fix is printed, not just the complaint");
+
+  const [missing] = prerequisiteFindings({ file: "README.md", markdown: "nothing", expected });
+  assert.match(missing.message, /cannot be checked/);
+});
+
+test("the two canonical blocks are told apart, so one cannot satisfy the other", () => {
+  // Both rules share an implementation; distinct markers are what keeps a
+  // hardware table from passing as a prerequisite list.
+  const expected = "x";
+  const hardwareOnly = `${MARKER.open}\n${expected}\n${MARKER.close}`;
+  assert.deepEqual(tableFindings({ file: "R.md", markdown: hardwareOnly, expected }), []);
+  const [finding] = prerequisiteFindings({ file: "R.md", markdown: hardwareOnly, expected });
   assert.match(finding.message, /cannot be checked/);
 });
 

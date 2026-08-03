@@ -29,9 +29,10 @@ STAMP_LENGTH = 8
 #: will work on, short enough to read out loud during an incident.
 SHA_LENGTH = 12
 
-#: The course source root. `provenance.py` sits at
-#: `<src>/workshops/assistant/after/src/assistant/`.
-SRC = Path(__file__).resolve().parents[5]
+#: A file that exists at the course source root and nowhere else above this one.
+#: Shipped in the companion ZIP too (`git archive HEAD -- src`), so the extracted
+#: lane finds the same landmark a checkout does.
+ROOT_MARKER = "verify-lessons.sh"
 
 #: Everything the full-fidelity release numbers are a measurement of, under `SRC`.
 #:
@@ -46,6 +47,29 @@ MEASURED_SOURCE = (
     "workshops/assistant/after",
     "phase6-design-defend/01-red-team/after/evals/redteam.jsonl",
 )
+
+
+def source_root() -> Path | None:
+    """The course source root above this file, or `None` when there is not one.
+
+    Searched for by landmark rather than counted to. The version this replaced was
+    `Path(__file__).resolve().parents[5]`, which is right in the checkout — thirteen
+    parents — and `IndexError` inside the image, where `COPY src/ src/` under
+    `WORKDIR /app` leaves four. The API imports this module for `build_version`, so
+    a source-root calculation that only the release lane needs crashed Uvicorn
+    before startup and Docker restarted the container for as long as anyone let it.
+
+    A fixed depth is an assumption about a layout with no way to check itself, and
+    it fails where the code is hardest to run. A landmark either is there or is not.
+
+    `None` is therefore a real answer, not a failure: inside the image there is no
+    course tree, and callers are expected to say so — `source_id()` returns
+    `unbound` — rather than to guess at a directory.
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ROOT_MARKER).is_file():
+            return parent
+    return None
 
 
 def build_version() -> str:
@@ -133,12 +157,14 @@ def source_id() -> str:
                           writes the commit into `src/RELEASE_COMMIT`, so the
                           measurement is still bound to something — the release it
                           came from rather than a tree.
-      ``unbound``         no git and no stamp. Says so, rather than inventing a
-                          value that would compare equal to something.
+      ``unbound``         no git and no stamp — including inside the image, where
+                          there is no course tree at all. Says so, rather than
+                          inventing a value that would compare equal to something.
     """
     if not _git("rev-parse", "--git-dir"):
-        stamp = SRC / "RELEASE_COMMIT"
-        if stamp.is_file() and (sha := stamp.read_text().strip()):
+        root = source_root()
+        stamp = root / "RELEASE_COMMIT" if root else None
+        if stamp and stamp.is_file() and (sha := stamp.read_text().strip()):
             return f"release-{sha[:SHA_LENGTH]}"
         return "unbound"
 
@@ -158,10 +184,14 @@ def source_id() -> str:
 
 
 def _git(*args: str) -> str:
-    """Git's answer, or "" when git cannot answer — including not being installed."""
+    """Git's answer, or "" when git cannot answer — including not being installed,
+    and including having nowhere to ask from, which is the container's case."""
+    root = source_root()
+    if root is None:
+        return ""
     try:
         done = subprocess.run(
-            ["git", "-C", str(SRC), *args],
+            ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
             timeout=10,

@@ -9,6 +9,7 @@ never changes the shape of an answer.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -17,6 +18,100 @@ from assistant.agent import Step
 from assistant.rag import Chunk
 
 ABSTAIN = "I don't know — that isn't in what I can see."
+
+#: What the MODEL is asked to say when the evidence falls short. The reader never
+#: sees it; `without_refusal` and `stop_at_refusal` turn it into `ABSTAIN`.
+#:
+#: The two used to be one string, and the prompt said "reply exactly: <sentence>".
+#: Measured against `qwen3.5:9b` on the deployed stack, that produced an answer
+#: with the refusal stapled to the end of it 6 to 8 times in 10 — on questions
+#: with nothing ambiguous about them:
+#:
+#:     Travel expenses are reimbursed within ten business days of filing [c1].
+#:     I don't know — that isn't in what I can see.
+#:
+#: A model that does that has not misjudged the evidence; it found the evidence,
+#: answered from it, cited it, and then filled in what it took to be a required
+#: field. One reply said as much in a parenthetical: "(Note: The second sentence
+#: is required by the prompt's constraint format)".
+#:
+#: Four rewordings were measured over 8-10 trials each. None removed it, and the
+#: most emphatic ("Answer or refuse — never both in one reply") made it worse by
+#: turning contradictions into outright refusals of evidence the model had in
+#: front of it. So the instruction is no longer asked to carry the contract. A
+#: sentinel is a word an answer cannot accidentally contain, which makes the same
+#: mistake detectable instead of merely discouraged, and `stop_at_refusal` cuts
+#: the reply there. The model still appends it; nobody downstream can tell.
+NO_ANSWER = "NO_ANSWER"
+
+#: Word-bounded so an answer that happens to begin a longer word with it — the
+#: string "NO_ANSWERS ARE FINAL" quoted out of a document, say — is not truncated
+#: into a refusal.
+_SENTINEL = re.compile(rf"\b{re.escape(NO_ANSWER)}\b")
+
+
+def _pending(text: str) -> int:
+    """How many trailing characters could still turn into the sentinel.
+
+    A streaming filter has to hold these back: `NO_ANSW` is not the sentinel yet
+    and may never be, but forwarding it and then discovering the rest arrives in
+    the next frame means the sentinel already reached the client in pieces.
+
+    The scan starts at the sentinel's full length rather than one below it, so a
+    buffer ending in a complete `NO_ANSWER` is held too — until the next
+    character says whether the word ended there or ran on into `NO_ANSWERS`.
+    """
+    for size in range(min(len(text), len(NO_ANSWER)), 0, -1):
+        if NO_ANSWER.startswith(text[-size:]):
+            return size
+    return 0
+
+
+def without_refusal(reply: str) -> str:
+    """A complete model reply, resolved to exactly one of an answer or `ABSTAIN`.
+
+    Everything from the sentinel onward is discarded rather than searched for
+    meaning: when the model keeps talking past it, what follows is commentary
+    about the output format, not about the question. A reply with nothing before
+    the sentinel — or nothing in it at all — is the refusal.
+    """
+    match = _SENTINEL.search(reply)
+    answer = (reply[: match.start()] if match else reply).strip()
+    return answer or ABSTAIN
+
+
+def stop_at_refusal(chunks: Iterator[str]) -> Iterator[str]:
+    """`without_refusal` for a stream, where the reply arrives in pieces.
+
+    Chunk boundaries fall wherever the provider puts them, so the sentinel can be
+    split across any number of frames. Each frame is therefore forwarded only up
+    to the point where the tail could still become the sentinel; the held-back
+    remainder is reconsidered when the next frame lands, and released at the end
+    of the stream if the sentinel never materialised. Nothing is held forever —
+    that failure would look like a working filter and quietly clip the last few
+    characters off every answer.
+    """
+    buffer = said = ""
+    refused = False
+    for chunk in chunks:
+        buffer += chunk
+        hold = _pending(buffer)
+        settled, buffer = buffer[: len(buffer) - hold], buffer[len(buffer) - hold :]
+        match = _SENTINEL.search(settled)
+        ready = settled[: match.start()] if match else settled
+        if ready:
+            said += ready
+            yield ready
+        if match:
+            refused = True
+            break
+    if not refused and buffer:
+        match = _SENTINEL.search(buffer)
+        if ready := (buffer[: match.start()] if match else buffer):
+            said += ready
+            yield ready
+    if not said.strip():
+        yield ABSTAIN
 
 #: (goal, retrieved contexts, tool state, recalled memories) -> answer.
 #: Memories are what the assistant already knew about THIS caller; contexts are
@@ -79,10 +174,16 @@ def grounded_prompt(
     if memories:
         recalled = "\n".join(f"- {guardrails.spotlight(m)}" for m in memories)
         known = f"\n\nKnown about the person asking:\n{recalled}"
+    # The refusal is a sentinel rather than the sentence the reader gets; see
+    # NO_ANSWER for the measurements. Deliberately no clause here about wording
+    # or paraphrase: "a passage answers the question when it states the fact
+    # asked for, however different its wording" was measured too, and it raised
+    # false refusals from 0 to 2 in 10 by giving the model a judgment to make
+    # where it previously just answered.
     return (
         "Answer the question using ONLY the evidence below, in one or two "
-        "sentences, citing the [c#] ids you used. If the evidence does not "
-        f"answer it, reply exactly: {ABSTAIN}\n\n"
+        "sentences, citing the [c#] ids you used. If no passage states the fact "
+        f"asked for, reply with this one word alone: {NO_ANSWER}\n\n"
         f"Evidence:\n{lines}{known}\n\nQuestion: {goal}"
     )
 
@@ -101,7 +202,7 @@ def memory_prompt(goal: str, memories: list[str]) -> str:
         "Answer the question using ONLY what this person told you earlier, "
         "below, in one sentence. Say that they told you. Do NOT cite sources or "
         "use [c#] markers — there are no documents here. If what they told you "
-        f"does not answer the question, reply exactly: {ABSTAIN}\n\n"
+        f"does not answer the question, reply with this one word alone: {NO_ANSWER}\n\n"
         f"What they told you earlier:\n{recalled}\n\nQuestion: {goal}"
     )
 
@@ -235,7 +336,7 @@ def model_composer(host: str, model: str) -> Composer:
             if not contexts and not state
             else grounded_prompt(goal, contexts, state, memories)
         )
-        return ollama_generate(prompt, host=host, model=model)
+        return without_refusal(ollama_generate(prompt, host=host, model=model))
 
     return compose
 
@@ -282,6 +383,6 @@ def model_stream_composer(host: str, model: str) -> StreamComposer:
             if not contexts and not state
             else grounded_prompt(goal, contexts, state, memories)
         )
-        yield from ollama_stream(prompt, host=host, model=model)
+        yield from stop_at_refusal(ollama_stream(prompt, host=host, model=model))
 
     return stream

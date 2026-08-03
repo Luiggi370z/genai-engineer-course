@@ -12,7 +12,15 @@
 #
 # and take the `refs/tags/v5^{}` hash, which is the commit the tag peels to.
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  # Callable, so `release.yml` can depend on these jobs instead of re-listing
+  # them. `needs:` cannot reach across workflows, and the alternative — copying
+  # the jobs into the release workflow — is two definitions that will disagree.
+  # Round 5 was tagged from a commit that was red in two of these jobs, because
+  # the release path ran `pnpm verify` and nothing else.
+  workflow_call:
 
 jobs:
   lessons-after:
@@ -187,10 +195,11 @@ jobs:
         working-directory: app
 
   compose-build:
-    # the capstone image must at least BUILD on every change. Booting the stack
-    # is not a push-lane job: the scheduled `e2e` workflow runs the whole of
+    # the capstone image must build AND run on every change. Booting the whole
+    # stack is not a push-lane job: the scheduled `e2e` workflow runs all of
     # src/verify-e2e.sh against a small model, and the full-fidelity run is a
-    # local release gate.
+    # local release gate. Booting the assistant ALONE is, because it costs
+    # seconds and it is the check this repo was missing.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -198,6 +207,11 @@ jobs:
       # student ZIP is cut from, so an ignored-but-present build input (the capstone
       # uv.lock) fails here instead of in a student's terminal.
       - run: ./src/verify-release-build.sh
+      # A build that succeeds proves the files copied, not that the application
+      # runs in the layout the Dockerfile produced. Round 5 shipped an image that
+      # built green and crashed on import; this is the gate that would have caught
+      # it, and it needs no Qdrant, no Ollama and no model to do so.
+      - run: ./src/verify-image-smoke.sh
       - run: docker compose build
         working-directory: src/phase8-deploy/01-compose/after
       # the overlays must stay mergeable even though this job never boots them.

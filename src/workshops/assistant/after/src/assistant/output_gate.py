@@ -62,9 +62,9 @@ from "this is as far as the answer got".
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
-from assistant import guardrails
+from assistant import deadline, guardrails
 from assistant.composers import StreamTruncated
 
 SAFE_BUFFERED = "safe-buffered"
@@ -91,7 +91,9 @@ REDACTION = "[redacted: output failed the safety gate]"
 
 
 def gated_chunks(
-    chunks: Iterator[str], mode: str = SAFE_BUFFERED
+    chunks: Iterator[str],
+    mode: str = SAFE_BUFFERED,
+    check: Callable[[], None] | None = None,
 ) -> Iterator[tuple[str, str]]:
     """Screen a stream on its way out.
 
@@ -104,9 +106,18 @@ def gated_chunks(
         still discards it, because a partial answer is not the answer;
       * `("truncated", partial)` — the source stopped early. The text that got
         out is screened like any other, but it is not offered as the answer.
+
+    `check` is called before pulling each source chunk and may raise
+    `deadline.Expired` — normally `deadline.check`, which asks whether the caller
+    is still there and whether the request still has time. It belongs HERE, not
+    only in the loop consuming this generator, because of the holding behaviour
+    described above: on an unbroken token this yields nothing for as long as the
+    token continues, so a consumer that checks between frames is not checking at
+    all. Expiry is treated exactly like a dead source — the terminal frame says
+    `truncated`, because a held buffer that never got sent is not an answer.
     """
     if mode == RAW:
-        yield from _raw(chunks)
+        yield from _raw(chunks, check)
         return
 
     buffer = ""
@@ -117,7 +128,7 @@ def gated_chunks(
     run_starts_at = 0
     truncated = False
     try:
-        for chunk in chunks:
+        for chunk in _while_wanted(chunks, check):
             scanned_to = len(buffer)
             buffer += chunk
             if not guardrails.output_ok(buffer):
@@ -133,7 +144,7 @@ def gated_chunks(
             if cut > released:
                 yield "chunk", buffer[released:cut]
                 released = cut
-    except StreamTruncated:
+    except (StreamTruncated, deadline.Expired):
         truncated = True
     # the held-back tail is screened whether the stream finished or gave up: a
     # truncated answer is still an answer's worth of text leaving the process
@@ -145,17 +156,39 @@ def gated_chunks(
     yield ("truncated" if truncated else "done"), buffer
 
 
-def _raw(chunks: Iterator[str]) -> Iterator[tuple[str, str]]:
+def _while_wanted(
+    chunks: Iterator[str], check: Callable[[], None] | None
+) -> Iterator[str]:
+    """The source, asking before each pull whether anyone still wants it.
+
+    Written as `next()` in a loop rather than `for`, because the difference is the
+    entire point: `for` asks the source for a chunk and only then hands control
+    back, so a check placed around the body runs after the work it was meant to
+    prevent.
+    """
+    source = iter(chunks)
+    while True:
+        if check is not None:
+            check()
+        try:
+            yield next(source)
+        except StopIteration:
+            return
+
+
+def _raw(
+    chunks: Iterator[str], check: Callable[[], None] | None = None
+) -> Iterator[tuple[str, str]]:
     """Emit first, judge later. Local-only: the verdict arrives after the content
     it was supposed to withhold, which is exactly the failure the default mode
     exists to prevent. Kept because seeing the two side by side is the lesson."""
     parts: list[str] = []
     truncated = False
     try:
-        for chunk in chunks:
+        for chunk in _while_wanted(chunks, check):
             parts.append(chunk)
             yield "chunk", chunk
-    except StreamTruncated:
+    except (StreamTruncated, deadline.Expired):
         truncated = True
     answer = "".join(parts)
     if not guardrails.output_ok(answer):

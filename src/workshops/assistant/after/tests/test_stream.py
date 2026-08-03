@@ -13,7 +13,7 @@ import re
 
 from fastapi.testclient import TestClient
 
-from assistant import guardrails
+from assistant import deadline, guardrails
 from assistant.api import create_app
 from assistant.composers import ABSTAIN, StreamTruncated
 from assistant.output_gate import (
@@ -476,3 +476,54 @@ def test_a_truncated_stream_is_still_screened():
     response = c.post("/ask/stream", json={"question": "what is the refund policy"})
     assert "alice@example.com" not in response.text
     assert events_from(response.text)[-1][1]["redacted"] is True
+
+
+def test_a_cancelled_stream_stops_while_the_gate_is_still_holding():
+    """Cancellation checked per released frame is not checked at all when nothing
+    is being released.
+
+    The safe-buffered gate degrades to full buffering on an unbroken token — that
+    is the documented, deliberate cost of not leaking a half-formed address. What
+    was not deliberate is that the request's only cancellation check lived in the
+    loop consuming this generator, so during that hold nobody was asking whether
+    the caller was still there. A client that disconnected went on being generated
+    for, which under load is the failure that compounds: tokens nobody will read,
+    competing with callers who stayed.
+
+    So the check moves to where the pulling happens — before every source chunk,
+    not after every released one — and expiry ends the stream the same way a dead
+    model does, with a terminal frame that says the answer is partial.
+
+    The waste is worse than it sounds, because the gate rescans its buffer per
+    chunk: draining this source took 0.6s at 200 chunks, 2.3s at 400 and 9.2s at
+    800. Quadratic work on behalf of nobody.
+    """
+    pulled = 0
+
+    def unbroken_token():
+        # No delimiter anywhere, so the gate can release nothing and the loop
+        # above never gets a frame to check between.
+        nonlocal pulled
+        for _ in range(400):
+            pulled += 1
+            yield "x" * 100
+
+    with deadline.budget(cancelled=lambda: pulled >= 5):
+        frames = list(gated_chunks(unbroken_token(), check=deadline.check))
+
+    assert pulled <= 6, (
+        f"the source was drained {pulled} times after the caller had gone — "
+        "cancellation is only observed between released frames"
+    )
+    assert frames[-1][0] == "truncated", (
+        "an abandoned stream is a partial answer and the terminal frame has to "
+        f"say so, not report {frames[-1][0]!r}"
+    )
+
+
+def test_the_gate_still_ends_normally_when_nobody_cancels():
+    """The property the fix could break: a check that is wrong in the other
+    direction ends every healthy stream as truncated."""
+    with deadline.budget(seconds=30):
+        frames = list(gated_chunks(iter(["refunds take ", "five days"]), check=deadline.check))
+    assert frames[-1] == ("done", "refunds take five days")

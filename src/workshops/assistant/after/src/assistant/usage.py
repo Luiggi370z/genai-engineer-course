@@ -71,6 +71,24 @@ def take_reported() -> Usage | None:
     return reported
 
 
+def adopt(reported: Usage | None) -> None:
+    """Take on counts a producer read out of another thread's context.
+
+    Context-local is the right default and a dead end at a thread boundary: a
+    worker starts with an empty context and nothing it writes comes back. The
+    batch path solves that generically, by copying its context back on success
+    (`resilience.resilient`). A streaming worker cannot — it is still running
+    when the first chunk is consumed, and copying a context mid-flight would
+    adopt whatever half-finished state happened to be in it.
+
+    So the streaming producer hands its counts over explicitly, on the same queue
+    that carries the chunks, and the consuming thread adopts them here. `None`
+    does nothing, which is what an unreported exchange means: the estimate stands.
+    """
+    if reported is not None:
+        _REPORTED.set(reported)
+
+
 #: The result of the most recent `measure`, for a caller downstream of the one
 #: that metered. `report.py` scores answers that `core.py` already metered; it
 #: used to re-measure them from a prompt it rebuilt itself, which was a second

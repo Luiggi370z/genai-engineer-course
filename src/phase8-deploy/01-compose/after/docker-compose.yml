@@ -62,6 +62,14 @@ services:
       # move when the corpus or the embedder does, which is why this is a
       # deployment setting and not a constant in the code — see WORKSHOP-DEPLOYED-STACK.md
       # for the measurement, and re-run it before trusting this value elsewhere.
+      #
+      # It governs the DENSE arm only. The keyword arm is admitted by a separate
+      # rule that needs no number: a query identifier appearing verbatim in the
+      # document. That split is not tidiness. When this floor applied to both arms,
+      # an exact search for order ZX-99417 returned nothing — cosine 0.535 against
+      # a floor of 0.58, on the one document that unambiguously contained it.
+      # Calibrating a similarity threshold against evidence that is not a
+      # similarity produces a number that cannot be right.
       ASSISTANT_MIN_SCORE: "0.58"
       # How long one composition may take before the offline stitcher answers
       # instead. The library default is 60 seconds, which suits a model with a

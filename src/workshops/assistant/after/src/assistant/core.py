@@ -595,12 +595,17 @@ class Assistant:
             # back, and inventing a number for it would be worse.
             metered: str | None = None
             blocked = truncated = False
-            for kind, chunk in gated_chunks(produced, self.settings.stream_mode):
-                # Checked per frame, which is the only place a long stream can be
-                # stopped at all. A client that closed the tab thirty seconds ago
-                # is still being generated for otherwise — and under load that is
-                # the failure that compounds, because the tokens nobody reads are
-                # the tokens that slow down the callers who stayed.
+            for kind, chunk in gated_chunks(
+                produced, self.settings.stream_mode, check=deadline.check
+            ):
+                # Checked here per released frame AND inside the gate before each
+                # source chunk, because those are different moments: the gate can
+                # hold an unbroken token indefinitely without releasing anything,
+                # and a check that only runs between frames never runs at all
+                # through that. A client that closed the tab thirty seconds ago is
+                # still being generated for otherwise — and under load that is the
+                # failure that compounds, because the tokens nobody reads are the
+                # tokens that slow down the callers who stayed.
                 if deadline.expired():
                     # Ending the loop is right; ending it in silence was not.
                     # The client has already rendered half an answer, and a

@@ -26,7 +26,17 @@ permissions:
   contents: write
 
 jobs:
+  # Every cheap gate the repo has, as a precondition of publishing rather than as
+  # something that merely ran at some point on some commit. Round 5 was tagged from
+  # a commit that was red in two of these jobs: this workflow ran `pnpm verify` —
+  # which did not even include lint — and had no relationship to the rest of CI.
+  # Calling ci.yml keeps one definition of those jobs; `needs:` alone cannot,
+  # because it does not reach across workflows.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   release:
+    needs: ci
     runs-on: ubuntu-latest
     steps:
       # Full history: verify-dist.sh resolves trees and blobs at HEAD with
@@ -45,7 +55,9 @@ jobs:
 
       # The content gates, before the build rather than after: a release that
       # ships a workbook whose claims disagree with the lessons is worse than no
-      # release, and `pnpm build` alone would not notice.
+      # release, and `pnpm build` alone would not notice. `verify` now begins with
+      # `lint` — it did not, which is how two Biome errors shipped while this step
+      # was green, and the name `verify` is only worth trusting if it is complete.
       - run: pnpm verify
         working-directory: app
 
@@ -73,76 +85,37 @@ jobs:
 
       # The precondition the documentation has always stated and nothing ever
       # checked. Steps 1-4 of the release checklist are the cheap gates, and this
-      # workflow runs all of them; step 6 is the full-fidelity measurement — the
+      # workflow runs all of them; step 5 is the full-fidelity measurement — the
       # deployed stack, the real model, RAGAS, the whole red-team dataset — and it
       # cannot run here. A hosted runner is four cores with no GPU, which is why
       # the e2e lane is named "wiring, small model" and says so in its own title.
       #
-      # So the artifact is carried instead of recomputed: the maintainer measures
+      # So the artifacts are carried instead of recomputed: the maintainer measures
       # locally and commits the result, and this refuses to publish unless that
-      # result describes the source being published. `source_id` is asked of the
-      # capstone rather than reimplemented here, for the same reason
-      # `verify-e2e.sh` has `--print-commit` — a copy of the path list in a YAML
-      # file is a copy that will drift. It is stdlib-only, so there is no `uv sync`.
+      # result describes the source being published, clears the same four merge
+      # gates the course teaches, and comes with proof that the deployed stack
+      # passed its whole end-to-end suite on the lane being claimed.
+      #
+      # The logic is a script rather than sixty lines of shell in a YAML string,
+      # because a gate nobody can run locally is a gate nobody tests — and this
+      # one is checking evidence for a bug class that reached production twice.
+      # `source_id` is asked of the capstone rather than reimplemented, for the
+      # same reason `verify-e2e.sh` has `--print-commit`: a copy of the path list
+      # in a workflow file is a copy that will drift. Both are stdlib-only, so
+      # there is no `uv sync` here.
       #
       # A tag fails; a dispatch warns. A rehearsal is for proving the packaging
       # path works, and refusing to rehearse without an hour of local measurement
       # would just mean nobody rehearses.
-      - name: The full-fidelity evidence measures THIS source
+      - name: The committed evidence measures THIS source
         run: |
           set -euo pipefail
-          json=release/evidence/release-report.json
-          page=release/evidence/RELEASE-EVIDENCE.md
           want=$(cd src/workshops/assistant/after \
             && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id())')
-          echo "this source answers to: $want"
-
-          problem=""
-          # Before any comparison. `dirty-` and `unbound` are the ids `source_id`
-          # returns when it cannot bind a measurement to committed code, and two
-          # of them are equal to each other — so comparing first and validating
-          # second would let an unbindable release publish itself.
-          case "$want" in
-            dirty-*|unbound) problem="this checkout has no bindable source id ($want)" ;;
-          esac
-          if [ -n "$problem" ]; then :
-          elif [ ! -f "$json" ] || [ ! -f "$page" ]; then
-            problem="no committed full-fidelity evidence at $json and $page"
-          else
-            got=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["versions"].get("source","<none>"))' "$json")
-            echo "the committed evidence measured: $got"
-            case "$got" in
-              dirty-*) problem="the evidence was measured against uncommitted changes ($got)" ;;
-              unbound) problem="the evidence is not bound to any source ($got)" ;;
-            esac
-            if [ -n "$problem" ]; then :
-            elif [ "$got" != "$want" ]; then
-              problem="the evidence measured $got, this release is $want"
-            else
-              bypasses=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["redteam_bypasses"])' "$json")
-              [ "$bypasses" = "0" ] || problem="the evidence records $bypasses red-team bypass(es)"
-            fi
-          fi
-
-          if [ -z "$problem" ]; then
-            echo "full-fidelity evidence agrees with the source being published"
-            exit 0
-          fi
-          case "$GITHUB_REF" in
-            refs/tags/*)
-              echo "error: refusing to publish — $problem" >&2
-              echo "       Run the full-fidelity lane against this exact tree, then commit its output:" >&2
-              echo "         cd src/workshops/assistant/after && make release-evidence" >&2
-              echo "         mkdir -p ../../../../release/evidence" >&2
-              echo "         cp evidence/RELEASE-EVIDENCE.md evidence/release-report.json ../../../../release/evidence/" >&2
-              echo "       A 'dirty-' or 'unbound' id means the measurement was not taken against" >&2
-              echo "       committed code; see docs/RELEASE-CHECKLIST.md step 6." >&2
-              exit 1
-              ;;
-            *)
-              echo "::warning::rehearsal only — a tag would refuse here: $problem"
-              ;;
-          esac
+          warn=""
+          case "$GITHUB_REF" in refs/tags/*) ;; *) warn="--warn-only" ;; esac
+          python3 .github/scripts/check-release-evidence.py \
+            --source "$want" --commit "$GITHUB_SHA" $warn
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
@@ -151,6 +124,11 @@ jobs:
 
       # Only a tag publishes. A dispatch run has proved the same things and is
       # allowed to stop here.
+      #
+      # All three evidence files ship, not just the readable one. The page is a
+      # summary and the gate above reads the other two — publishing only the page
+      # asks a reader to trust a number whose source and completeness are in files
+      # they cannot see.
       - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         if: startsWith(github.ref, 'refs/tags/')
         with:
@@ -160,4 +138,6 @@ jobs:
             dist/genai-engineer-workbook-src.zip
             dist/BUILD.json
             release/evidence/RELEASE-EVIDENCE.md
+            release/evidence/release-report.json
+            release/evidence/e2e-attestation.json
           generate_release_notes: true

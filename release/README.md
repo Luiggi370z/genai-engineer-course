@@ -72,9 +72,27 @@ the short version here cannot quietly disagree with the long one in the workbook
 course can be completed spending nothing. Hosted providers — the no-GPU fallback and the
 optional frontier comparisons — are metered and cost real (small) money.
 
-**Skills.** You should already write Python comfortably (type hints, `async`/`await`,
-Pydantic, pytest), know git, HTTP and JSON, and have met Docker. No machine-learning
-background is needed and there is no maths derivation anywhere in here.
+**Skills.** No machine-learning background is needed and there is no maths derivation
+anywhere in here. What is assumed, and what merely helps:
+
+<!-- canonical:prerequisites -->
+**Required — assumed on day one.**
+
+- **Python (comfortable)** — type hints, async/await, Pydantic, uv or poetry, pytest
+- **APIs & HTTP** — verbs, status codes, API-key auth, JSON, SSE/streaming, retry with backoff
+- **Git/GitHub** — branching, PRs, code review
+- **Docker basics** — Dockerfile, docker compose, multi-stage builds
+
+**Helpful, not required** — each is either taught here or has a stated way around it.
+
+- **A cloud** — any of AWS/GCP/Azure. Phase 8 deploys with compose on one box; a cloud makes the last mile familiar rather than possible
+- **SQL** — joins and indexes make pgvector feel familiar, but every query the course writes is shown in full
+- **Design patterns** — adapter/strategy and dependency injection carry this whole course; you can also just read them off the lessons that use them
+- **Hardware** — any 16GB+ machine runs the local-model lessons; more RAM unlocks stronger models (sizing table in Phase 1). No GPU at all? Hosted budget tiers cover everything.
+- **Light math** — vectors, cosine similarity, probability intuition. No PhD required, promise
+<!-- /canonical:prerequisites -->
+
+The workbook's opening screen carries the same two lists as a self-check.
 
 **Scope.** This is a course about *building systems on top of models*. It deliberately
 does not teach transformer mathematics or model architecture, pretraining and distributed

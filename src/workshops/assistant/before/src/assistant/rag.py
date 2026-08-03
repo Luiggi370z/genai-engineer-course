@@ -58,7 +58,9 @@ class Chunk:
     #: What the retriever ranked and KEPT this chunk by, and in which units. Two
     #: fields rather than one because a bare float here would be uninterpretable:
     #: 0.66 is a strong cosine and a meaningless reciprocal rank. `scored_by` is
-    #: "cosine" when a dense similarity decided it, "rrf" when a fusion did.
+    #: "cosine" when a dense similarity decided it, "rrf" when a fusion did, and
+    #: "sparse" when the keyword arm did — an IDF-weighted score, which is not on
+    #: the same scale as a cosine and must never be compared to one.
     #:
     #: Carried through composition and into the citation because the relevance
     #: DECISION is part of the provenance. The alternative — a chunk that arrives

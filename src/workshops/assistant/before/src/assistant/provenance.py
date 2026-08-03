@@ -23,11 +23,12 @@ STAMP_LENGTH = 8
 #: Git's conventional short form.
 SHA_LENGTH = 12
 
-#: The course source root. `provenance.py` sits at
-#: `<src>/workshops/assistant/before/src/assistant/`.
-SRC = Path(__file__).resolve().parents[5]
+#: A file that exists at the course source root and nowhere else above this one.
+#: Shipped in the companion ZIP too, so the extracted lane finds the same landmark
+#: a checkout does.
+ROOT_MARKER = "verify-lessons.sh"
 
-#: Everything the full-fidelity release numbers are a measurement of, under `SRC`.
+#: Everything the full-fidelity release numbers are a measurement of, under the root.
 #:
 #: Two entries because the red team is one dataset shared with the lesson that
 #: maintains it, so a row added there changes what a containment number means
@@ -115,21 +116,45 @@ def source_id() -> str:
                           also check a boolean, and this id matches nothing.
                           Careful — a pathspec resolves against the cwd, so use the
                           `:/` root-relative form or a clean tree will read dirty.
-      ``release-<sha12>`` no git, but `SRC / "RELEASE_COMMIT"` exists — the ZIP
-                          lane, where `package.sh` wrote the release's own commit.
-      ``unbound``         neither. Never invent a value here: an id that compares
-                          equal to a real one is worse than admitting you have none.
+      ``release-<sha12>`` no git, but `source_root() / "RELEASE_COMMIT"` exists —
+                          the ZIP lane, where `package.sh` wrote the commit.
+      ``unbound``         neither, including `source_root()` returning None. Never
+                          invent a value here: an id that compares equal to a real
+                          one is worse than admitting you have none.
 
-    `_git` below is written for you; the judgement being tested is what to hash.
+    `_git` and `source_root` below are written for you; the judgement being tested
+    is what to hash.
     """
     raise NotImplementedError
 
 
+def source_root() -> Path | None:
+    """The course source root above this file, or `None` when there is not one.
+
+    Searched for by landmark rather than counted to. `parents[5]` would be right in
+    the checkout and `IndexError` inside the image, where `COPY src/ src/` under
+    `WORKDIR /app` leaves four parents — and because `api.py` imports this module
+    for `build_version`, that crashed the serving API for a calculation only the
+    release lane needs.
+
+    `None` is a real answer, not a failure: in the container there is no course
+    tree, and callers say so rather than guess at a directory.
+    """
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ROOT_MARKER).is_file():
+            return parent
+    return None
+
+
 def _git(*args: str) -> str:
-    """Git's answer, or "" when git cannot answer — including not being installed."""
+    """Git's answer, or "" when git cannot answer — including not being installed,
+    and including having nowhere to ask from, which is the container's case."""
+    root = source_root()
+    if root is None:
+        return ""
     try:
         done = subprocess.run(
-            ["git", "-C", str(SRC), *args],
+            ["git", "-C", str(root), *args],
             capture_output=True,
             text=True,
             timeout=10,

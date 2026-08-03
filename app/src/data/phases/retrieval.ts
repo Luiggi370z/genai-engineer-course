@@ -19,7 +19,7 @@ export const retrieval: PhaseContent = {
     { id: "p2-o2", text: "**Choose** chunking by evidence, not blog folklore" },
     {
       id: "p2-o3",
-      text: "**Build** a fast, offline gate — sliced golden questions plus lexical metrics — so every retrieval change is measurable before Phase 3 makes it judged",
+      text: "**Build** a two-tier eval harness — a fast lexical gate on every push, a real judge as an opt-in smoke path — so every retrieval change is measurable before Phase 3 calibrates the judge",
     },
     {
       id: "p2-o4",
@@ -316,8 +316,8 @@ assert body[c.start : c.end] == c.text`,
         {
           kind: "callout",
           tone: "tip",
-          title: "Fast and lexical here; judged and calibrated in Phase 3",
-          text: "For this phase you need a gate that runs in seconds: a small set of golden questions, sliced by type, scored with deterministic string metrics (`rapidfuzz`). Deliberately crude — it catches “retrieval broke” instantly and costs nothing. **Phase 3 is where scorekeeping becomes a discipline**: real judges, calibration against your own labels, and a merge gate you can defend. Never report a lexical proxy as “faithfulness.”",
+          title: "Both tiers here; the judge becomes trustworthy in Phase 3",
+          text: "What gates your merges in this phase runs in seconds: a small set of golden questions, sliced by type, scored with deterministic string metrics (`rapidfuzz`). Deliberately crude — it catches “retrieval broke” instantly and costs nothing. You also wire a real judge here, as an opt-in second tier, precisely so you can watch the two disagree. **What Phase 3 adds is the right to believe the judged number**: labelling rows yourself, measuring how often the judge agrees with you, and only then putting its threshold in front of a merge. Until then it is a smoke path — and never report a lexical proxy as “faithfulness.”",
         },
         {
           kind: "code",
@@ -728,7 +728,7 @@ class QdrantStore:                       # <- your job in the workshop
       },
       {
         id: "w1-d4",
-        text: "`make eval` runs the fast lexical gate over the golden slices and **CI fails** on a regression — Phase 3 upgrades this gate to a judged one",
+        text: "`make eval` runs the fast lexical gate over the golden slices and **CI fails** on a regression, with the judged tier available opt-in beside it — Phase 3 calibrates that judge and earns it a threshold",
         tier: "full",
       },
       {

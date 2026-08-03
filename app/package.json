@@ -21,7 +21,7 @@
     "check-a11y": "node scripts/check-a11y.mjs",
     "check-a11y:browser": "node scripts/check-a11y-browser.mjs",
     "check-sections": "node scripts/check-sections.mjs",
-    "verify": "pnpm build && pnpm test && pnpm check-a11y",
+    "verify": "pnpm lint && pnpm build && pnpm test && pnpm check-a11y",
     "verify-full": "pnpm verify && pnpm check-a11y:browser && pnpm check-sections",
     "check-claims": "node scripts/check-claims.mjs",
     "check-doc-links": "node scripts/check-doc-links.mjs",

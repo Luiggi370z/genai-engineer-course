@@ -62,9 +62,9 @@ from "this is as far as the answer got".
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
-from assistant import guardrails
+from assistant import deadline, guardrails
 from assistant.composers import StreamTruncated
 
 SAFE_BUFFERED = "safe-buffered"
@@ -91,7 +91,9 @@ REDACTION = "[redacted: output failed the safety gate]"
 
 
 def gated_chunks(
-    chunks: Iterator[str], mode: str = SAFE_BUFFERED
+    chunks: Iterator[str],
+    mode: str = SAFE_BUFFERED,
+    check: Callable[[], None] | None = None,
 ) -> Iterator[tuple[str, str]]:
     """TODO 1: screen a stream on its way out.
 
@@ -140,6 +142,18 @@ def gated_chunks(
     `("truncated", buffer)` instead of `("done", buffer)`. Ending a died-early
     stream with `done` is how a fragment gets served as a finished answer.
 
+    Iterate with `_while_wanted(chunks, check)` rather than over `chunks`, and
+    catch `deadline.Expired` alongside `StreamTruncated`. `_while_wanted` is
+    written for you; what it does is ask, before pulling each chunk, whether the
+    caller is still there. That has to happen HERE and not only in the loop
+    consuming this generator, and the reason is the holding behaviour you are
+    about to build: on an unbroken token this yields nothing at all, so a
+    cancellation check that runs between released frames runs zero times. An
+    abandoned stream then drains the whole model, re-screening a growing buffer
+    per chunk — measured at 9.2 seconds for 800 chunks nobody would ever read.
+    An expiry ends the stream as `truncated`, for the same reason a dead model
+    does: a buffer that was never sent is not an answer.
+
     The tests to hold yourself to are already written, and two of them are worth
     reading before you start: `test_no_local_part_is_long_enough_to_outrun_the_gate`
     sweeps the address length past the window at five different chunk sizes, and
@@ -150,17 +164,39 @@ def gated_chunks(
     raise NotImplementedError
 
 
-def _raw(chunks: Iterator[str]) -> Iterator[tuple[str, str]]:
+def _while_wanted(
+    chunks: Iterator[str], check: Callable[[], None] | None
+) -> Iterator[str]:
+    """The source, asking before each pull whether anyone still wants it.
+
+    Written as `next()` in a loop rather than `for`, because the difference is the
+    entire point: `for` asks the source for a chunk and only then hands control
+    back, so a check placed around the body runs after the work it was meant to
+    prevent.
+    """
+    source = iter(chunks)
+    while True:
+        if check is not None:
+            check()
+        try:
+            yield next(source)
+        except StopIteration:
+            return
+
+
+def _raw(
+    chunks: Iterator[str], check: Callable[[], None] | None = None
+) -> Iterator[tuple[str, str]]:
     """Emit first, judge later. Local-only: the verdict arrives after the content
     it was supposed to withhold, which is exactly the failure the default mode
     exists to prevent. Kept because seeing the two side by side is the lesson."""
     parts: list[str] = []
     truncated = False
     try:
-        for chunk in chunks:
+        for chunk in _while_wanted(chunks, check):
             parts.append(chunk)
             yield "chunk", chunk
-    except StreamTruncated:
+    except (StreamTruncated, deadline.Expired):
         truncated = True
     answer = "".join(parts)
     if not guardrails.output_ok(answer):

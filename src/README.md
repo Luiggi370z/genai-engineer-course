@@ -103,12 +103,18 @@ lesson installs something newer than the stamp:
 | **Recorded resolution** | a `VERIFIED.md` naming an exact version (`verified against ragas 0.4.3`) | what that dated run actually resolved to. It is evidence for bisecting a future break — nothing reinstalls it. |
 | **Locked** | `workshops/assistant/after/uv.lock`, the only tracked lockfile | every transitive dependency by hash. `uv sync --frozen` gets the same tree on any machine. |
 
-So: **only the capstone is reproducible; the lessons are version-bounded.** That is a
+So: **the capstone's Python tree is locked; the lessons are version-bounded.** That is a
 choice, not an omission. A lockfile per lesson would freeze 34 dependency trees that
 exist to be upgraded — the course teaches you to raise a cap deliberately and re-run
 `make check`, and a lockfile would hide the drift it wants you to practise on. The
 capstone is locked because it is the one artifact that gets deployed, where "works on
 my machine" is the failure being prevented.
+
+Locked is not bit-identical, and the Dockerfile says why in more detail: its base images
+are floating tags and the deployed stack pulls its models by tag, both on purpose, so a
+rebuild collects Debian's security patches instead of pinning a known-vulnerable layer.
+The lockfile fixes the Python tree by hash; the OS and the weights underneath it track
+named update channels.
 
 The interpreter follows the same rule: `>=3.11,<3.15`, and CI runs the whole lesson set
 at **both ends** of that range on every push, so the bound is tested rather than

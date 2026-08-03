@@ -3,41 +3,74 @@
 
 import type { Milestone, Myth, OutOfScope, Prerequisite } from "./types";
 
+/**
+ * Two groups, because an undifferentiated list of nine is read as nine gates.
+ *
+ * `required` is the honest floor: without these you will be learning two things
+ * at once and blaming the wrong one. Everything in `helpful` is either taught
+ * here (OAuth 2.1 and PKCE are Phase 7's subject, not an entry fee) or has a
+ * stated way around it, so a reader who has never provisioned a cloud can still
+ * finish. Both READMEs restate this list inside a canonical block and
+ * `pnpm check-claims` fails when a copy drifts.
+ */
 export const prerequisites: Prerequisite[] = [
   {
     id: "pre-1",
+    need: "required",
     text: "**Python (comfortable)** — type hints, async/await, Pydantic, uv or poetry, pytest",
   },
   {
     id: "pre-2",
-    text: "**APIs & HTTP** — verbs, status codes, auth (API keys, OAuth2), JSON, SSE/streaming, retry with backoff",
+    need: "required",
+    text: "**APIs & HTTP** — verbs, status codes, API-key auth, JSON, SSE/streaming, retry with backoff",
   },
-  { id: "pre-3", text: "**Git/GitHub** — branching, PRs, code review" },
+  { id: "pre-3", need: "required", text: "**Git/GitHub** — branching, PRs, code review" },
   {
     id: "pre-4",
+    need: "required",
     text: "**Docker basics** — Dockerfile, docker compose, multi-stage builds",
   },
   {
     id: "pre-5",
-    text: "**A cloud** — any of AWS/GCP/Azure: compute, object storage, secrets, a managed Postgres",
+    need: "helpful",
+    text: "**A cloud** — any of AWS/GCP/Azure. Phase 8 deploys with compose on one box; a cloud makes the last mile familiar rather than possible",
   },
   {
     id: "pre-6",
-    text: "**SQL** — joins, indexes, basic tuning (pgvector will feel familiar)",
+    need: "helpful",
+    text: "**SQL** — joins and indexes make pgvector feel familiar, but every query the course writes is shown in full",
   },
   {
     id: "pre-7",
-    text: "**Design patterns** — adapter/strategy and dependency injection carry this whole course",
+    need: "helpful",
+    text: "**Design patterns** — adapter/strategy and dependency injection carry this whole course; you can also just read them off the lessons that use them",
   },
   {
     id: "pre-8",
-    text: "**Optional hardware** — any 16GB+ machine runs the local-model lessons; more RAM unlocks stronger models (sizing table in Phase 1). No GPU at all? Hosted budget tiers cover everything.",
+    need: "helpful",
+    text: "**Hardware** — any 16GB+ machine runs the local-model lessons; more RAM unlocks stronger models (sizing table in Phase 1). No GPU at all? Hosted budget tiers cover everything.",
   },
   {
     id: "pre-9",
+    need: "helpful",
     text: "**Light math** — vectors, cosine similarity, probability intuition. No PhD required, promise",
   },
 ];
+
+/** The prerequisite list as the READMEs carry it, grouped by need. */
+export function prerequisiteSummaryMarkdown(): string {
+  const bullets = (need: Prerequisite["need"]) =>
+    prerequisites.filter((item) => item.need === need).map((item) => `- ${item.text}`);
+  return [
+    "**Required — assumed on day one.**",
+    "",
+    ...bullets("required"),
+    "",
+    "**Helpful, not required** — each is either taught here or has a stated way around it.",
+    "",
+    ...bullets("helpful"),
+  ].join("\n");
+}
 
 export const myths: Myth[] = [
   {

@@ -10,11 +10,13 @@ date, and every `before/` scaffold passed lint + type with its tests failing by 
 necessarily — what the date above was taken against. Where this file names an exact
 version, that is a **record** of what the verified run resolved to, not a constraint
 that reinstalls it. Exactly one lockfile is tracked in the whole repo,
-`workshops/assistant/after/uv.lock`: the capstone is the only bit-reproducible thing
-here, because it is the only thing that gets deployed. Everything else is
-version-bounded. Interpreter: **3.11 through 3.14** (`>=3.11,<3.15`), with both ends
-run in CI on every push; `phase4-agents/04-framework-bakeoff` pins 3.12 and says so
-itself. The long version is in [`../README.md`](../README.md).
+`workshops/assistant/after/uv.lock`: the capstone's Python tree is the only one fixed by
+hash rather than by range, because it is the only one that gets deployed. That still is
+not a bit-reproducible image — its Dockerfile bases are floating tags and the stack
+pulls its models by tag, both deliberately, so a rebuild picks up Debian's security
+patches instead of pinning a known-vulnerable layer. Everything else is version-bounded.
+Interpreter: **3.11 through 3.14** (`>=3.11,<3.15`), with both ends run in CI on every
+push; `phase4-agents/04-framework-bakeoff` pins 3.12 and says so itself. The long version is in [`../README.md`](../README.md).
 The integration tiers were additionally run for real: lesson 5.1 against `fastembed`
 ONNX embeddings, 5.2 against `tiktoken`, and 5.4 against **both** Mem0 and LangMem with
 Ollama serving `nomic-embed-text` locally — no API keys anywhere.

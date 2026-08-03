@@ -10,13 +10,49 @@ import re
 
 from fastapi.testclient import TestClient
 
-from assistant.adapters import InMemoryRag, collection_name, hash_embed
+from assistant.adapters import (
+    InMemoryRag,
+    collection_name,
+    distinctive_terms,
+    hash_embed,
+)
 from assistant.api import create_app
 from assistant.rag import Chunk, chunk_document, source_for
 from assistant.service import build_assistant
 from assistant.settings import Settings
 
 REFUNDS = "approved refunds are processed within five business days"
+
+
+def test_the_sparse_arm_may_admit_on_identifiers_and_nothing_else():
+    """The rule that lets a keyword hit survive a relevance gate, and the reason it
+    is narrow. Admission asks each retrieval arm in its own units — a cosine floor
+    for dense evidence, an exact-term rule for sparse — and this is the sparse half.
+
+    Widening it to "any shared word" would return the system to the failure the
+    dense floor was introduced to fix, from the other side: `work` and `refund`
+    appear verbatim all over an office corpus, and admitting on them would mean
+    never abstaining again. So a term counts when being exact is the whole of its
+    meaning: it carries a digit, or it is written in caps.
+
+    The Qdrant-backed half of this lives in `test_integration.py`, at the floor the
+    deployment actually sets. This half runs on every push.
+    """
+    # `ZX` is dropped as too short to be a code on its own, and it costs nothing:
+    # the number beside it is what no embedder could have placed.
+    assert distinctive_terms("where is order ZX-99417") == {"99417"}
+    assert distinctive_terms("what does E_TIMEOUT mean") == {"timeout"}
+    assert distinctive_terms("is CVE-2026-1 patched") == {"cve", "2026", "1"}
+
+    for prose in ("how does photosynthesis work", "when do refunds arrive", "hello"):
+        assert distinctive_terms(prose) == set(), (
+            f"{prose!r} has no exact-match evidence in it, so the sparse arm has "
+            "no grounds to overrule the cosine floor"
+        )
+
+    # Case is a signal, not noise: `IT` is a department and `it` is a pronoun.
+    assert distinctive_terms("escalate to IT support") == set(), "two letters is not a code"
+    assert "sla" in distinctive_terms("what is the SLA")
 
 
 def test_a_chunk_id_is_derived_from_where_it_came_from_not_from_when():

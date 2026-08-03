@@ -142,6 +142,30 @@ def sparse_terms(text: str):
     return SparseVector(indices=list(counts), values=list(counts.values()))
 
 
+def distinctive_terms(text: str) -> set[str]:
+    """Query tokens whose presence is evidence in itself: identifiers.
+
+    The sparse arm earns its place by finding strings an embedder cannot place —
+    `ZX-99417`, `E_TIMEOUT`, `CVE-2026-1`. When admission needs to know whether a
+    sparse hit is real, "the query and the document share this exact token" is the
+    honest test, and it costs no calibration.
+
+    But only for tokens that MEAN something by being exact. Admitting on any shared
+    word would undo abstention: ask an office-policy corpus how photosynthesis
+    works and "work" appears verbatim in half of it. So a term qualifies when it
+    carries a digit or is written in caps, and ordinary prose qualifies never.
+
+    Tokenised the way `sparse_terms` tokenises, on `[a-z0-9]+`, so a term that
+    qualifies here is a term that arm actually indexed: `ZX-99417` contributes
+    `zx` and `99417`, and it is `99417` that does the work.
+    """
+    terms = set()
+    for raw in re.findall(r"[A-Za-z0-9]+", text):
+        if any(ch.isdigit() for ch in raw) or (raw.isupper() and len(raw) >= 3):
+            terms.add(raw.lower())
+    return terms
+
+
 def collection_name(base: str, signature: str, dim: int) -> str:
     """`assistant__nomic-embed-text__768` — the store's identity, not just a name.
 
@@ -325,9 +349,9 @@ class QdrantStore:
             query_filter=tenant_filter,
         ).points
         # RRF scores are reciprocal ranks, not similarities: the top hit of a
-        # search that found nothing relevant still scores like a top hit. The
-        # threshold therefore reads the DENSE arm's own score, which is a cosine
-        # similarity and does mean something.
+        # search that found nothing relevant still scores like a top hit. So the
+        # fused list cannot judge its own relevance, and admission goes back to the
+        # arms, each of which is asked in units that mean something to it.
         #
         # Off by default (0.0) and set by the deployment, because the right cut is
         # a property of the corpus and the embedder rather than of this code. What
@@ -340,7 +364,7 @@ class QdrantStore:
             if h.payload
         ]
         if self.min_score > 0.0:
-            kept = self._above_threshold(query, kept, tenant)
+            kept = self._admitted(query, kept, tenant)
         if self.rerank and kept:
             kept = self.rerank(query, kept)
         return kept[:k]
@@ -352,38 +376,94 @@ class QdrantStore:
         ranked eighth."""
         return k * 5 if self.rerank else k
 
-    def _above_threshold(
+    def _admitted(
         self, query: str, chunks: list[Chunk], tenant: str
     ) -> list[Chunk]:
-        """Drop chunks whose dense similarity to the query is below `min_score`.
+        """Which candidates are relevant enough to ground an answer in — asked of
+        each arm about its own hits, in its own units.
 
-        Vector search never abstains: ask an unrelated question and it returns
-        the three least-unrelated documents in the corpus, with no signal that
-        it found nothing. The composer then grounds an answer in them. This is
-        the gate that turns "the nearest thing I have" back into "I don't know",
-        and it is the ONLY place in the request path where that judgement is made
-        — a second opinion further downstream has less information, not more, and
-        the one that was tried there filtered on shared words and threw away the
-        semantic hits the embedder existed to find.
+        Vector search never abstains: ask an unrelated question and it returns the
+        three least-unrelated documents in the corpus, with no signal that it found
+        nothing, and the composer grounds an answer in them. This is the gate that
+        turns "the nearest thing I have" back into "I don't know", and it is the
+        ONLY place in the request path where that judgement is made.
 
-        The surviving chunks carry the cosine that kept them, replacing the fused
-        rank they arrived with. That number is the reason the citation is in the
-        answer, so it travels with the citation.
+        It is also the gate that has now been got wrong twice in opposite
+        directions, which is what makes the per-arm shape the point rather than an
+        implementation detail:
+
+          * a lexical filter downstream threw away the semantic hits the embedder
+            existed to find;
+          * replacing it with a single dense cosine floor threw away the exact
+            matches the sparse arm existed to find — `ZX-99417` scored 0.535
+            against a floor of 0.58 while being the only hit on an arm that had no
+            doubt about it.
+
+        Both failures are the same mistake: one arm's units used to judge the
+        other's evidence. So the dense arm gets a cosine floor, which is the right
+        question for semantic similarity, and the sparse arm gets an exact-term
+        rule, which needs no calibration and cannot be expressed as a cosine.
+        Either arm can admit; neither can veto.
+
+        Each survivor carries the score of the arm that kept it and the name of
+        that arm. Both travel into the citation, because a 1.96 that reads as a
+        cosine is worse than no number at all.
         """
+        cosine = self._dense_admits(query, tenant, len(chunks) * 2)
+        exact = self._sparse_admits(query, tenant, chunks)
+        kept = []
+        for chunk in chunks:
+            # Dense first when both arms admit, so the common case keeps reporting
+            # a cosine and the citation contract downstream stays honest.
+            if chunk.id in cosine:
+                kept.append(replace(chunk, score=cosine[chunk.id], scored_by="cosine"))
+            elif chunk.id in exact:
+                kept.append(replace(chunk, score=exact[chunk.id], scored_by="sparse"))
+        return kept
+
+    def _dense_admits(self, query: str, tenant: str, limit: int) -> dict:
+        """Dense hits at or above `min_score`, by id. The threshold is applied by
+        Qdrant rather than here so a candidate below it is never transferred."""
         scored = self.client.query_points(
             self.collection,
             query=self.embed(query),
             using=DENSE,
-            limit=len(chunks) * 2,
+            limit=limit,
             score_threshold=self.min_score,
             query_filter=self._filter(tenant),
         ).points
-        cosine = {point.id: point.score for point in scored}
-        return [
-            replace(c, score=cosine[c.id], scored_by="cosine")
-            for c in chunks
-            if c.id in cosine
-        ]
+        return {point.id: point.score for point in scored}
+
+    def _sparse_admits(self, query: str, tenant: str, chunks: list[Chunk]) -> dict:
+        """Sparse hits that also contain a distinctive query term verbatim, by id.
+
+        Two conditions, and the second is what keeps abstention working. The sparse
+        arm ranks everything it can match, so "found by the sparse arm" alone is
+        nearly as unselective as no gate at all — every document sharing the word
+        "the" is on that list. Requiring an identifier to appear verbatim means the
+        rule fires on the evidence the arm exists to produce and stays silent on
+        prose, where the dense arm is the one with an opinion worth having.
+
+        No threshold on the sparse score itself, deliberately: it is an IDF-weighted
+        dot product whose scale depends on the corpus, so any constant here would be
+        a number nobody could defend, calibrated against a corpus that will change.
+        """
+        terms = distinctive_terms(query)
+        if not terms:
+            return {}
+        scored = self.client.query_points(
+            self.collection,
+            query=sparse_terms(query),
+            using=SPARSE,
+            limit=len(chunks) * 2,
+            query_filter=self._filter(tenant),
+        ).points
+        admitted = {}
+        for point in scored:
+            text = (point.payload or {}).get("text", "")
+            if terms & set(re.findall(r"[a-z0-9]+", text.lower())):
+                admitted[point.id] = point.score
+        return admitted
 
 
 # --- generation: the Ollama tier -----------------------------------------------

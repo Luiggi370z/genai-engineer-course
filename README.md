@@ -19,14 +19,30 @@ and numbers to quote about it.
 
 ## Before you start: what you need
 
-**Skills.** You should already write Python comfortably (type hints, `async`/`await`,
-Pydantic, pytest) and be able to read a stack trace without flinching. You should know
-git, HTTP and JSON, and have met Docker. This is **not** a first programming course, and
-it is not an introduction to Python — it assumes you can build software and teaches you
-to build *this kind* of software.
+**Skills.** This is **not** a first programming course, and it is not an introduction to
+Python — it assumes you can build software and teaches you to build *this kind* of
+software. You do not need a machine-learning background, and there is no maths derivation
+anywhere in here.
 
-You do not need a machine-learning background. Vectors, cosine similarity and a feel for
-probability are plenty; there is no maths derivation anywhere in here.
+<!-- canonical:prerequisites -->
+**Required — assumed on day one.**
+
+- **Python (comfortable)** — type hints, async/await, Pydantic, uv or poetry, pytest
+- **APIs & HTTP** — verbs, status codes, API-key auth, JSON, SSE/streaming, retry with backoff
+- **Git/GitHub** — branching, PRs, code review
+- **Docker basics** — Dockerfile, docker compose, multi-stage builds
+
+**Helpful, not required** — each is either taught here or has a stated way around it.
+
+- **A cloud** — any of AWS/GCP/Azure. Phase 8 deploys with compose on one box; a cloud makes the last mile familiar rather than possible
+- **SQL** — joins and indexes make pgvector feel familiar, but every query the course writes is shown in full
+- **Design patterns** — adapter/strategy and dependency injection carry this whole course; you can also just read them off the lessons that use them
+- **Hardware** — any 16GB+ machine runs the local-model lessons; more RAM unlocks stronger models (sizing table in Phase 1). No GPU at all? Hosted budget tiers cover everything.
+- **Light math** — vectors, cosine similarity, probability intuition. No PhD required, promise
+<!-- /canonical:prerequisites -->
+
+The workbook's opening screen carries the same two lists as a self-check, and
+`pnpm check-claims` fails if this copy drifts from `app/src/data/intro.ts`.
 
 **Scope — what this course does not teach.** It is about *building systems on top of
 models*. Six areas are deliberately out of scope, and knowing that now beats inferring

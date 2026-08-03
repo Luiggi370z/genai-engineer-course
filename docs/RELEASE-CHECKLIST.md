@@ -5,9 +5,12 @@ Everything below has to pass, in this order, before `./package.sh` runs and the
 in seconds and the expensive one takes an hour, and there is no reason to spend
 the hour on a tree that cannot lint.
 
-Push CI runs steps 1–4 on every commit. Steps 5–7 are the ones a human has to
-start, and step 6 is the one this checklist exists for — the only measurement in
-the repo taken against the system that actually ships.
+Push CI runs steps 1–4 on every commit, and `release.yml` now depends on that same
+workflow rather than running a subset of it — round 5 was tagged from a commit that
+was red in two jobs. Steps 5–7 are the ones a human has to start, and step 6 is the
+one this checklist exists for: the only measurement in the repo taken against the
+system that actually ships. Steps 5 and 6 leave three committed files behind, and
+the tag refuses to publish without all three.
 
 ---
 
@@ -50,24 +53,51 @@ Chromium, both viewports, both themes, full ruleset including `color-contrast`
 and `scrollable-region-focusable`. The JSDOM gate in step 1 cannot see either of
 those — it has no layout.
 
-## 4. The release artifact builds
+## 4. The release artifact builds — and runs
 
 ```bash
 ./src/verify-release-build.sh         # `git archive` still `docker compose build`s
+./src/verify-image-smoke.sh           # ...and the image it produced can actually boot
 ```
 
-## 5. End to end, cold, on the real model
+Both, because they answer different questions. The first proves the shipped tree
+contains everything the Dockerfile needs; the second proves the application
+imports and reports `/ready` inside the layout that Dockerfile creates. Round 5
+passed the first and failed the second, and published anyway. Ten seconds, no
+model required — the assistant answers from its rule-based tier.
+
+## 5. End to end, on the real model — and attested
 
 ```bash
-./src/verify-e2e.sh                   # no flags: in-stack ollama, the 9B, ~18 minutes
+docker compose -f src/phase8-deploy/01-compose/after/docker-compose.yml down -v
+./src/verify-e2e.sh --attest release/evidence/e2e-attestation.json
 ```
 
-**No flags.** `--host-model` is the local development loop and `--ci` is the
-nightly wiring check; neither is the release claim. The claim is that a stranger
-clones this repo, runs one command with nothing installed and no keys, and gets a
-working system — and only the unqualified lane proves it. Run it against empty
-volumes (`docker compose down -v` first) so check 1 measures a first boot rather
-than a warm one.
+`--attest` writes `{source, commit, lane, model, checks_run, checks_total,
+finished_at}` and only on a run that reached the last check. It refuses `--from`
+and `--only` outright, before booting anything, because a resumed run inherits
+state from an earlier one whose source may differ. This is what turns "the
+deployed stack passes its end-to-end suite" from a sentence in `RELEASE-EVIDENCE.md`
+into something `release.yml` can check.
+
+**Which lane to attest.** The gate accepts the two lanes that run the real model
+and refuses `--ci`, which runs a 1.7B to prove wiring and says so in its own name.
+Between the two real lanes:
+
+| lane | costs | proves | does not prove |
+|---|---|---|---|
+| no flags — in-stack ollama | ~18 min | a stranger clones this, runs one command with nothing installed and no keys, and gets a working system | — |
+| `--host-model` | ~45 s | every check passes against the 9B on a GPU | the in-stack Ollama path, or that a container-only CPU cold start finishes inside the timeouts |
+
+Attest the unqualified lane when you can: it is the stronger claim and the only
+one that covers a cold first boot. `--host-model` is the honest fallback when
+eighteen minutes is what stands between you and skipping this step entirely —
+attest it, and say in the release notes that the in-stack path was not re-proven
+this cycle. What is not acceptable is an unattested release; the whole point of
+the flag is that the gate can tell the difference and you cannot forget which
+lane you ran.
+
+`down -v` first either way, so check 1 measures a first boot rather than a warm one.
 
 ## 6. Full-fidelity evidence
 
@@ -102,11 +132,12 @@ thing they are scoring. The `make` target defaults it to the deployed value.
 It writes two files:
 
 - `evidence/RELEASE-EVIDENCE.md` — the page, opening with a provenance block
-  naming every instrument
+  naming every instrument, and ending with the sha256 of the JSON beside it
 - `evidence/release-report.json` — the same run in the gate's shape
 
 Both are gitignored where they land, because `evidence/` belongs to whoever ran it.
-Publication needs them committed, so copy them out:
+Publication needs them committed, so copy them out — next to the attestation step 5
+already wrote there:
 
 ```bash
 mkdir -p ../../../../release/evidence
@@ -115,9 +146,29 @@ cp evidence/RELEASE-EVIDENCE.md evidence/release-report.json ../../../../release
 
 **This copy is not bookkeeping — it is the release gate.** `release.yml` cannot run
 this step itself: a hosted runner has four cores and no GPU, which is why the
-nightly e2e lane is called *wiring, small model*. So it reads
-`versions.source` out of the committed report and refuses to publish a tag unless
-that value equals what the tagged tree answers to. Ask the tree yourself with:
+nightly e2e lane is called *wiring, small model*. So it carries the evidence
+instead, and `.github/scripts/check-release-evidence.py` refuses to publish a tag
+unless all five of these hold:
+
+1. `versions.source` in the report equals what the tagged tree answers to;
+2. the numbers clear the same four merge gates the course teaches — quality,
+   safety, latency, cost — imported from `phase8-deploy/02-ci` rather than
+   restated in YAML;
+3. `RELEASE-EVIDENCE.md` carries the sha256 of that exact `release-report.json`,
+   so a page from an older run cannot ride along with fresher numbers;
+4. the attestation is bound to the same source and records **every** check run,
+   none skipped;
+5. the attested lane is one that runs the real model.
+
+Run it yourself before you tag — it is stdlib-only and takes no arguments beyond
+the source id:
+
+```bash
+python3 .github/scripts/check-release-evidence.py --source "$(cd src/workshops/assistant/after \
+  && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id())')"
+```
+
+Ask the tree what it answers to on its own with:
 
 ```bash
 cd src/workshops/assistant/after
@@ -164,8 +215,9 @@ empty string outside a checkout and compared it against `dev`.
 |---|---|---|---|
 | push CI | every commit | structure, types, fast tests, content gates, image builds | "the tree is coherent" |
 | `make report` | every commit, one second | an offline proxy: in-memory retrieval, lexical judge, 3 probes | "the harness works" |
-| `e2e (wiring, small model)` | nightly | the composed stack end to end on a 1.7B | "the wiring holds" |
-| `verify-e2e.sh` | before a release | the same, on the real model, from cold | "one command, no keys, it works" |
+| `e2e (wiring, small model)` | nightly | the composed stack end to end on a 1.7B | "the wiring holds" — and the release gate refuses to accept its attestation |
+| `verify-e2e.sh --host-model` | before a release | every check against the 9B on a GPU | "the stack works on the real model" |
+| `verify-e2e.sh` | before a release | the same, in-stack, from cold | "one command, no keys, it works" |
 | `make release-evidence` | before a release | the deployed stack, RAGAS judge, the whole red team | **the release numbers** |
 
 The row that matters is the last one, and the reason the table exists is that the

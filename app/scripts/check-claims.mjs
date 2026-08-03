@@ -29,13 +29,14 @@ import {
   datasetFindings,
   modelFindings,
   pinFindings,
+  prerequisiteFindings,
   priceFindings,
   readDataset,
   STALE_DAYS,
   sourceFindings,
   tableFindings,
 } from "./lib/claims.mjs";
-import { loadReference } from "./lib/load-data.mjs";
+import { loadCourseData, loadReference } from "./lib/load-data.mjs";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const report = process.argv.includes("--report");
@@ -107,10 +108,12 @@ push(errors);
 
 // --- 2. the README tables still match the canonical rows --------------------
 const summary = hardwareSummaryMarkdown();
+const { prerequisiteSummaryMarkdown } = await loadCourseData();
+const prereqs = prerequisiteSummaryMarkdown();
 for (const file of ["README.md", "release/README.md"]) {
-  push(
-    tableFindings({ file, markdown: readFileSync(resolve(repo, file), "utf8"), expected: summary }),
-  );
+  const markdown = readFileSync(resolve(repo, file), "utf8");
+  push(tableFindings({ file, markdown, expected: summary }));
+  push(prerequisiteFindings({ file, markdown, expected: prereqs }));
 }
 
 // --- 3. the lesson code prices tokens at the canonical rate -----------------
@@ -195,6 +198,6 @@ if (findings.length) {
   process.exit(1);
 }
 console.log(
-  "\nClaims OK — one hardware table, one price list, one model per role, one pin per library, " +
-    "and every CI action on a commit.",
+  "\nClaims OK — one hardware table, one prerequisite list, one price list, one model per " +
+    "role, one pin per library, and every CI action on a commit.",
 );

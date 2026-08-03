@@ -14,7 +14,7 @@ from queue import Empty, Queue
 from threading import Thread
 from typing import Any
 
-from assistant import auth
+from assistant import auth, deadline, usage
 from assistant.agent import Step
 from assistant.composers import (
     Composer,
@@ -143,7 +143,14 @@ def fallback_stream(
             try:
                 for chunk in primary(goal, contexts, state, memories or []):
                     frames.put(("chunk", chunk))
-                frames.put(("end", None))
+                # The provider's own token counts ride the terminal frame.
+                #
+                # The adapter reports them into a ContextVar, and this thread's
+                # context dies with it — so the request thread metered a word-split
+                # estimate while exact counts sat unread. Only on a clean end: a
+                # stream that failed has no totals to hand over, and the estimate
+                # over what actually escaped is the honest number for it.
+                frames.put(("end", usage.take_reported()))
             except Exception as exc:  # noqa: BLE001 — the seam exists to catch anything
                 frames.put(("error", exc))
 
@@ -151,7 +158,13 @@ def fallback_stream(
         yielded = False
         while True:
             try:
-                kind, payload = frames.get(timeout=timeout)
+                # Shrunk to what the request has left, the way `resilient` bounds
+                # the batch composer. A 60-second per-chunk budget inside a request
+                # with four seconds left is a four-second budget; waiting the full
+                # 60 means the caller is long gone before this notices, and the
+                # per-chunk timeout was never meant to outlive the request it
+                # serves.
+                kind, payload = frames.get(timeout=deadline.capped(timeout))
             except Empty:
                 report("brain", f"stream produced no chunk within {timeout}s")
                 if yielded:
@@ -168,6 +181,7 @@ def fallback_stream(
                 yield from degraded(goal, contexts, state, memories or [])
                 return
             else:
+                usage.adopt(payload)
                 return
 
     return stream

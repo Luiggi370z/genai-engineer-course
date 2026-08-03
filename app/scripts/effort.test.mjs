@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  ESTIMATES,
-  PROVENANCE_NOTE,
-  WORKSHOPS,
   assess,
   briefShape,
+  ESTIMATES,
   envelope,
+  PROVENANCE_NOTE,
   round15,
   suiteTests,
   todoGroups,
+  WORKSHOPS,
 } from "./lib/effort.mjs";
 
 /** A stand-in repo, so these tests describe the rules rather than the course. */
@@ -23,7 +23,13 @@ function fakeRepo(files) {
   };
 }
 
-const WORKSHOP = { repo: "workshops/x", pkg: "x", brief: "BRIEF.md", modules: ["a"], suites: ["test_a"] };
+const WORKSHOP = {
+  repo: "workshops/x",
+  pkg: "x",
+  brief: "BRIEF.md",
+  modules: ["a"],
+  suites: ["test_a"],
+};
 
 test("a numbered TODO counts once however many lines it spans", () => {
   const read = fakeRepo({
@@ -141,9 +147,7 @@ test("every real workshop estimate sits inside the range its evidence spans", as
 });
 
 test("the ratios are not one number wearing nine hats", () => {
-  const ratios = new Set(
-    Object.values(ESTIMATES).map((e) => (e.realistic / e.fast).toFixed(2)),
-  );
+  const ratios = new Set(Object.values(ESTIMATES).map((e) => (e.realistic / e.fast).toFixed(2)));
   assert.ok(ratios.size >= 3, `only ${ratios.size} distinct ratio(s): ${[...ratios]}`);
   assert.ok(!ratios.has("2.00"), "2.00 is the formula this replaced");
 });

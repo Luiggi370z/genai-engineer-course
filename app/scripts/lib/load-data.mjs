@@ -13,7 +13,7 @@ const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.
 
 export async function loadCourseData() {
   return compile(`export { phases } from "./src/data/phases/index";
-                  export { prerequisites, myths, milestones } from "./src/data/intro";
+                  export { prerequisites, prerequisiteSummaryMarkdown, myths, milestones } from "./src/data/intro";
                   export { electives } from "./src/data/electives";`);
 }
 
