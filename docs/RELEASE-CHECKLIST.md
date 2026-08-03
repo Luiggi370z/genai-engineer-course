@@ -68,36 +68,43 @@ model required — the assistant answers from its rule-based tier.
 
 ## 5. End to end, on the real model — and attested
 
+Ollama has to be running on this machine with `qwen3.5:9b` and `nomic-embed-text`
+pulled. The script's preflight checks that before it builds anything and prints
+the exact `ollama pull` if not.
+
 ```bash
-docker compose -f src/phase8-deploy/01-compose/after/docker-compose.yml down -v
-./src/verify-e2e.sh --attest release/evidence/e2e-attestation.json
+./src/verify-e2e.sh --reset --attest release/evidence/e2e-attestation.json
 ```
 
-`--attest` writes `{source, commit, lane, model, checks_run, checks_total,
-finished_at}` and only on a run that reached the last check. It refuses `--from`
-and `--only` outright, before booting anything, because a resumed run inherits
-state from an earlier one whose source may differ. This is what turns "the
-deployed stack passes its end-to-end suite" from a sentence in `RELEASE-EVIDENCE.md`
-into something `release.yml` can check.
+`--attest` writes `{source, commit, lane, model, ollama_version, model_digests,
+checks_run, checks_total, finished_at}` and only on a run that reached the last
+check. It refuses `--from` and `--only` outright, before booting anything, because
+a resumed run inherits state from an earlier one whose source may differ. This is
+what turns "the deployed stack passes its end-to-end suite" from a sentence in
+`RELEASE-EVIDENCE.md` into something `release.yml` can check.
 
-**Which lane to attest.** The gate accepts the two lanes that run the real model
-and refuses `--ci`, which runs a 1.7B to prove wiring and says so in its own name.
-Between the two real lanes:
+**Which lane to attest.** There is one lane that can carry a release claim, and
+the gate accepts only it:
 
 | lane | costs | proves | does not prove |
 |---|---|---|---|
-| no flags — in-stack ollama | ~18 min | a stranger clones this, runs one command with nothing installed and no keys, and gets a working system | — |
-| `--host-model` | ~45 s | every check passes against the 9B on a GPU | the in-stack Ollama path, or that a container-only CPU cold start finishes inside the timeouts |
+| `--reset` — host ollama | ~50 s | every check passes against the 9B on the host's GPU, which is the tier the release ships | anything about a machine with no Ollama installed |
+| `--ci` | ~10 min on a runner | the WIRING: retrieval, the gate, containment, discovery, tracing, durability | answer quality — it runs a 1.7B, and the gate refuses it for exactly that reason |
 
-Attest the unqualified lane when you can: it is the stronger claim and the only
-one that covers a cold first boot. `--host-model` is the honest fallback when
-eighteen minutes is what stands between you and skipping this step entirely —
-attest it, and say in the release notes that the in-stack path was not re-proven
-this cycle. What is not acceptable is an unattested release; the whole point of
-the flag is that the gate can tell the difference and you cannot forget which
-lane you ran.
+There used to be a second release lane: an in-stack Ollama, accepted as the
+*stronger* claim because it needed nothing installed. Retiring it was the point of
+this change. That lane ran the 9B on CPU inside a VM at 0.52 tokens/second against
+a composer budget raised to fifteen minutes to accommodate it — so what it
+actually measured, most of the time, was the offline fallback with a timeout
+generous enough to hide the substitution. A lane whose numbers describe a tier the
+release does not ship cannot carry the release claim, however self-contained it is.
 
-`down -v` first either way, so check 1 measures a first boot rather than a warm one.
+`--reset` clears the two state volumes, so the durability and tenancy checks
+measure this run's writes rather than the last one's. Your pulled models are not
+touched: they are yours, and re-downloading six gigabytes per release would prove
+nothing. The cold-start question the old lane answered is now answered earlier and
+more directly — `preflight-ollama.sh` refuses to start a run whose models are
+present but not warm.
 
 ## 6. Full-fidelity evidence
 
@@ -158,7 +165,9 @@ unless all five of these hold:
    so a page from an older run cannot ride along with fresher numbers;
 4. the attestation is bound to the same source and records **every** check run,
    none skipped;
-5. the attested lane is one that runs the real model.
+5. the attested lane is the one that runs the real model — and the attestation
+   says which Ollama and which model digests served it, since the models now run
+   on the releaser's own machine and `qwen3.5:9b` is a mutable pointer.
 
 Run it yourself before you tag — it is stdlib-only and takes no arguments beyond
 the source id:
@@ -215,9 +224,8 @@ empty string outside a checkout and compared it against `dev`.
 |---|---|---|---|
 | push CI | every commit | structure, types, fast tests, content gates, image builds | "the tree is coherent" |
 | `make report` | every commit, one second | an offline proxy: in-memory retrieval, lexical judge, 3 probes | "the harness works" |
-| `e2e (wiring, small model)` | nightly | the composed stack end to end on a 1.7B | "the wiring holds" — and the release gate refuses to accept its attestation |
-| `verify-e2e.sh --host-model` | before a release | every check against the 9B on a GPU | "the stack works on the real model" |
-| `verify-e2e.sh` | before a release | the same, in-stack, from cold | "one command, no keys, it works" |
+| `e2e (wiring, small model)` | nightly | the composed stack end to end on a 1.7B, on the runner's own Ollama | "the wiring holds" — and the release gate refuses to accept its attestation |
+| `verify-e2e.sh --reset` | before a release | every check against the 9B on the host's GPU | "the stack works on the real model" |
 | `make release-evidence` | before a release | the deployed stack, RAGAS judge, the whole red team | **the release numbers** |
 
 The row that matters is the last one, and the reason the table exists is that the

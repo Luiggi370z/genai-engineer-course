@@ -65,8 +65,19 @@ def model_name(assistant: Any) -> str:
     """Which brain answered, as a span attribute and a report stamp. "offline"
     is a model too — a number produced by the stitcher and a number produced by
     a 9B model are not comparable, and the trace should say which one it was."""
-    settings = assistant.settings
-    return settings.ollama_model if settings.ollama_host else "offline-stitcher"
+    from assistant.providers import model_tag
+
+    return model_tag(assistant.settings)
+
+
+def _brain_tier(settings: Settings) -> str:
+    """What /health calls the composing tier. "rule-based" rather than "offline"
+    for the no-model path, because that is the name the probes and the e2e suite
+    have always used for it."""
+    from assistant.providers import OFFLINE, chat_provider
+
+    provider = chat_provider(settings)
+    return "rule-based" if provider == OFFLINE else provider
 
 
 def _auth_tier(settings: Settings) -> str:
@@ -116,8 +127,14 @@ class Assistant:
             # vocabulary, so a question about "reimbursements" finds nothing
             # about "refunds". A stack running on it looks identical from every
             # other probe, which is exactly why this one exists.
+            # The embedder that is RUNNING. It takes a vector store to run one at
+            # all, and a named embedder that could not be built is now a boot
+            # error (providers.build_embedder) rather than a silent downgrade —
+            # so a model named alongside a store is the one in use. The tag
+            # rather than the provider-qualified signature: an operator reading
+            # this is asking which embedder, not whose.
             "embed": (
-                s.embed_model if (s.embed_model and s.ollama_host) else "hash (not semantic)"
+                s.embed_model if (s.embed_model and s.qdrant_url) else "hash (not semantic)"
             ),
             # dense-only or dense+sparse fused. The second is what phase 2
             # teaches; the deployed stack shipped the first for a while.
@@ -144,7 +161,11 @@ class Assistant:
                 else "off"
             ),
             "memory": "sqlite" if s.assistant_db else "in-process",
-            "brain": "ollama" if s.ollama_host else "rule-based",
+            # Which provider is answering, by name. Not "a model is configured":
+            # the bill, the latency and the data-residency question all differ by
+            # vendor, and this is the row an operator reads to find out which one
+            # they are actually on.
+            "brain": _brain_tier(s),
             "tools": "mcp+builtin" if s.mcp_server else "builtin",
             # How many discovered tools the operator has ungated. A number an
             # auditor can read from outside: "0" means every tool that arrived
@@ -184,7 +205,7 @@ class Assistant:
         stack as ready. The two lines below share the words "service" and
         "ready" for that reason, and not as an accident of phrasing.
         """
-        if not self.settings.ollama_host:
+        if _brain_tier(self.settings) == "rule-based":
             return True, "rule-based tier needs no warmup"
         try:
             answer = self.compose(

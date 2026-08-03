@@ -18,16 +18,11 @@
 # opens a vector store and a model runner to processes on this machine for the
 # length of a release run, not to the network.
 #
-# Ollama is published too, because the release measurement composes with the same
-# model the stack answers with. On a Mac use `docker-compose.hostmodel.yml`
-# instead and leave OLLAMA_HOST at the host's own daemon — inference inside the
-# VM has no GPU, and a release run at 0.52 tokens/second is a release run nobody
-# finishes.
+# Only Qdrant needs widening now. Ollama used to be published here so the release
+# measurement could reach the same model the stack answers with; it runs on the
+# host, so the harness already talks to it directly at localhost:11434 and there
+# is no container port to open.
 services:
   qdrant:
     ports:
       - "127.0.0.1:6333:6333"
-
-  ollama:
-    ports:
-      - "127.0.0.1:11434:11434"

@@ -1,21 +1,28 @@
-# The whole stack, one command: the capstone assistant + its MCP server + Qdrant +
-# Ollama. Zero API keys. Both app services build from the SAME capstone image
+# The whole stack, one command: the capstone assistant + its MCP server + Qdrant.
+# Zero API keys. Both app services build from the SAME capstone image
 # (workshops/assistant/after — see its Dockerfile); only the assistant's port ever
 # leaves the compose network.
 #
+#   ollama serve                      # on the HOST, with the two models pulled
 #   docker compose up --build
 #   curl localhost:8000/health
 #
-# First boot is slow on purpose: the ollama service pulls its models AND loads one
-# into memory before it reports healthy, and nothing that depends on it starts
-# until it does. Reporting ready on a downloaded-but-cold model is the same lie as
-# reporting ready on a container that has not started — the first request pays for
-# it either way, and the fallback hides the evidence.
+# The models run on your machine, not in this file. Everything a container is good
+# at — pinned dependencies, isolated filesystems, one command to start — a
+# container is still bad at inference on a Mac: Docker Desktop exposes no GPU, so
+# a containerised 9B ran at 0.52 tokens/second inside the VM against 81 on the
+# same machine's Metal. That is not a tuning problem, it is which side of the VM
+# boundary the GPU is on, and no compose setting crosses it. So infrastructure
+# lives here and the model lives on the host, reached at `host.docker.internal`.
+#
+# `./src/preflight-ollama.sh` checks the daemon and both models before any of this
+# starts, so a missing model is a sentence at second zero instead of a composer
+# timeout twenty minutes in.
+#
 # Reliability posture, uniform across services: `restart: unless-stopped` brings a
 # crashed container back (but respects an operator's explicit stop), memory/cpu
 # limits keep one runaway service from starving the rest of the laptop, and
-# `stop_grace_period` gives uvicorn/ollama time to drain in-flight work before
-# SIGKILL.
+# `stop_grace_period` gives uvicorn time to drain in-flight work before SIGKILL.
 services:
   assistant:
     build:
@@ -39,9 +46,14 @@ services:
       # matter how read-only it says it is.
       ASSISTANT_MCP_READONLY_ALLOWLIST: lookup_fact
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_HOST: http://ollama:11434
+      # The host's Ollama, as seen from inside the compose network. `extra_hosts`
+      # below is what makes the name resolve on Linux.
+      OLLAMA_HOST: http://host.docker.internal:11434
+      # Which model answers. The preflight verifies this exact tag is pulled on
+      # the host before the stack starts.
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
       ASSISTANT_DB: /data/assistant.db
-      # The ollama service pulls this model; without naming it here the store
+      # Pulled on the host alongside the chat model; without naming it here the store
       # silently used `hash_embed`, which matches on shared vocabulary and not
       # on meaning — so the deployed stack answered "what is the reimbursement
       # policy" with nothing, while a page about refunds sat in the corpus. The
@@ -72,15 +84,13 @@ services:
       # similarity produces a number that cannot be right.
       ASSISTANT_MIN_SCORE: "0.58"
       # How long one composition may take before the offline stitcher answers
-      # instead. The library default is 60 seconds, which suits a model with a
-      # GPU under it; this stack does not have one. Docker Desktop exposes no
-      # GPU to containers, so the 9B here runs at about half a token per second
-      # and every answer arrived from the fallback — a stack that was working
-      # exactly as configured, failing its own end-to-end check because of a
-      # number compiled into the code. Fifteen minutes is the budget for a model
-      # running on a CPU inside a VM; the host-model overlay puts it back to the
-      # library default, because there slow really does mean broken.
-      COMPOSE_TIMEOUT_SECONDS: "900"
+      # instead. Sixty seconds is the library default and it is the right number
+      # for a model on the host's GPU: a composition that has not finished in a
+      # minute there is not slow, it is wrong. This used to read 900, because a
+      # containerised 9B on CPU genuinely needed fifteen minutes — a budget that
+      # large stops being a timeout and becomes a way to wait out a broken stack
+      # in silence. Moving the model to the host is what let it come back down.
+      COMPOSE_TIMEOUT_SECONDS: "60"
       # Ship spans to a real collector with the observability overlay (adds a pinned
       # otel-collector and sets OTEL_EXPORTER_OTLP_ENDPOINT — see the overlay file):
       #   docker compose -f docker-compose.yml -f docker-compose.observability.yml up
@@ -101,12 +111,15 @@ services:
       - assistant-data:/data # memory survives a container restart — that is the point
     ports:
       - "8000:8000" # the ONLY published port; everything else stays internal
+    # Docker Desktop resolves `host.docker.internal` on its own; on Linux it does
+    # not exist until you map it to the gateway. One line, and the stack works the
+    # same on a laptop, a workstation and a CI runner.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on: # wait for HEALTH, not for start — a started Qdrant isn't a ready Qdrant
       mcp:
         condition: service_healthy
       qdrant:
-        condition: service_healthy
-      ollama:
         condition: service_healthy
     healthcheck:
       # /ready, not /health: the process being up is not the same claim as the
@@ -158,51 +171,6 @@ services:
       timeout: 3s
       retries: 12
 
-  ollama:
-    image: ollama/ollama:0.32.5@sha256:4dea9fb511947e24a84237bb636b0203abcb2ff0d3fbc7b4ff865deb91362131 # pinned, same reason
-    restart: unless-stopped
-    mem_limit: 12g # a 9B model plus the embedder need real headroom
-    cpus: 4.0
-    stop_grace_period: 30s # let an in-flight generation finish before SIGKILL
-    environment:
-      # Ollama unloads an idle model after five minutes by default, which turns
-      # every pause between checks into another cold start. Holding it resident
-      # is what makes the warmup below stay true for the length of a run.
-      OLLAMA_KEEP_ALIVE: 1h
-    entrypoint: ["/bin/sh", "-c"]
-    command: # bootstrap: serve, pull, WARM, then keep serving
-      - |
-        ollama serve &
-        sleep 2
-        ollama pull qwen3.5:9b
-        ollama pull nomic-embed-text
-        # A pulled model is a file on disk. Loading a 9B into memory on CPU takes
-        # minutes, and the composer's budget is sixty seconds — so without this
-        # line the first real question times out, the offline composer answers,
-        # and a stack that reported itself healthy quietly serves a degraded
-        # answer to whoever showed up first. Paying the load here means the
-        # readiness signal and the truth agree.
-        ollama run qwen3.5:9b "ok" >/dev/null 2>&1
-        touch /tmp/warm
-        wait
-    volumes:
-      - ollama-models:/root/.ollama # pulled models survive `compose down`
-    healthcheck:
-      # healthy = the models are downloaded AND one of them has completed a
-      # generation. `ollama list` alone was the old check, and it is satisfied by
-      # a model nobody can use yet. The image ships no curl, wget or python, so
-      # the CLI and a sentinel file are the tools available — the assistant's
-      # own /ready endpoint is what proves the round trip end to end.
-      test:
-        [
-          "CMD-SHELL",
-          "test -f /tmp/warm && ollama list | grep -q qwen3.5 && ollama list | grep -q nomic-embed-text",
-        ]
-      interval: 15s
-      timeout: 5s
-      retries: 120 # first boot downloads ~6 GB and then loads it; patient, not broken
-
 volumes:
   assistant-data:
   qdrant-data:
-  ollama-models:

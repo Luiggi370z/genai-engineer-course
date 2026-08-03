@@ -559,6 +559,135 @@ def ollama_stream(prompt: str, *, host: str, model: str) -> Iterator[str]:
             yield chunk
 
 
+# --- the hosted brains: same two shapes, someone else's hardware ----------------
+#
+# Optional, keyed, and never reached by accident — `providers.py` builds these
+# only when an operator names the provider. They exist so the capstone can be
+# pointed at a frontier model without rewriting the request path: everything
+# above `compose` sees a `str -> str` and a `str -> Iterator[str]`, exactly as it
+# does for Ollama.
+#
+# `max_tokens` rather than Ollama's `num_predict`, same cap and the same reason.
+# The counts are the providers' own, reported through the same meter, so a cost
+# number means the same thing whichever brain produced it.
+
+
+def openai_generate(
+    prompt: str, *, model: str, base_url: str | None = None, timeout: float | None = None
+) -> str:
+    """One completion from OpenAI (or anything speaking its wire format).
+
+    The key is read by the SDK from `OPENAI_API_KEY`; it is deliberately not a
+    parameter, so there is no call site that could pass one in from a config file
+    and no traceback that could print it.
+    """
+    from openai import OpenAI  # lazy: the offline tier never imports it
+
+    response = OpenAI(base_url=base_url, timeout=timeout).chat.completions.create(
+        model=model,
+        max_tokens=COMPLETION_TOKEN_CAP,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if usage_block := getattr(response, "usage", None):
+        _report_openai_usage(usage_block)
+    return (response.choices[0].message.content or "").strip()
+
+
+def openai_stream(
+    prompt: str, *, model: str, base_url: str | None = None
+) -> Iterator[str]:
+    """The same completion as deltas.
+
+    `include_usage` asks for the token counts the batch path gets for free. A
+    stream without it is billed by estimate — see `usage.measure`, which labels
+    the difference rather than hiding it.
+    """
+    from openai import OpenAI  # lazy
+
+    chunks = OpenAI(base_url=base_url).chat.completions.create(
+        model=model,
+        max_tokens=COMPLETION_TOKEN_CAP,
+        messages=[{"role": "user", "content": prompt}],
+        stream=True,
+        stream_options={"include_usage": True},
+    )
+    for chunk in chunks:
+        # Usage rides on a final frame that carries no choices, and some deltas
+        # are None even when choices are present.
+        if usage_block := getattr(chunk, "usage", None):
+            _report_openai_usage(usage_block)
+        if chunk.choices and chunk.choices[0].delta.content:
+            yield chunk.choices[0].delta.content
+
+
+def _report_openai_usage(block: Any) -> None:
+    tokens_in = getattr(block, "prompt_tokens", None)
+    tokens_out = getattr(block, "completion_tokens", None)
+    if isinstance(tokens_in, int) and isinstance(tokens_out, int):
+        from assistant import usage
+
+        usage.report(tokens_in, tokens_out)
+
+
+def anthropic_generate(
+    prompt: str, *, model: str, timeout: float | None = None
+) -> str:
+    """One completion from Anthropic. Key from `ANTHROPIC_API_KEY`, same rule."""
+    from anthropic import Anthropic  # lazy
+
+    kwargs = {"timeout": timeout} if timeout is not None else {}
+    response = Anthropic(**kwargs).messages.create(
+        model=model,
+        max_tokens=COMPLETION_TOKEN_CAP,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    _report_anthropic_usage(getattr(response, "usage", None))
+    # A response is a list of content blocks; only the text ones are the answer.
+    return "".join(b.text for b in response.content if b.type == "text").strip()
+
+
+def anthropic_stream(prompt: str, *, model: str) -> Iterator[str]:
+    """The same completion as deltas, through the SDK's streaming helper."""
+    from anthropic import Anthropic  # lazy
+
+    with Anthropic().messages.stream(
+        model=model,
+        max_tokens=COMPLETION_TOKEN_CAP,
+        messages=[{"role": "user", "content": prompt}],
+    ) as live:
+        yield from live.text_stream
+        # Only available once the stream is drained, which is why it is here and
+        # not before the yield.
+        _report_anthropic_usage(getattr(live.get_final_message(), "usage", None))
+
+
+def _report_anthropic_usage(block: Any) -> None:
+    tokens_in = getattr(block, "input_tokens", None)
+    tokens_out = getattr(block, "output_tokens", None)
+    if isinstance(tokens_in, int) and isinstance(tokens_out, int):
+        from assistant import usage
+
+        usage.report(tokens_in, tokens_out)
+
+
+def openai_embed(
+    model: str, base_url: str | None = None, timeout: float = 30.0
+) -> Callable[[str], list[float]]:
+    """Hosted embeddings, in the shape `QdrantStore` already probes for width.
+
+    Anthropic has no embedding API, which is why this is the only hosted embedder
+    here: a deployment on Claude still names an embedder of its own.
+    """
+    from openai import OpenAI  # lazy
+
+    client = OpenAI(base_url=base_url, timeout=timeout)
+
+    def embed(text: str) -> list[float]:
+        return list(client.embeddings.create(model=model, input=text).data[0].embedding)
+
+    return embed
+
+
 # --- tools: discover + invoke on a real MCP server ------------------------------
 
 

@@ -342,7 +342,8 @@ structured `citations` (`[{id, source, snippet}]`) that the model-tier prompt
 labels with the same `[c#]` ids.
 
 The `Dockerfile` builds one image that runs as both the assistant API and the MCP
-server; `phase8-deploy/01-compose` deploys it next to pinned Qdrant and Ollama, and
+server; `phase8-deploy/01-compose` deploys it next to a pinned Qdrant, answering
+from the Ollama on your own machine through `host.docker.internal`, and
 `src/verify-e2e.sh` proves the composed stack end to end, under the secure
 profile so every request is authenticated: boot on healthchecks, tier report, an
 unauthenticated request refused, grounded answer, approval containment bound to

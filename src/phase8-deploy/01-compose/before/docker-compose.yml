@@ -7,10 +7,13 @@
 #   - depends_on is the list form -> waits for START, and a started Qdrant
 #                                    is not a ready Qdrant
 #   - every port is published     -> internal services are on the host network
-#   - ollama pulls no models      -> the assistant boots against an empty model store
-#   - and pulling is not warming  -> a model on disk still takes minutes to load, so
-#                                    "healthy" can mean "your first question will
-#                                    time out and be answered by the fallback"
+#   - the model host is a guess   -> `localhost` inside a container is the container,
+#                                    so this reaches nothing and every answer quietly
+#                                    arrives from the offline fallback
+#
+# The models themselves run on YOUR machine, not in this file — see
+# ../after/docker-compose.yml for why, and src/preflight.py for the check that a
+# model on disk is not yet a model that can answer.
 #
 # The reference wiring is in ../after/docker-compose.yml — but write the checks
 # first and let them tell you what to fix.
@@ -20,12 +23,12 @@ services:
     environment:
       MCP_SERVER: http://mcp:8080/mcp
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_HOST: http://localhost:11434
       ASSISTANT_DB: /data/assistant.db
     volumes:
       - assistant-data:/data
     ports: ["8000:8000"]
-    depends_on: [mcp, qdrant, ollama]
+    depends_on: [mcp, qdrant]
 
   mcp:
     build: ../../../workshops/assistant/after
@@ -38,13 +41,6 @@ services:
     volumes:
       - qdrant-data:/qdrant/storage
 
-  ollama:
-    image: ollama/ollama
-    ports: ["11434:11434"]
-    volumes:
-      - ollama-models:/root/.ollama
-
 volumes:
   assistant-data:
   qdrant-data:
-  ollama-models:

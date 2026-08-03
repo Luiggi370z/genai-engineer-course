@@ -1,0 +1,33 @@
+{
+  // The repository root is not a JavaScript project — everything Biome lints
+  // lives under `app/`, and `app/biome.json` is where the rules are. This file
+  // exists only to tell Biome v2 which configuration is the ROOT.
+  //
+  // Without it, `app/biome.json` is a root config sitting underneath another
+  // root (the directory Biome was invoked from), and Biome refuses the pair:
+  //
+  //     × Found a nested root configuration, but there's already a root
+  //       configuration.
+  //
+  // `pnpm lint` never saw that, because it runs with `app/` as the working
+  // directory and never looks higher. An editor does look higher — its project
+  // root is this repository — so it got the error instead of a config, fell
+  // back to Biome's defaults, and reported rules this project has switched off.
+  // `noArrayIndexKey` was the loud one: off in `app/biome.json`, and squiggled
+  // under every `.map((row, i) =>` in the editor anyway.
+  //
+  // Two things here are load-bearing and both fail quietly:
+  //
+  // `.jsonc`, not `.json`. Comments in a `biome.json` do not raise a parse
+  // error — the file is skipped, which puts you back to defaults with no clue
+  // why. Only `.jsonc` may carry comments.
+  //
+  // No `files.includes`. Narrowing the root to `app/**` looks right and breaks
+  // the nested project: its files stop matching, so they resolve against these
+  // defaults instead of `app/biome.json` — `.mjs` scripts get reformatted to
+  // tabs and `src/styles/index.css` fails to parse, because the space indent
+  // and the Tailwind directive parser are configured in the nested file.
+  "$schema": "https://biomejs.dev/schemas/2.5.6/schema.json",
+  "root": true,
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true }
+}

@@ -663,20 +663,24 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
       },
       {
         kind: "code",
-        title: "The whole stack comes up with one command",
-        code: `# docker-compose.yml — Qdrant + the service, zero cloud accounts
+        title: "Ollama on the host, everything else in one command",
+        code: `# Ollama runs on YOUR machine (embeddings + a small generator = $0, and
+# it gets the GPU — a container on Docker Desktop would not):
+#   ollama serve  &&  ollama pull nomic-embed-text
+
+# docker-compose.yml — Qdrant + the service, zero cloud accounts
 services:
   qdrant:
     image: qdrant/qdrant:latest
     ports: ["6333:6333"]
-  ollama:                       # embeddings + a small local generator = $0
-    image: ollama/ollama:latest
-    ports: ["11434:11434"]
   api:
     build: .
     ports: ["8000:8000"]
-    depends_on: [qdrant, ollama]
-    environment: [QDRANT_URL=http://qdrant:6333]
+    depends_on: [qdrant]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_HOST: http://host.docker.internal:11434   # out of the VM, to the host
 
 # then:  make ingest  &&  make eval  &&  curl localhost:8000/ask -d '{"q": "..."}'`,
       },
@@ -708,7 +712,7 @@ class QdrantStore:                       # <- your job in the workshop
     deliverables: [
       {
         id: "w1-d1",
-        text: "`docker compose up` brings the whole stack online with **no API keys** (Ollama for embeddings + generation)",
+        text: "`docker compose up` brings the stack online with **no API keys**, against the Ollama on your own machine (embeddings + generation)",
         tier: "minimum",
       },
       {

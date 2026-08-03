@@ -1,15 +1,15 @@
 # 8.1 Compose — reference
 
-One `docker compose up --build` brings the real stack online: the capstone assistant and its MCP server (both built from the SAME image — `workshops/assistant/after` and its Dockerfile), plus pinned Qdrant and Ollama. Zero API keys.
+`ollama serve` on your machine, then one `docker compose up --build`, and the real stack is online: the capstone assistant and its MCP server (both built from the SAME image — `workshops/assistant/after` and its Dockerfile), plus pinned Qdrant. Zero API keys.
 
 What makes this deployable rather than a diagram:
 
-- **Pinned images, by tag and digest.** `qdrant/qdrant:v1.18.3`, `ollama/ollama:0.32.5`, each carrying an `@sha256:…` after the tag. `:latest` means every reviewer runs a different stack, and a version tag only narrows that — a tag is a mutable pointer its publisher can repoint at a rebuild, so the digest is the part that actually names the bytes. The tag stays because a digest alone is unreadable.
+- **Pinned images, by tag and digest.** `qdrant/qdrant:v1.18.3` and the rest each carry an `@sha256:…` after the tag. `:latest` means every reviewer runs a different stack, and a version tag only narrows that — a tag is a mutable pointer its publisher can repoint at a rebuild, so the digest is the part that actually names the bytes. The tag stays because a digest alone is unreadable.
 - **Healthchecks everywhere, and dependencies wait on them.** `depends_on: condition: service_healthy` — a started Qdrant is not a ready Qdrant.
-- **Model bootstrap.** The ollama service pulls `qwen3.5:9b` and `nomic-embed-text` on first boot and only reports healthy once they're in, so the assistant never starts against an empty model store.
-- **One published port.** Only the assistant reaches the host; MCP, Qdrant and Ollama stay on the compose network.
+- **The model is on the host, on purpose.** `OLLAMA_HOST: http://host.docker.internal:11434` plus `extra_hosts: ["host.docker.internal:host-gateway"]`, which Docker Desktop provides by name and Linux needs mapped explicitly. See below for the number that decided this.
+- **One published port.** Only the assistant reaches the host; MCP and Qdrant stay on the compose network.
 
-`src/health.py` reviews the compose file structurally (parsed YAML — services, pins, healthchecks, dependency conditions, published ports), and the tests prove the checks catch a broken file, not just bless this one.
+`src/health.py` reviews the compose file structurally (parsed YAML — services, pins, healthchecks, dependency conditions, published ports), and the tests prove the checks catch a broken file, not just bless this one. `src/preflight.py` covers what YAML cannot: the daemon outside the stack.
 
 ## Secure profile
 
@@ -49,7 +49,7 @@ curl -H "Authorization: Bearer $TOKEN" localhost:8000/ask -d '{"goal":"hello"}'
 The deterministic screen is the floor and stays the floor. `ASSISTANT_GUARD_MODEL` adds a local model as a second opinion on every untrusted string — question, retrieved document, tool output, ingested document:
 
 ```bash
-docker compose exec ollama ollama pull llama-guard3:8b
+ollama pull llama-guard3:8b        # on the host, like every other model
 ASSISTANT_GUARD_MODEL=llama-guard3:8b docker compose up -d assistant
 curl -s localhost:8000/health | python3 -m json.tool | grep guard
 ```
@@ -65,22 +65,34 @@ docker compose -f docker-compose.yml -f docker-compose.observability.yml logs co
 
 `docker-compose.observability.yml` adds a pinned OpenTelemetry Collector (`otel-collector.yaml` config: OTLP-in over HTTP, debug exporter to stdout) and sets `OTEL_EXPORTER_OTLP_ENDPOINT` on the assistant. The assistant's instrumentation does not change — the same spans that back `spans_recorded` on `/health` also ship over OTLP, and `logs collector` shows the `agent.run` trees arriving **outside the process**. Swap the debug exporter for an `otlp` exporter at Phoenix, Langfuse or your APM and nothing upstream notices; that pluggability is why the course exports OTel instead of a vendor SDK. `verify-e2e.sh` boots with this overlay and asserts the collector saw the spans.
 
-## Host-model overlay (optional, and a lesson about where the GPU is)
+## Why the model is not in the compose file
+
+Docker Desktop on macOS gives containers **no GPU access**. A containerised Ollama therefore runs the course's 9B on CPU inside a VM, measured at **0.52 tokens/second**. The same model, on the same laptop, through the host's Ollama with Metal: **81 tokens/second**. Identical code, identical model, 156× — the entire difference is which side of the VM boundary the accelerator is on.
+
+That is why this stack keeps its infrastructure in compose and its model on the host. Three things follow, and only one of them is about speed:
+
+- **`extra_hosts` is not optional.** Docker Desktop resolves `host.docker.internal` on its own; Linux does not, and without `host.docker.internal:host-gateway` the assistant resolves nothing, every composition fails, and the offline stitcher answers with the stack looking perfectly healthy. Mapping it explicitly costs one line and makes the file portable.
+- **If your production plan is "containerised model on a VM without a GPU", 0.52 tokens/second is your latency budget**, not a laptop artifact. Either give the container the accelerator, call a model over the network, or design for the number you actually have.
+- **Timeouts are part of that budget and belong next to the deployment.** `COMPOSE_TIMEOUT_SECONDS: "60"`. The library default of 60 seconds is a GPU's number, which is right here and was catastrophically wrong in a container: at half a token per second every composition blew through it, the offline stitcher answered, and the end-to-end run failed on a stack working exactly as configured. The value is declared in the compose file rather than inherited from a library, because a timeout is a statement about the hardware underneath.
+
+What the split costs is `depends_on`. Compose cannot start the host's Ollama, cannot health-gate on it, and will bring the stack up cheerfully without it. `src/preflight.py` replaces that lost guarantee — and inherits the sharper half of the old model bootstrap's lesson.
+
+## Preflight (the dependency compose cannot wait for)
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.hostmodel.yml up --build
-../../../verify-e2e.sh --host-model     # the same, with the preflight checks
+../../preflight-ollama.sh            # human-readable
+../../preflight-ollama.sh --json     # the record verify-e2e.sh attests
 ```
 
-`docker-compose.hostmodel.yml` points the assistant at the **host's** Ollama through `host.docker.internal` and switches the in-stack `ollama` service off with a profile nobody enables. It exists because of a number worth knowing before you deploy anything that runs a model: Docker Desktop on macOS gives containers **no GPU access**. The stack's own Ollama therefore runs a 9B model on CPU inside a VM, measured at **0.52 tokens/second**. The same model, on the same laptop, through the host's Ollama with Metal: **81 tokens/second**. Identical code, identical model, 156× — the entire difference is which side of the VM boundary the accelerator is on.
+Six checks, each printing the exact command that fixes it: the daemon answers, `qwen3.5:9b` is present, `nomic-embed-text` is present, the chat model **answers a token**, the embedder **returns a vector**, and a throwaway container can reach the host through `host-gateway`.
 
-Two things follow, and only one of them is about speed:
+The two warmups are the point. `ollama list` reports a file on disk, and loading a 9B takes longer than the composer's entire budget — so a stack that treats presence as readiness times out its own first question and answers it from the fallback with every probe green. This is the `cold_model_healthchecks` idea from the containerised era, which was always about the same confusion and is now enforced where the model actually lives.
 
-- The self-contained lane stays the **default**, for CI and for anyone cloning this repo, because "one command, nothing installed, no keys" is a claim `verify-e2e.sh`'s first check exists to prove — and a lane that needs a host daemon and a pre-pulled model cannot make it. This overlay is the local shortcut, and both lanes print which one is running.
-- If your production plan is "containerised model on a VM without a GPU", that 0.52 tokens/second is your latency budget, not a laptop artifact. Either give the container the accelerator, call a model over the network, or design for the number you actually have.
-- Timeouts are part of that budget, and the base file now says so: `COMPOSE_TIMEOUT_SECONDS: "900"`. The library default of 60 seconds is a GPU's number. At half a token per second every composition blew through it, the offline stitcher answered, and the end-to-end run failed on a stack that was working exactly as configured — the timeout was the only thing wrong, and it was compiled into a library rather than declared next to the deployment it described. The host-model overlay sets it back to 60, because with Metal underneath, a minute without an answer is a fault rather than a slow day.
+It never pulls. A 5.6 GB download is the operator's decision; a check that starts one silently has stopped being a check.
 
-The overlay is also the smallest honest example of `!override`: the base file makes the assistant wait for the `ollama` service to report healthy, so without replacing that list the stack would wait forever for a container this overlay just turned off.
+One trap it handles explicitly: `OLLAMA_HOST` is a **bind address** to the Ollama server (`0.0.0.0:11434`) and a **client URL** to everything else (`http://localhost:11434`). A shell that exported the server's meaning must not have `0.0.0.0` dialled back at it, or leaked into the container's environment.
+
+`--json` emits the Ollama version and both model digests, which `verify-e2e.sh` folds into its attestation — so a release claim names the bytes that produced it rather than just a model tag.
 
 ## CI overlay (what a hosted runner can honestly measure)
 
@@ -90,7 +102,7 @@ docker compose -f docker-compose.yml -f docker-compose.ci.yml up --build
 ../../../verify-e2e.sh --model TAG      # the same, with a tag you choose
 ```
 
-`docker-compose.ci.yml` swaps the chat model for a 1.7B and leaves everything else alone. The reason is the number above: a GitHub runner is four CPU cores with no GPU, so the 9B would miss the composer's budget on every request and the whole run would report the fallback tier's behaviour under the model's name.
+`docker-compose.ci.yml` swaps the chat model for a 1.7B and gives the composer a longer deadline; everything else is unchanged. The reason is the number above with the sign flipped: a GitHub runner is four CPU cores with no GPU anywhere — host or container — so the 9B would miss the composer's budget on every request and the whole run would report the fallback tier's behaviour under the model's name. The workflow still installs Ollama on the runner rather than in a container, so CI exercises the same `host.docker.internal` path a learner does.
 
 This is the part worth taking with you. A cheap lane is only worth having if it is **labelled by what it measures**, and the labelling has to survive being quoted out of context — a green check gets pasted into a pull request without its workflow name attached. So the model tag is registered in `app/src/data/reference.ts` as a `ci`-tier entry with the exact list of files allowed to name it, `check-claims` fails if it appears anywhere else, the workflow is called `e2e (wiring, small model)`, and the script prints its lane twice: once before check 1 and once under the final count.
 

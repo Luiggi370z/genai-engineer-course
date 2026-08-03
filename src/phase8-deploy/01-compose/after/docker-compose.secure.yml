@@ -42,10 +42,11 @@ services:
       # `deadline.capped` takes the tighter of the two — so the stack was
       # configured for a slow model and still cut every answer off at two
       # minutes. The stream showed it first: chunks, then the budget, then a
-      # `done` frame reporting a truncated answer nobody could act on. Sixteen
-      # minutes is the fifteen the composer may take plus room for retrieval and
-      # tools around it; the host-model overlay puts both back to GPU numbers.
-      REQUEST_DEADLINE_SECONDS: "960"
+      # `done` frame reporting a truncated answer nobody could act on. Two
+      # minutes is the composer's sixty seconds plus room for retrieval and tools
+      # around it; both numbers came down together when the model moved to the
+      # host's GPU, and they have to keep moving together.
+      REQUEST_DEADLINE_SECONDS: "120"
     # `!override` replaces the base list instead of appending to it. Without it,
     # Compose merges sequences: the service ends up publishing 0.0.0.0:8000 AND
     # 127.0.0.1:8000, the second bind loses the port to the first, and the secure

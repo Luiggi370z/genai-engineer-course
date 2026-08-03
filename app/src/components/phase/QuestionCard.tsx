@@ -42,7 +42,7 @@ export function QuestionCard({ q, accent, progress, onToggle, source }: Question
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
-        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-ink/[0.03]"
+        className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-ink/3"
       >
         <span
           className="mt-1 shrink-0 rounded px-1.5 py-0.5 font-mono text-[12px]"

@@ -15,7 +15,10 @@ from pathlib import Path
 
 import yaml
 
-REQUIRED_SERVICES = ("assistant", "mcp", "qdrant", "ollama")
+#: The model runner is not in here, and that is the point: it runs on the host,
+#: where compose can neither start it nor wait for it. src/preflight.py is where
+#: you check it.
+REQUIRED_SERVICES = ("assistant", "mcp", "qdrant")
 
 
 def health() -> dict:
@@ -52,25 +55,6 @@ def unpinned_images(services: dict) -> list[str]:
 def services_without_healthcheck(services: dict) -> list[str]:
     """TODO 3: services with no healthcheck. Without one,
     `depends_on: service_healthy` has nothing to wait for."""
-    raise NotImplementedError
-
-
-def cold_model_healthchecks(services: dict) -> list[str]:
-    """TODO 9: services that report healthy on a model that is merely DOWNLOADED.
-
-    `ollama list` is satisfied by a file on disk. Loading a 9B into memory on
-    CPU takes minutes and the composer's budget is sixty seconds, so a stack
-    that goes healthy on the download alone times out its own first request and
-    answers it from the fallback — every probe green, the answer degraded. This
-    happened here; it is why the compose file warms the model and touches
-    `/tmp/warm` before the check will pass.
-
-    Flatten the `healthcheck.test` (it comes as a list or a string) and flag any
-    service whose probe mentions `ollama list` without also requiring
-    `/tmp/warm`. Narrow on purpose: reading a compose file cannot tell a warmup
-    sentinel from any other file, and `/ready` on the assistant is what proves
-    the round trip.
-    """
     raise NotImplementedError
 
 

@@ -84,16 +84,17 @@ which looks exactly like nothing having happened.
 - **Contain**: do not route to the container. That is what the 503 is for — a
   load balancer or `depends_on: service_healthy` will hold traffic on its own.
 - **Diagnose**: `curl -s $URL/ready | jq -r .detail` says why. `model tier not
-  answering` means Ollama is unreachable; `model tier degraded` means it
-  answered by falling back, which is the cold-model case. Confirm with
-  `docker compose exec ollama ollama ps` — a model listed by `ollama list` but
-  absent from `ollama ps` is on disk and not in memory, and loading a 9B on CPU
-  takes minutes against a 60-second composer budget.
-- **Recover**: wait, if it is a first boot — the compose bootstrap warms the
-  model and touches `/tmp/warm` before the ollama healthcheck passes, so this
-  resolves itself. If it does not, `docker compose logs ollama` will show the
-  pull or the warmup failing. Check `OLLAMA_KEEP_ALIVE` is still set; without it
-  the model unloads after five idle minutes and every gap becomes a cold start.
+  answering` means the host's Ollama is unreachable from the container — check
+  the daemon is up and that `extra_hosts` maps `host.docker.internal`, which
+  Linux does not provide on its own. `model tier degraded` means it answered by
+  falling back, which is the cold-model case. Confirm with `ollama ps` on the
+  host: a model listed by `ollama list` but absent from `ollama ps` is on disk
+  and not in memory, and the first load costs more than the composer's budget.
+- **Recover**: `./src/preflight-ollama.sh` runs both of those checks and prints
+  the fixing command. It warms the model rather than only looking for it, which
+  is the distinction this incident is about. Check `OLLAMA_KEEP_ALIVE` is still
+  set; without it the model unloads after five idle minutes and every gap
+  becomes a cold start.
 - **Learn**: this is the failure that taught the difference between liveness and
   readiness here. Before `/ready` existed, a downloaded-but-cold model reported
   healthy, the first real question timed out, the offline composer answered it,

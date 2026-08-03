@@ -20,7 +20,7 @@ would show someone. **Stretch** is for when the full pass came easily.
 - [ ] Runs offline; the store sits behind an interface you could swap for Qdrant
 
 ## Stretch
-- [ ] `docker compose up` with Qdrant + Ollama, zero API keys — the production shape
+- [ ] `docker compose up` with Qdrant, answering from your machine's Ollama, zero API keys — the production shape
       Workshop 8 will require anyway
 - [ ] Contextual chunks (`phase2-retrieval/04-contextual-chunks`) on the slice where
       recall is weakest, with the before/after number written down

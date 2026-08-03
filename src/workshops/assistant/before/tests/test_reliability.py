@@ -78,15 +78,18 @@ def test_a_dead_composer_falls_back_to_offline_prose():
 
 
 def test_the_composition_budget_is_deployment_policy_not_a_constant():
-    """Why this is configurable at all, in one sentence: the self-contained
-    end-to-end lane failed on a correctly configured stack.
+    """Why this is configurable at all, in one sentence: the end-to-end lane
+    failed on a correctly configured stack.
 
-    Docker Desktop gives a container no GPU, so the in-stack 9B answers at about
-    half a token per second. Every composition passed 60 seconds, the offline
-    stitcher answered, and the run failed on check 4 — after seventeen minutes,
-    with nothing wrong except a number compiled into a library. Both paths read
-    it from the same setting so batch and stream cannot drift apart."""
-    slow = Settings(ollama_host="http://ollama:11434", compose_timeout=900)
+    Docker Desktop gives a container no GPU, so a containerised 9B answered at
+    about half a token per second. Every composition passed 60 seconds, the
+    offline stitcher answered, and the run failed on check 4 — after seventeen
+    minutes, with nothing wrong except a number compiled into a library. The
+    model has since moved to the host, where 60 seconds is generous again; the
+    setting stays because the right budget is a fact about the hardware
+    underneath, not about the code. Both paths read it from the same setting so
+    batch and stream cannot drift apart."""
+    slow = Settings(ollama_host="http://host.docker.internal:11434", compose_timeout=900)
     assert slow.compose_timeout == 900
     assert Settings().compose_timeout == COMPOSE_TIMEOUT_SECONDS
 

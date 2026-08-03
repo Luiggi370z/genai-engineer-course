@@ -113,7 +113,7 @@ export function ManifestPanel({ phases, progress }: ManifestPanelProps) {
           <button
             type="button"
             onClick={() => fileInput.current?.click()}
-            className="rounded border border-line px-3 py-1.5 font-mono text-[12px] text-ink hover:bg-ink/[0.04]"
+            className="rounded border border-line px-3 py-1.5 font-mono text-[12px] text-ink hover:bg-ink/4"
           >
             Attach evidence/manifest.json
           </button>
@@ -132,7 +132,7 @@ export function ManifestPanel({ phases, progress }: ManifestPanelProps) {
           <button
             type="button"
             onClick={download}
-            className="rounded border border-line px-3 py-1.5 font-mono text-[12px] text-ink hover:bg-ink/[0.04]"
+            className="rounded border border-line px-3 py-1.5 font-mono text-[12px] text-ink hover:bg-ink/4"
           >
             Download COMPLETION.md
           </button>
@@ -144,7 +144,7 @@ export function ManifestPanel({ phases, progress }: ManifestPanelProps) {
                 window.setTimeout(() => setCopied(false), 2000);
               });
             }}
-            className="rounded border border-line px-3 py-1.5 font-mono text-[12px] text-ink hover:bg-ink/[0.04]"
+            className="rounded border border-line px-3 py-1.5 font-mono text-[12px] text-ink hover:bg-ink/4"
           >
             {copied ? "Copied" : "Copy as markdown"}
           </button>

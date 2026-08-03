@@ -17,7 +17,7 @@ export function CheckItem({ id, text, checked, onToggle, accent }: CheckItemProp
       type="button"
       onClick={() => onToggle(id)}
       aria-pressed={checked}
-      className="group flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-ink/[0.04]"
+      className="group flex w-full items-start gap-3 rounded-md px-3 py-2.5 text-left transition-colors hover:bg-ink/4"
     >
       <span
         className="mt-0.5 flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px] border-2 transition-colors"

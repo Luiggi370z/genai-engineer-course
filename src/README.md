@@ -48,7 +48,8 @@ You wire libraries together; you do **not** implement algorithms:
 Requirements: **Python 3.11 through 3.14** (`>=3.11,<3.15`, and CI proves both ends —
 `./verify-lessons.sh --python 3.11` runs the set on the floor),
 [uv](https://docs.astral.sh/uv/), and (for most lessons)
-[Ollama](https://ollama.com) running locally so everything works with **zero API keys**.
+[Ollama](https://ollama.com) **installed on your machine** so everything works with
+**zero API keys**.
 `phase4-agents/04-framework-bakeoff` is the single exception: it pins **3.12** in its own
 `pyproject.toml` (CrewAI's tree does not build on newer) and uv fetches that interpreter
 for that lesson alone.
@@ -61,8 +62,16 @@ ollama pull qwen3-coder:30b     # eval judge (Phase 3) — any capable local mod
 ollama pull llama-guard3:8b     # guard model (Phase 6)
 ```
 
+Install Ollama on the host, never in a container — Docker Desktop passes no GPU
+through, and the same 9B that answers in a second on your laptop takes two minutes
+inside the VM. Phase 8's stack keeps its infrastructure in compose and reaches your
+Ollama at `host.docker.internal:11434`.
+
 Hosted providers are optional everywhere — set `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
-only if you want to run the hosted path.
+only if you want to run the hosted path. The capstone picks one explicitly with
+`ASSISTANT_PROVIDER=ollama|openai|anthropic|offline`; unset means Ollama when
+`OLLAMA_HOST` is set and the offline stitcher otherwise, and naming a hosted provider
+without its key fails the boot rather than quietly answering from the fallback.
 
 ## The nine workshops
 
@@ -194,23 +203,29 @@ whole suite with `--ci` against a small chat model, which proves the wiring and
 not the answers; the unqualified local run is the release gate. Every lane says
 which one it is in its own output.
 
-A full pass on that lane is about twelve minutes, nearly all of it the local model
-actually composing, so
-`verify-e2e.sh` also takes `--list`, `--from N`, `--only N` and `--no-build` for the
-fix-and-re-prove loop. The checks share one corpus, outbox and set of approvals on purpose, so a
-resumed run only means something against volumes a full run has already filled; the
-unqualified `./verify-e2e.sh` is the claim.
+A full pass is about forty-five seconds, so `verify-e2e.sh` also takes `--list`,
+`--from N`, `--only N` and `--no-build` for the fix-and-re-prove loop. The checks
+share one corpus, outbox and set of approvals on purpose, so a resumed run only
+means something against volumes a full run has already filled; the unqualified
+`./verify-e2e.sh` is the claim.
 
-`--host-model` runs the same fifteen checks against the **host's** Ollama instead of
-the one in the stack, and finishes in forty-five seconds.
-That gap is not a trick: Docker Desktop gives containers no GPU, so the containerised
-model runs on CPU inside a VM at 0.52 tokens per second against the host's 81. Worth
-reading [Phase 8's
+The model answers from **your machine**, not from a container. That is not a
+convenience — it is the difference between forty-five seconds and twelve minutes.
+Docker Desktop gives containers no GPU, so the same 9B runs at 0.52 tokens per
+second inside the VM against 81 on the host: 156x, same model, same laptop, decided
+by which side of the boundary the accelerator is on. Compose keeps the
+infrastructure; `host.docker.internal:11434` reaches the model. Worth reading
+[Phase 8's
 VERIFIED.md](phase8-deploy/VERIFIED.md#the-twenty-minutes-and-what-was-hiding-inside-them)
 for how that number stayed hidden for so long: the suite spent most of its runtime
 timing out and answering from the fallback composer, with every check green, because
 "is the answer grounded" and "did the model write it" are different questions and only
 the first was being asked. Check 4 now asserts the second one.
+
+Because compose can neither start nor wait for a dependency on the host, check 0 is
+a **preflight**: the daemon answers, both models are pulled, both are warm, and a
+throwaway container can actually reach the host through `host-gateway`. It never
+pulls anything for you — a 5.6 GB download is your decision, not a test's.
 
 ### Phase 9 · The GenAI Mindset
 - `drill-deck` — the interview question bank as flashcards

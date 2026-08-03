@@ -45,7 +45,7 @@ export function Sidebar({
       <button
         type="button"
         onClick={() => navigate("dash")}
-        className="border-b border-line/70 px-5 pt-6 pb-4 text-left hover:bg-ink/[0.02]"
+        className="border-b border-line/70 px-5 pt-6 pb-4 text-left hover:bg-ink/2"
       >
         <div className="font-mono text-[12px] uppercase tracking-[0.18em] text-graphite">
           Workbook · 2026
@@ -70,7 +70,7 @@ export function Sidebar({
           onClick={() => navigate("dash")}
           aria-current={view === "dash" ? "page" : undefined}
           className={`mb-3 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[12.5px] font-semibold transition-colors ${
-            view === "dash" ? "bg-ink text-paper" : "text-ink/80 hover:bg-ink/[0.05]"
+            view === "dash" ? "bg-ink text-paper" : "text-ink/80 hover:bg-ink/5"
           }`}
         >
           <HugeiconsIcon icon={Home01Icon} size={15} strokeWidth={2} />
@@ -90,7 +90,7 @@ export function Sidebar({
                   onClick={() => navigate(phase.id)}
                   aria-current={active ? "page" : undefined}
                   className={`relative w-full rounded-r-md py-2 pl-5 pr-2 text-left transition-colors ${
-                    active ? "" : "hover:bg-ink/[0.04]"
+                    active ? "" : "hover:bg-ink/4"
                   }`}
                   style={
                     active
@@ -134,7 +134,7 @@ export function Sidebar({
           onClick={() => navigate("electives")}
           aria-current={view === "electives" ? "page" : undefined}
           className={`mt-4 flex w-full items-center gap-2 rounded-md border border-dashed px-3 py-2 text-left transition-colors ${
-            view === "electives" ? "border-ink/40 bg-ink/[0.06]" : "border-line hover:bg-ink/[0.04]"
+            view === "electives" ? "border-ink/40 bg-ink/6" : "border-line hover:bg-ink/4"
           }`}
         >
           <HugeiconsIcon
@@ -165,7 +165,7 @@ export function Sidebar({
             type="button"
             onClick={onTheme}
             aria-label="Toggle light/dark theme"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-ink/[0.03] text-ink transition-colors hover:bg-ink/[0.07]"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-ink/3 text-ink transition-colors hover:bg-ink/7"
           >
             <HugeiconsIcon icon={theme === "dark" ? Sun03Icon : Moon02Icon} size={17} />
           </button>
@@ -177,14 +177,14 @@ export function Sidebar({
           <button
             type="button"
             onClick={onExport}
-            className="rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/[0.05] hover:text-ink"
+            className="rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/5 hover:text-ink"
           >
             Export
           </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/[0.05] hover:text-ink"
+            className="rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/5 hover:text-ink"
           >
             Import
           </button>

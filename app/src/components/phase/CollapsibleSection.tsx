@@ -63,7 +63,7 @@ export function CollapsibleSection({
     <>
       <button
         {...triggerProps}
-        className="mb-3 flex w-full items-center gap-2 rounded-md border border-line bg-card px-3 py-2 text-left transition-colors hover:bg-ink/[0.03]"
+        className="mb-3 flex w-full items-center gap-2 rounded-md border border-line bg-card px-3 py-2 text-left transition-colors hover:bg-ink/3"
       >
         <span
           className="transition-transform"

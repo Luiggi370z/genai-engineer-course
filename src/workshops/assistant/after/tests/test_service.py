@@ -4,8 +4,12 @@ TestClient with every adapter in its offline default. No network, no model."""
 import pytest
 from fastapi.testclient import TestClient
 
+from assistant.adapters import InMemoryRag
 from assistant.api import create_app
 from assistant.composers import ABSTAIN
+from assistant.core import Assistant
+from assistant.observe import recorder
+from assistant.providers import ConfigError
 from assistant.service import build_assistant, build_reranker
 from assistant.settings import Settings
 
@@ -37,15 +41,48 @@ def test_the_embedder_tier_names_the_model_only_when_it_can_actually_run():
     and never set ASSISTANT_EMBED_MODEL, so the store ran on the hash vector and
     nothing said so. An operator reading `/health` now sees which one it is.
 
-    A model named without a host is worse than no model, because it reads as
-    configured — so that case reports the hash too, and `degraded` says why."""
-    named = build_assistant(
-        Settings(embed_model="nomic-embed-text", ollama_host="http://ollama:11434")
+    Running one takes a vector store as well as a tag. A model named with no
+    store behind it is not the embedder in use — there is nothing to embed for —
+    and reporting the tag there would be the same lie in the other direction.
+    """
+    # Reported straight off the settings, so the deployed combination can be
+    # asserted here without a Qdrant to connect to or the `ollama` package the
+    # fast tier deliberately does not install.
+    named = Assistant(
+        settings=Settings(
+            embed_model="nomic-embed-text",
+            ollama_host="http://ollama:11434",
+            qdrant_url="http://qdrant:6333",
+            min_score=0.4,
+        ),
+        rag=InMemoryRag(), memory=None, base_registry={}, rec=recorder(),
     )
     assert named.tier()["embed"] == "nomic-embed-text"
 
-    hostless = build_assistant(Settings(embed_model="nomic-embed-text"))
-    assert hostless.tier()["embed"] == "hash (not semantic)"
+    storeless = build_assistant(
+        Settings(embed_model="nomic-embed-text", ollama_host="http://ollama:11434")
+    )
+    assert storeless.tier()["embed"] == "hash (not semantic)"
+
+
+def test_an_embedder_that_cannot_be_reached_stops_the_boot_rather_than_hashing():
+    """The other half of the rule above, and the reason it is an error.
+
+    `ASSISTANT_EMBED_MODEL` with nothing to run it on used to degrade to the hash
+    vector and say so on `/health`. That is a fine answer for a dependency that
+    broke and a bad one for a deployment that was never coherent: the store comes
+    up, writes hash vectors into a collection named for them, and answers
+    plausibly until someone asks about "reimbursements" and gets nothing about
+    refunds. Failing at boot costs one restart and no corpus.
+    """
+    with pytest.raises(ConfigError, match="OLLAMA_HOST"):
+        build_assistant(
+            Settings(
+                embed_model="nomic-embed-text",
+                qdrant_url="http://qdrant:6333",
+                min_score=0.4,
+            )
+        )
 
 
 def test_a_reranker_that_cannot_load_degrades_instead_of_downing_the_service():

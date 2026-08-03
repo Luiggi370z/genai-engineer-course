@@ -57,7 +57,7 @@ export function PredictBlock({ prompt, answer, consolidation, accent }: PredictB
       {revealed && (
         <div
           {...panelProps}
-          className="border-t-2 border-dashed border-line bg-ink/[0.02] px-4 pt-3 pb-3.5"
+          className="border-t-2 border-dashed border-line bg-ink/2 px-4 pt-3 pb-3.5"
         >
           <div className="mb-1 font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
             What actually happens

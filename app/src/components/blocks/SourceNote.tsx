@@ -17,7 +17,7 @@ export function SourceNote({
 }) {
   return (
     <p className="my-2.5 text-[12px] leading-relaxed text-graphite">
-      <span className="font-mono uppercase tracking-[0.1em]">Verified {verifiedOn}</span>
+      <span className="font-mono uppercase tracking-widest">Verified {verifiedOn}</span>
       {" · "}
       {items.map((item, i) => (
         <span key={item.url}>

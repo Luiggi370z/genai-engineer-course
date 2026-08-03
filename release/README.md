@@ -26,6 +26,7 @@ open course.html
 unzip genai-engineer-workbook-src.zip
 
 # 3. Install the toolchain and pull the two models you need to begin.
+#    Ollama goes on this machine, not in a container — it needs the GPU.
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ollama pull qwen3.5:9b        # chat + tool calling
 ollama pull nomic-embed-text  # embeddings
@@ -46,7 +47,11 @@ smaller or hosted judge), and `llama-guard3:8b` for the Phase 6 guardrails.
 ## What you need
 
 **Software.** Python **3.11 through 3.14**, [uv](https://docs.astral.sh/uv/),
-[Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.
+[Ollama](https://ollama.com) installed on your own machine, and Docker for the
+Phase 8 deployment lessons. Install Ollama on the host rather than in a container:
+Docker Desktop gives containers no GPU, and the difference on the course's own 9B
+is 0.52 tokens per second against 81. Phase 8's stack runs its infrastructure in
+compose and reaches your Ollama at `host.docker.internal:11434`.
 That range is a range, not a floor: every lesson declares
 `requires-python = ">=3.11,<3.15"` and CI runs the whole set at both ends on every
 push, because an unbounded `3.11+` is a claim about versions that did not exist when

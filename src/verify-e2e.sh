@@ -2,62 +2,51 @@
 # End-to-end verification of the deployed stack — the slow lane.
 #
 #   ./verify-e2e.sh              build + boot the composed stack, run every check
-#   ./verify-e2e.sh --reset      wipe the state volumes first (keeps the model cache)
+#   ./verify-e2e.sh --reset      wipe the state volumes first (your pulled models are yours)
 #   ./verify-e2e.sh --down       same, then `docker compose down` when finished
 #   ./verify-e2e.sh --from 9     boot, then run checks 9..15 and skip 2..8
 #   ./verify-e2e.sh --only 12    boot, then run check 12 and nothing else
 #   ./verify-e2e.sh --no-build   skip the image build (the stack is already current)
-#   ./verify-e2e.sh --host-model use the HOST's ollama (much faster on a Mac; see below)
 #   ./verify-e2e.sh --ci         the CI overlay: a small chat model on a hosted runner
-#   ./verify-e2e.sh --model TAG  override the chat model tag (implies --ci)
+#   ./verify-e2e.sh --model TAG  override the chat model tag
 #   ./verify-e2e.sh --list       print the checks and exit
 #   ./verify-e2e.sh --print-commit  print the commit this run would expect, and exit
 #   ./verify-e2e.sh --attest PATH   on a COMPLETE pass, record what ran, where (see below)
 #
-# Needs Docker and disk for two Ollama models (~6 GB on first boot). Everything else
-# in this repo verifies offline; this is the one script that proves the composed
-# stack really boots, authenticates, retrieves, refuses, contains, and traces.
+# Needs Docker, and Ollama running on THIS machine with `qwen3.5:9b` and
+# `nomic-embed-text` pulled (~6 GB). `preflight-ollama.sh` checks all of that
+# before anything builds, and prints the exact `ollama pull` if something is
+# missing. Everything else in this repo verifies offline; this is the one script
+# that proves the composed stack really boots, authenticates, retrieves, refuses,
+# contains, and traces.
 #
-# A full pass on the self-contained lane takes about twelve minutes on a machine
-# whose containers have no GPU, nearly all of it waiting on the model — or about
-# forty-five seconds with `--host-model`, below. A verifier you can
-# only run from the top is a verifier that stops being run: fix something check 12
-# caught, and re-proving it should not cost another twelve minutes of checks that
-# already passed. Hence `--from` and `--only`.
+# The model runs on the host and the infrastructure runs in Docker, and the reason
+# is a measurement rather than a preference. Docker Desktop on macOS gives
+# containers no GPU, so a containerised Ollama ran the 9B on CPU inside a VM at
+# 0.52 tokens/second. The same model, same laptop, through the host's own Ollama
+# with Metal: 81 tokens/second — 156x, with nothing about the code different. A
+# full pass went from twelve minutes to about forty-five seconds.
 #
-# `--host-model` attacks those minutes instead of working around them, and is worth
-# reading about even if you never use it, because the measurement is the lesson.
-# Docker Desktop on macOS gives containers no GPU, so the containerised Ollama runs a
-# 9B model on CPU inside a VM: 0.52 tokens/second. The same model on the same
-# machine's own Ollama, with Metal: 81 tokens/second. `--host-model` points the
-# container at it through `host.docker.internal` and switches the stack's ollama
-# service off — twelve minutes becomes forty-five seconds, with the model composing
-# every answer either way.
+# That 156x is also why the timeouts are what they are. The composer's 60-second
+# budget is right behind a GPU and absurd at half a token per second; the stack
+# used to raise it to fifteen minutes to survive CPU inference, which meant a
+# genuinely broken model was indistinguishable from a slow one for a quarter of an
+# hour. On the host's GPU, sixty seconds without an answer is a fault, and the
+# budget says so again.
 #
-# "Either way" is newer than it sounds. The composer's 60-second budget is right
-# behind a GPU and absurd at half a token per second, so on the self-contained lane
-# every answer used to arrive from the offline fallback and check 4 failed — a
-# correctly configured stack failing its own verifier over a constant compiled into
-# the code. The base compose file now sets COMPOSE_TIMEOUT_SECONDS to fifteen
-# minutes, the secure overlay's REQUEST_DEADLINE_SECONDS to sixteen so it contains
-# rather than undercuts it, and the host-model overlay puts both back to GPU
-# numbers, because there slow really does mean broken.
+# A verifier you can only run from the top is a verifier that stops being run: fix
+# something check 12 caught, and re-proving it should not cost another full pass of
+# checks that already passed. Hence `--from` and `--only`.
 #
-# The default stays self-contained, because check 1's claim is that a stranger
-# clones this repo and runs ONE command with nothing installed and no keys — and a
-# lane that needs a host daemon and a pre-pulled model cannot make that claim.
-# Use `--host-model` for the local loop, and run the default lane before you
-# believe a green result.
-#
-# Where this actually runs, since an earlier version of this header claimed more
-# than was true: push CI builds the image and validates the compose files, and
-# does NOT boot the stack. The scheduled `e2e` workflow runs `--ci`, which is
-# every check below against a 1.7B chat model — enough to prove the WIRING
-# (retrieval, the gate, containment, discovery, tracing, durability) and not the
-# model, because a hosted runner has four CPU cores and no GPU. The
-# full-fidelity run with the real 9B is the unqualified `./verify-e2e.sh`, on a
-# machine with the disk and the patience for it, and it is a release gate rather
-# than a per-push one. Every lane prints which one it is, twice.
+# Where this actually runs. Push CI builds the image and validates the compose
+# files, and does NOT boot the stack. The scheduled `e2e` workflow runs `--ci`,
+# which is every check below against a 1.7B chat model on the runner's own Ollama
+# — enough to prove the WIRING (retrieval, the gate, containment, discovery,
+# tracing, durability) and not the model, because a hosted runner has four CPU
+# cores and no GPU. The full-fidelity run with the real 9B is the unqualified
+# `./verify-e2e.sh`, and it is a release gate rather than a per-push one. Both
+# lanes use the same host topology; only the size of the model differs, and every
+# lane prints which one it is, twice.
 #
 # What they assume, stated plainly: the checks SHARE STATE. They ingest into one
 # corpus, spend approvals, fill the outbox and write memories, and several of the
@@ -80,6 +69,9 @@
 # JWT per request, carrying a subject and the endpoint's scope. Checks that used
 # to reach inside the container now go over HTTP as somebody.
 #
+#   0. preflight: the HOST's ollama answers, both models are present AND warm,
+#      and a container can reach it — the dependency compose cannot start,
+#      cannot see, and cannot wait for
 #   1. compose up --build reaches healthy (healthchecks gate the whole chain)
 #   2. /health reports the REAL tier: qdrant + sqlite + ollama + mcp+builtin, it
 #      reports the model tier as READY (warm, not merely downloaded), and the gate
@@ -147,7 +139,9 @@ COMPOSE="docker compose -f docker-compose.yml \
   -f docker-compose.observability.yml"
 
 BASE="http://localhost:8000"
-BOOT_TIMEOUT=1200 # first boot pulls models; be patient, not broken
+# No model download happens here any more — the preflight proved the host already
+# has both, warm. This is image build plus three containers reaching healthy.
+BOOT_TIMEOUT=600
 
 say() { printf '\n== %s\n' "$1"; }
 die() { printf 'FAIL: %s\n' "$1"; exit 1; }
@@ -176,10 +170,10 @@ RESET=0
 FROM=1
 ONLY=0
 BUILD="--build"
-HOST_MODEL=0
 PRINT_COMMIT=0
 ATTEST=""
 CI_LANE=0
+CHAT_MODEL="" # empty = the compose default, qwen3.5:9b
 CI_MODEL="qwen3.5:1.7b" # registered in app/src/data/reference.ts as the ci-tier chat tag
 
 while (($#)); do
@@ -187,10 +181,13 @@ while (($#)); do
     --down) DOWN=1 ;;
     --reset) RESET=1 ;;
     --no-build) BUILD="" ;;
-    --host-model) HOST_MODEL=1 ;;
     --ci) CI_LANE=1 ;;
-    --model) CI_LANE=1; CI_MODEL="${2:?--model needs a tag}"; shift ;;
-    --model=*) CI_LANE=1; CI_MODEL="${1#*=}" ;;
+    # A tag and a lane are two different questions. `--model` used to answer both,
+    # so naming a model silently pulled in the CI overlay's looser deadlines —
+    # and a full-fidelity run with a hand-picked 9B quietly measured itself
+    # against CI's budget.
+    --model) CHAT_MODEL="${2:?--model needs a tag}"; shift ;;
+    --model=*) CHAT_MODEL="${1#*=}" ;;
     --print-commit) PRINT_COMMIT=1 ;;
     --attest) ATTEST="${2:?--attest needs a path}"; shift ;;
     --attest=*) ATTEST="${1#*=}" ;;
@@ -222,30 +219,35 @@ if [[ -n "$ATTEST" ]] && { ((FROM > 1)) || ((ONLY)); }; then
 fi
 if [[ -n "$ATTEST" && "$ATTEST" != /* ]]; then ATTEST="$INVOKED_FROM/$ATTEST"; fi
 
-# The model lane, announced rather than inferred. A run that quietly used a
-# different inference path than the reader assumes is worse than a slow one, so
-# both lanes say which they are, and the preflight turns "the host is not set up
-# for this" into a message here instead of a composer timeout in check 4.
-MODEL_LANE="in-stack ollama (CPU-only in Docker Desktop; slow by design, self-contained)"
-if ((HOST_MODEL)) && ((CI_LANE)); then
-  die "--host-model and --ci are two different answers to the same question; pick one"
-fi
+# One inference topology: the host's Ollama, reached through host.docker.internal.
+# The lanes differ only in which model answers, and the lane is announced rather
+# than inferred — a run that quietly used a different model than the reader
+# assumes is worse than a slow one.
 if ((CI_LANE)); then
-  export CI_CHAT_MODEL="$CI_MODEL"
   COMPOSE="$COMPOSE -f docker-compose.ci.yml"
-  MODEL_LANE="CI overlay, chat model $CI_MODEL — proves the WIRING, not the model's answers"
+  [[ -n "$CHAT_MODEL" ]] || CHAT_MODEL="$CI_MODEL"
 fi
-if ((HOST_MODEL)); then
-  HOST_OLLAMA="http://127.0.0.1:11434"
-  WANT_MODEL="${OLLAMA_MODEL:-qwen3.5:9b}"
-  curl -sf "$HOST_OLLAMA/api/version" -o /dev/null \
-    || die "--host-model needs the host's ollama serving on 11434 (start Ollama, or drop the flag)"
-  curl -sf "$HOST_OLLAMA/api/tags" | grep -q "\"$WANT_MODEL\"" \
-    || die "--host-model: host ollama has no $WANT_MODEL — run 'ollama pull $WANT_MODEL', or set OLLAMA_MODEL to one you have"
-  export OLLAMA_MODEL="$WANT_MODEL"
-  COMPOSE="$COMPOSE -f docker-compose.hostmodel.yml"
-  MODEL_LANE="host ollama via host.docker.internal, model $WANT_MODEL (GPU; not what CI runs)"
+WANT_MODEL="${CHAT_MODEL:-${OLLAMA_MODEL:-qwen3.5:9b}}"
+export OLLAMA_MODEL="$WANT_MODEL"
+if ((CI_LANE)); then
+  MODEL_LANE="host ollama, chat model $WANT_MODEL — proves the WIRING, not the model's answers"
+else
+  MODEL_LANE="host ollama via host.docker.internal, model $WANT_MODEL"
 fi
+
+# Check 0, and it runs before the build rather than after it. The models live on
+# the host now: compose cannot start them, cannot wait for them, and cannot tell
+# you they are missing. Without this, a host with no `nomic-embed-text` builds an
+# image, boots three containers, and fails in check 4 with a retrieval result that
+# looks like a bug in the retriever.
+#
+# It also writes the version and both digests, which the attestation folds in: a
+# report that says "passed against qwen3.5:9b" has not said which qwen3.5:9b, and
+# a tag is a mutable pointer.
+PREFLIGHT_FACTS="$(mktemp -t e2e-preflight)"
+trap 'rm -f "$PREFLIGHT_FACTS"' EXIT
+"$SRC_ROOT/preflight-ollama.sh" --model "$WANT_MODEL" --json "$PREFLIGHT_FACTS" \
+  || die "host Ollama is not ready — fix the line(s) above and re-run"
 
 # The secure overlay refuses to start without this, on purpose: a committed
 # default is a published credential. Ephemeral per run — nothing outlives it.
@@ -263,9 +265,10 @@ export ASSISTANT_JWT_SECRET="${ASSISTANT_JWT_SECRET:-$(head -c 48 /dev/urandom |
 # run's writes are still there". A green line pasted into a pull request is
 # supposed to mean the stack does this from cold.
 #
-# The two state volumes are the subject. `ollama-models` is a cache, not state:
-# nothing asserts on its contents, and requiring it empty would add a multi-gigabyte
-# download to every release run to prove nothing.
+# Both volumes in the stack are the subject — there is no third one to reason
+# about since the model cache moved to the host, where this script neither manages
+# it nor needs to: the preflight refuses to start a run whose models are missing,
+# and pulled models are the operator's, not the run's.
 #
 # Existence is the test rather than emptiness, because `docker compose down -v` is
 # the operation being asked for and it removes the volume outright. Reading the
@@ -510,7 +513,7 @@ die_if_crashed() {
   local svc cid status restarts
   for svc in $($COMPOSE ps --services 2>/dev/null); do
     cid=$($COMPOSE ps -q "$svc" 2>/dev/null) || continue
-    [[ -n "$cid" ]] || continue # defined but not started in this lane
+    [[ -n "$cid" ]] || continue # declared but not created yet — nothing to inspect
     status=$(docker inspect -f '{{.State.Status}}' "$cid" 2>/dev/null || echo gone)
     restarts=$(docker inspect -f '{{.RestartCount}}' "$cid" 2>/dev/null || echo 0)
     case "$status" in
@@ -659,16 +662,16 @@ EOF
   # safe-buffered: the gate screens the WHOLE answer before releasing the first
   # chunk, so a "first chunk within 60s" budget is really "generate and screen it
   # all within 60s" — strictly harder than the batch path, which then pays for the
-  # same generation a second time. A 9B model on a CPU-only container sits right on
-  # that line and sometimes crosses it. So the stream is allowed to fall back, but it
-  # is NOT allowed to fall back quietly: the degradation has to be on /health, naming
-  # the stream. A batch fallback still fails the run outright.
+  # same generation a second time. A small model on a contended CI runner sits
+  # right on that line and sometimes crosses it. So the stream is allowed to fall
+  # back, but it is NOT allowed to fall back quietly: the degradation has to be on
+  # /health, naming the stream. A batch fallback still fails the run outright.
   brain="$(brain_degradation)"
   if [[ -z "$brain" ]]; then
     echo "the model composed both answers, batch and streamed"
   elif [[ "$brain" == *stream* ]]; then
     echo "note: the model missed the streaming budget and /health confessed: $brain"
-    echo "      expected where the container has no GPU — see docker-compose.hostmodel.yml"
+    echo "      expected on a shared runner; on a host GPU this should not happen"
   else
     die "the model stopped composing for a reason that is not the stream budget: $brain"
   fi
@@ -1201,24 +1204,39 @@ if [[ -n "$ATTEST" ]]; then
     'from assistant.settings import Settings; print(Settings.from_env().ollama_model)') \
     || die "the stack could not say which chat model it was configured with"
   mkdir -p "$(dirname "$ATTEST")"
+  # The preflight's record rides along: which Ollama served the run, and the
+  # digests behind both model tags. "Passed against qwen3.5:9b" names a mutable
+  # pointer — a re-pull can change the bytes under it — so the digest is the part
+  # a reader can check a year from now.
   ATTEST_SOURCE="$attest_source" ATTEST_MODEL="$attest_model" ATTEST_COMMIT="$GIT_SHA" \
   ATTEST_LANE="$MODEL_LANE" ATTEST_RAN="$RAN" ATTEST_TOTAL="$TOTAL" \
+  ATTEST_FACTS="$PREFLIGHT_FACTS" \
     python3 - "$ATTEST" <<'EOF'
 import datetime as dt, json, os, sys
 
-json.dump(
-    {
-        "source": os.environ["ATTEST_SOURCE"].strip(),
-        "commit": os.environ["ATTEST_COMMIT"].strip(),
-        "lane": os.environ["ATTEST_LANE"].strip(),
-        "model": os.environ["ATTEST_MODEL"].strip(),
-        "checks_run": int(os.environ["ATTEST_RAN"]),
-        "checks_total": int(os.environ["ATTEST_TOTAL"]),
-        "finished_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat(),
+facts = {}
+try:
+    with open(os.environ["ATTEST_FACTS"]) as handle:
+        facts = json.load(handle)
+except (OSError, ValueError):
+    pass
+
+record = {
+    "source": os.environ["ATTEST_SOURCE"].strip(),
+    "commit": os.environ["ATTEST_COMMIT"].strip(),
+    "lane": os.environ["ATTEST_LANE"].strip(),
+    "model": os.environ["ATTEST_MODEL"].strip(),
+    "ollama_version": facts.get("ollama_version", ""),
+    "model_digests": {
+        key.removeprefix("digest:"): value
+        for key, value in sorted(facts.items())
+        if key.startswith("digest:")
     },
-    open(sys.argv[1], "w"),
-    indent=2,
-)
+    "checks_run": int(os.environ["ATTEST_RAN"]),
+    "checks_total": int(os.environ["ATTEST_TOTAL"]),
+    "finished_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat(),
+}
+json.dump(record, open(sys.argv[1], "w"), indent=2)
 open(sys.argv[1], "a").write("\n")
 EOF
   printf 'attested: %s (source %s, model %s)\n' "$ATTEST" "$attest_source" "$attest_model"
@@ -1227,6 +1245,6 @@ fi
 # request, and "all 15 passed" means something different on each lane. The CI lane
 # says so loudest: it is the one whose green is most likely to be quoted as if it
 # were the release claim.
-((HOST_MODEL || CI_LANE)) && printf 'lane: %s\n' "$MODEL_LANE"
+printf 'lane: %s\n' "$MODEL_LANE"
 ((DOWN)) && $COMPOSE down
 exit 0

@@ -224,3 +224,10 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.secure.yml \
             -f docker-compose.observability.yml -f docker-compose.ci.yml config --quiet
         working-directory: src/phase8-deploy/01-compose/after
+      # The release overlay is stacked by hand during a release and by nothing on
+      # a schedule, so it is the one whose typo surfaces at the worst moment.
+      - run: |
+          ASSISTANT_JWT_SECRET=only-for-config-validation-32-bytes! \
+          docker compose -f docker-compose.yml -f docker-compose.secure.yml \
+            -f docker-compose.observability.yml -f docker-compose.release.yml config --quiet
+        working-directory: src/phase8-deploy/01-compose/after

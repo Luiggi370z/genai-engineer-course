@@ -33,7 +33,7 @@ export function DeepDive({ title, blocks, accent }: DeepDiveProps) {
     >
       <button
         {...triggerProps}
-        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left hover:bg-ink/[0.03]"
+        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left hover:bg-ink/3"
       >
         <span
           className="shrink-0 transition-transform duration-150"

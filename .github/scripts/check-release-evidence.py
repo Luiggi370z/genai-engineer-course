@@ -35,18 +35,24 @@ REPO = Path(__file__).resolve().parents[2]
 EVIDENCE = REPO / "release" / "evidence"
 GATE_PATH = REPO / "src" / "phase8-deploy" / "02-ci" / "after" / "src" / "gate.py"
 
-# The two lanes that run the real model, by the prefix each writes into its own
+# The lane that runs the real model, by the prefix it writes into its own
 # attestation. An allowlist rather than a ban on the CI overlay: a lane added
 # later should have to be admitted deliberately, not admitted by not matching a
 # string. `--ci` runs a 1.7B to prove wiring and says so in its own lane name, and
 # letting it attest a release would publish "the deployed stack passes" on the
 # strength of a run that was never meant to answer that question.
 #
-# Both real lanes are accepted because the unqualified one — in-stack, cold, no
-# host dependencies — is the stronger claim, not a lesser one. Which lane ran is
-# recorded and printed, since they prove different things; see the lane table at
-# the bottom of docs/RELEASE-CHECKLIST.md.
-RELEASE_LANES = ("host ollama", "in-stack ollama")
+# One entry now, where there used to be two. The in-stack lane was accepted as the
+# stronger claim — self-contained, no host dependencies — but it ran the 9B on CPU
+# inside a VM at 0.52 tokens/second, so what it actually measured was the offline
+# fallback with a fifteen-minute timeout hiding it. A lane whose numbers describe
+# a tier the release does not ship cannot carry the release claim.
+RELEASE_LANES = ("host ollama",)
+
+#: What the attestation has to say about the model beyond its tag. A tag is a
+#: mutable pointer: `qwen3.5:9b` a year from now may not be the bytes these
+#: numbers were measured against, and without the digest nobody can tell.
+REQUIRED_MODEL_FACTS = ("ollama_version", "model_digests")
 
 # An id that is not a binding. Equal to each other, which is why nothing may be
 # compared before they are excluded.
@@ -138,6 +144,20 @@ def problems(source: str, commit: str | None, evidence: Path = EVIDENCE) -> list
             f"{lane or '<none>'} (expected one of {', '.join(RELEASE_LANES)})"
         )
 
+    # Which Ollama, and which bytes behind each tag. The models run on the
+    # releaser's own machine now, so "it passed against qwen3.5:9b" is a claim
+    # about a host nobody else can inspect — the version and the digests are what
+    # make it checkable afterwards.
+    missing_facts = [key for key in REQUIRED_MODEL_FACTS if not attestation.get(key)]
+    if missing_facts:
+        found.append(
+            f"the e2e attestation does not say which model actually ran: "
+            f"missing {', '.join(missing_facts)} — re-attest with a current verify-e2e.sh"
+        )
+    else:
+        digests = attestation["model_digests"]
+        print(f"ollama {attestation['ollama_version']}, models: {digests}")
+
     if commit and attestation.get("commit") not in (commit, None):
         found.append(f"the e2e suite ran at commit {attestation['commit']}, the tag is {commit}")
 
@@ -175,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     print(
         "\nRun the full-fidelity lane against this exact tree and commit its output:\n"
-        "  ./src/verify-e2e.sh --host-model --attest release/evidence/e2e-attestation.json\n"
+        "  ./src/verify-e2e.sh --reset --attest release/evidence/e2e-attestation.json\n"
         "  cd src/workshops/assistant/after && make release-evidence\n"
         "  cp evidence/RELEASE-EVIDENCE.md evidence/release-report.json "
         "../../../../release/evidence/\n"

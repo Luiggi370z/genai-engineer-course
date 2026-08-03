@@ -62,7 +62,7 @@ export const deploy: PhaseContent = {
       blocks: [
         {
           kind: "p",
-          text: "A deployment is only real if a stranger can run it. Your target: `docker compose up` brings the assistant, its MCP server, the vector store, and a local model online together — ideally with **zero API keys** for the demo path. Multi-stage Dockerfiles keep images small; compose wires the services.",
+          text: "A deployment is only real if a stranger can run it. Your target: `docker compose up` brings the assistant, its MCP server and the vector store online together, talking to a model running on the reviewer's own machine — **zero API keys** on the demo path. Multi-stage Dockerfiles keep images small; compose wires the services.",
         },
         {
           kind: "code",
@@ -71,29 +71,35 @@ export const deploy: PhaseContent = {
   assistant:
     build: ../workshops/assistant/after   # the capstone image
     ports: ["8000:8000"]                  # the ONLY published port
-    environment: [MCP_SERVER=http://mcp:8080/mcp, QDRANT_URL=http://qdrant:6333]
+    environment:
+      MCP_SERVER: http://mcp:8080/mcp
+      QDRANT_URL: http://qdrant:6333
+      OLLAMA_HOST: http://host.docker.internal:11434   # the model runs on the HOST
+    extra_hosts:                          # Docker Desktop knows this name; Linux needs the map
+      - "host.docker.internal:host-gateway"
     depends_on:                           # wait for HEALTH, not for start
       mcp:    { condition: service_healthy }
       qdrant: { condition: service_healthy }
-      ollama: { condition: service_healthy }
   mcp:                          # same image, run as the MCP server
     build: ../workshops/assistant/after
     command: ["python", "-m", "assistant.mcp_server", "--http"]
   qdrant:
     image: qdrant/qdrant:v1.18.3   # pinned — ':latest' = every reviewer runs a different stack
-  ollama:
-    image: ollama/ollama:0.32.5    # pulls its models, THEN reports healthy
 # (healthchecks elided here — the lesson writes one per service)
-# (so are the @sha256 digests each image line carries — see below)
-# reviewers run ONE command and the assistant + MCP + retrieval all come up.`,
+# (so are the @sha256 digests each image line carries — read one with
+#  'docker buildx imagetools inspect qdrant/qdrant:v1.18.3', and take the INDEX
+#  digest so the line resolves on an ARM laptop and an x86 runner alike)
+# reviewers start Ollama, run ONE command, and the whole stack comes up.`,
+        },
+        {
+          kind: "callout",
+          tone: "warn",
+          title: "Why the model is not in that file",
+          text: "Containerising Ollama is one line, and it is the wrong line. Docker Desktop exposes **no GPU** to containers, so the course's 9B ran at **0.52 tokens/second** inside the VM — against **81 tokens/second** for the same model on the same laptop's own Ollama with Metal. Identical code, identical model, 156x, decided entirely by which side of the VM boundary the accelerator is on. Containers are excellent at pinning dependencies and bad at inference on a Mac, so the split follows the hardware: infrastructure in Docker, model on the host, `host.docker.internal` between them.\n\nWhat it costs you is a dependency compose can neither start nor wait for, which is why this lesson also writes a preflight.",
         },
         {
           kind: "p",
-          text: "A version tag is not a pin. `v1.18.3` is a pointer its publisher can repoint at a rebuild, so the stack you demo and the one a reviewer boots months later can differ while every line of your compose file is identical. A digest is the content address: `qdrant/qdrant:v1.18.3@sha256:0bd98f…` resolves to the same bytes or fails loudly.",
-        },
-        {
-          kind: "p",
-          text: "Keep both — the tag is what a human reads, the digest is what makes the line reproducible. Read one off a tag you already trust with `docker buildx imagetools inspect qdrant/qdrant:v1.18.3`, and take the index digest rather than a per-platform one so the file still resolves on an ARM laptop and an x86 runner.",
+          text: "A version tag is not a pin. `v1.18.3` is a pointer its publisher can repoint at a rebuild, so the stack you demo and the one a reviewer boots months later can differ while every line of your compose file is identical. A digest is the content address: `@sha256:0bd98f…` resolves to the same bytes or fails loudly. Keep both — the tag is what a human reads, the digest is what makes the line reproducible.",
         },
         {
           kind: "callout",
@@ -637,11 +643,12 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       effort: { fast: 45, integration: null, realistic: 75 },
       rung: "faded",
       proves: "operate",
-      task: "Write structural checks over the compose file (parsed YAML: pinned images, a healthcheck per service, health-gated depends_on, one published port), watch them fail on the shipped first draft, then fix the wiring until the whole stack — capstone assistant, MCP server, Qdrant, Ollama — is one trustworthy `docker compose up`, zero API keys. Then time it, from `docker compose down -v` to the first answer, and record how long each service took to report healthy. Cold boot is the number a reviewer experiences and the one nobody measures: a model pull can take twenty minutes, and knowing that is the difference between a stack that is slow and a stack somebody reports as broken.",
+      task: "Write structural checks over the compose file (parsed YAML: pinned images, a healthcheck per service, health-gated depends_on, one published port), watch them fail on the shipped first draft, then fix the wiring until the whole stack — capstone assistant, MCP server, Qdrant — is one trustworthy `docker compose up` against the model on your own machine, zero API keys. Then write the preflight for the half compose cannot see: is the host's Ollama answering, are both models pulled, and are they **warm**? Time the whole thing, from `docker compose down -v` to the first answer, and record how long each service took to report healthy. Cold boot is the number a reviewer experiences and the one nobody measures.",
       assesses: ["p6-o1"],
       needs: ["p3-o2", "p5-o3"],
       solution: [
-        "condition: service_healthy for ordering — a started Qdrant is not a ready Qdrant; env vars for every URL; the ollama service pulls its models before reporting healthy.",
+        "condition: service_healthy for ordering — a started Qdrant is not a ready Qdrant; env vars for every URL; `extra_hosts` mapping `host.docker.internal` to the gateway, or the assistant resolves nothing on Linux and every answer silently comes from the fallback.",
+        "Readiness is not presence, and moving the model to the host does not retire that lesson — it relocates it. `ollama list` is satisfied by a file on disk; loading a 9B takes longer than the composer's whole budget, so a stack that treats the download as readiness times out its own first question and answers it from the offline stitcher with every probe green. The preflight's warmup is a real generation for that reason.",
         "Compose **concatenates** sequences across overlay files. Narrowing `ports` to `127.0.0.1:8000:8000` in a hardening overlay publishes both mappings, the wildcard bind wins the port, and the hardened profile is the only one that will not start — “address already in use” on a port nothing else wants. `!override` replaces the list. An overlay that adds to a list where it meant to replace one is the ordinary way a locked-down profile turns out to be the permissive one plus extra; here it failed loudly, and a `cap_add` written the same way would not have.",
         "Test the reviewer experience: fresh clone, one command, does it come up? `verify-e2e.sh` automates exactly that.",
       ],
@@ -792,7 +799,7 @@ def is_cacheable(result, gated_tools_fired) -> bool:
     deliverables: [
       {
         id: "w-deploy-d1",
-        text: "The whole stack comes up with **one command and zero API keys** — assistant, MCP server, retrieval and a local model",
+        text: "The whole stack comes up with **one command and zero API keys** — assistant, MCP server and retrieval in Docker, answering from the model on your own machine",
         tier: "minimum",
       },
       {
@@ -963,7 +970,10 @@ def is_cacheable(result, gated_tools_fired) -> bool:
       url: "https://docs.docker.com/build/building/multi-stage/",
     },
     { label: "Langfuse — tracing + cost per query", url: "https://langfuse.com" },
-    { label: "Ollama Docker image", url: "https://hub.docker.com/r/ollama/ollama" },
+    {
+      label: "Ollama — install it on your machine, not in a container",
+      url: "https://ollama.com/download",
+    },
     {
       label: "OpenTelemetry Python — tracing SDK",
       url: "https://opentelemetry.io/docs/languages/python/",

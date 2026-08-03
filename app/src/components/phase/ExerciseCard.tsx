@@ -82,7 +82,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
           </p>
           {exercise.repo && (
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[12px] text-graphite">
-              <span className="rounded border border-line bg-ink/[0.03] px-1.5 py-0.5">
+              <span className="rounded border border-line bg-ink/3 px-1.5 py-0.5">
                 repo: {exercise.repo}
               </span>
               {/* The estimate the lesson itself claims — the integrity gate

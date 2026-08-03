@@ -16,7 +16,13 @@
 # `./src/verify-e2e.sh` with no flags, on a machine with the disk and the
 # patience — a release gate, recorded in docs/RELEASE-CHECKLIST.md.
 #
-# Not on push: a full pass boots four services and pulls a model, which is
+# Ollama is installed ON THE RUNNER rather than run as a container, which is the
+# same topology a learner has: infrastructure in Docker, the model on the host,
+# reached through `host.docker.internal`. That is not a CI convenience, it is the
+# arrangement being tested — a lane that containerised the model would be
+# exercising a stack nobody deploys.
+#
+# Not on push: a full pass boots three services and pulls a model, which is
 # minutes of runner time per commit for a signal that changes far less often than
 # the code does. Nightly plus a button covers the drift this catches — usually an
 # upstream image or model tag moving under a pin.
@@ -52,6 +58,7 @@ jobs:
       # Ephemeral: one value per run, never leaves the runner.
       ASSISTANT_JWT_SECRET: ${{ github.run_id }}-${{ github.run_attempt }}-e2e-secret-32-bytes-min
       CI_CHAT_MODEL: ${{ inputs.model || 'qwen3.5:1.7b' }}
+      EMBED_MODEL: nomic-embed-text
       COMPOSE_FILES: >-
         -f docker-compose.yml
         -f docker-compose.secure.yml
@@ -60,7 +67,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      # Two model downloads and four images. Without this the runner runs out of
+      # Two model downloads and three images. Without this the runner runs out of
       # room partway through the ollama pull, which surfaces as a healthcheck
       # timeout twenty minutes in rather than as "the disk is full".
       - name: reclaim runner disk
@@ -68,9 +75,34 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h /
 
+      - name: install ollama on the runner
+        run: curl -fsSL https://ollama.com/install.sh | sh
+
+      # `OLLAMA_HOST` here is a BIND ADDRESS, not a client URL — the one name for
+      # two things that `preflight.client_url` exists to disentangle. The default
+      # binds to 127.0.0.1, which the compose network's gateway cannot reach, so
+      # every request from the assistant would be refused and every answer would
+      # arrive from the offline fallback with nothing saying why.
+      - name: start ollama, bound where containers can reach it
+        run: |
+          OLLAMA_HOST=0.0.0.0:11434 nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -sf http://localhost:11434/api/version && break
+            sleep 1
+          done
+
+      - name: pull the models this lane runs on
+        run: |
+          ollama pull "$CI_CHAT_MODEL"
+          ollama pull "$EMBED_MODEL"
+
+      # No separate preflight step: verify-e2e.sh runs it before it builds
+      # anything, so a runner whose daemon is bound to loopback fails in seconds
+      # with the remediation printed, and running it twice would just pay for the
+      # container-reachability probe twice.
       - name: run every check against the CI overlay
         run: |
-          args=(--model "$CI_CHAT_MODEL")
+          args=(--ci --model "$CI_CHAT_MODEL")
           if [ -n "${{ inputs.from }}" ]; then args+=(--from "${{ inputs.from }}"); fi
           ./src/verify-e2e.sh "${args[@]}"
 
@@ -86,7 +118,9 @@ jobs:
         if: always()
         with:
           name: e2e-stack-logs
-          path: ${{ runner.temp }}/stack.log
+          path: |
+            ${{ runner.temp }}/stack.log
+            ${{ runner.temp }}/ollama.log
 
       - name: tear down
         if: always()

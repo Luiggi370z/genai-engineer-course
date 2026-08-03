@@ -32,7 +32,7 @@ export function InlineText({ text }: { text: string }) {
           return (
             <code
               key={i}
-              className="rounded border border-ink/10 bg-ink/[0.07] px-1 py-px font-mono text-[0.86em] text-ink"
+              className="rounded border border-ink/10 bg-ink/7 px-1 py-px font-mono text-[0.86em] text-ink"
             >
               {part.slice(1, -1)}
             </code>

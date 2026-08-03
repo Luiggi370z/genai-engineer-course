@@ -7,9 +7,11 @@
 # What this lane proves and what it does not, stated up front because a green
 # check that measured something other than what its name says is worse than no
 # check. GitHub's ubuntu-latest runner is four CPU cores and no GPU. The course
-# model is a 9B, measured at 0.52 tokens/second on CPU inside Docker Desktop
-# against a 60-second composer budget — so on a hosted runner every answer would
-# come from the offline fallback and the run would take hours to tell you so.
+# model is a 9B, measured at 0.52 tokens/second on CPU against a 60-second
+# composer budget — so on a hosted runner every answer would come from the
+# offline fallback and the run would take hours to tell you so. The runner's
+# Ollama is installed on the runner itself, the same host topology a learner
+# runs; what changes here is the size of the model, not where it lives.
 #
 # Swapping in a 1.7B changes what the numbers mean and nothing about the wiring:
 # retrieval still goes through Qdrant with a real embedder, the gate still signs
@@ -31,29 +33,3 @@ services:
       # answer; the real reason to raise this is that a shared runner's CPU is
       # contended in ways a laptop's is not.
       REQUEST_DEADLINE_SECONDS: "180"
-
-  ollama:
-    # `!override` because the base command pulls and warms the 9B by name. Adding
-    # to it rather than replacing it would download six gigabytes this lane never
-    # uses, on a runner with a disk quota.
-    command: !override
-      - |
-        ollama serve &
-        sleep 2
-        ollama pull ${CI_CHAT_MODEL:-qwen3.5:1.7b}
-        ollama pull nomic-embed-text
-        ollama run ${CI_CHAT_MODEL:-qwen3.5:1.7b} "ok" >/dev/null 2>&1
-        touch /tmp/warm
-        wait
-    # The 9B's headroom is the reason the base file asks for 12 GB, which is more
-    # than a hosted runner has to spare.
-    mem_limit: 6g
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "test -f /tmp/warm && ollama list | grep -q nomic-embed-text",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 90

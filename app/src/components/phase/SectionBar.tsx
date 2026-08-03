@@ -60,7 +60,7 @@ export function SectionBar({
                 goToSection(entry.id);
               }}
               className={`shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-[12px] leading-normal transition-colors ${
-                current ? "font-semibold" : "border-line text-graphite hover:bg-ink/[0.04]"
+                current ? "font-semibold" : "border-line text-graphite hover:bg-ink/4"
               }`}
               style={
                 current

@@ -22,7 +22,7 @@ export function DataTable({ headers, rows, accent }: DataTableProps) {
             {headers.map((header) => (
               <th
                 key={header}
-                className="whitespace-nowrap px-3 py-2 font-mono text-[12px] uppercase tracking-[0.1em]"
+                className="whitespace-nowrap px-3 py-2 font-mono text-[12px] uppercase tracking-widest"
                 style={{ color: accent }}
               >
                 {header}
@@ -32,7 +32,7 @@ export function DataTable({ headers, rows, accent }: DataTableProps) {
         </thead>
         <tbody>
           {rows.map((row, r) => (
-            <tr key={r} className={r % 2 ? "bg-ink/[0.02]" : "bg-card"}>
+            <tr key={r} className={r % 2 ? "bg-ink/2" : "bg-card"}>
               {row.map((cell, c) => (
                 <td
                   key={c}

@@ -318,10 +318,17 @@ def _with_memories(answer: str, memories: list[str] | None) -> str:
     return answer + " [recalled: " + "; ".join(memories) + "]"
 
 
-def model_composer(host: str, model: str) -> Composer:
-    """Real-tier composer: grounded generation against local Ollama. Abstention on
+def model_composer(generate: Callable[[str], str]) -> Composer:
+    """Real-tier composer: grounded generation against a model. Abstention on
     empty evidence stays DETERMINISTIC — a model given nothing to ground on should
-    not be asked to improvise a refusal."""
+    not be asked to improvise a refusal.
+
+    Takes the completion callable rather than a host and a tag, so the prompt
+    construction and the refusal contract below are written once and hold for
+    every provider `providers.py` can build. A second backend must not be a
+    second copy of this function; that is how two brains end up disagreeing about
+    what counts as a refusal.
+    """
 
     def compose(
         goal: str,
@@ -332,7 +339,6 @@ def model_composer(host: str, model: str) -> Composer:
         recalled = relevant_memories(goal, memories)
         if not contexts and not state and not recalled:
             return ABSTAIN
-        from assistant.adapters import ollama_generate
 
         # Memory-only questions get their own prompt, because the grounded one
         # asks for [c#] citations and there is nothing here to number. Sending
@@ -345,7 +351,7 @@ def model_composer(host: str, model: str) -> Composer:
             if not contexts and not state
             else grounded_prompt(goal, contexts, state, memories)
         )
-        return without_refusal(ollama_generate(prompt, host=host, model=model))
+        return without_refusal(generate(prompt))
 
     return compose
 
@@ -368,9 +374,15 @@ def word_stream(compose: Composer) -> StreamComposer:
     return stream
 
 
-def model_stream_composer(host: str, model: str) -> StreamComposer:
-    """Real-tier streaming: tokens leave Ollama and reach the client as they are
-    produced, not after the full completion lands."""
+def model_stream_composer(
+    stream_tokens: Callable[[str], Iterator[str]],
+) -> StreamComposer:
+    """Real-tier streaming: tokens leave the model and reach the client as they
+    are produced, not after the full completion lands.
+
+    Takes the streaming callable for the same reason the batch composer takes the
+    completion one.
+    """
 
     def stream(
         goal: str,
@@ -382,7 +394,6 @@ def model_stream_composer(host: str, model: str) -> StreamComposer:
         if not contexts and not state and not recalled:
             yield ABSTAIN
             return
-        from assistant.adapters import ollama_stream
 
         # Same choice as the batch composer, on the same terms. Streaming and
         # batch answering the same question differently is a bug a client sees
@@ -392,6 +403,6 @@ def model_stream_composer(host: str, model: str) -> StreamComposer:
             if not contexts and not state
             else grounded_prompt(goal, contexts, state, memories)
         )
-        yield from stop_at_refusal(ollama_stream(prompt, host=host, model=model))
+        yield from stop_at_refusal(stream_tokens(prompt))
 
     return stream

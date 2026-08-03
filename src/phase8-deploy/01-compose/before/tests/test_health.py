@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from src.health import (
-    cold_model_healthchecks,
     compose_ok,
     health,
     load_services,
@@ -35,7 +34,10 @@ def test_health_ok():
     assert health()["status"] == "ok"
 
 
-def test_all_four_services_are_wired():
+def test_every_service_the_stack_needs_is_wired():
+    """Three, not four. The model runner moved to the host, where compose cannot
+    start it and `depends_on` cannot wait for it — see tests/test_preflight.py
+    for the checks that took over that job."""
     assert missing_services(load_services(COMPOSE)) == []
 
 
@@ -77,24 +79,15 @@ def test_dependencies_wait_for_health_not_start():
     assert weak_dependencies(load_services(COMPOSE)) == []
 
 
-def test_the_model_service_is_healthy_only_once_the_model_is_warm():
-    """A downloaded model is not a usable one. This stack went healthy on
-    `ollama list`, which passes the moment the file lands — and then the first
-    question timed out loading it and was answered by the offline fallback, on a
-    stack whose every probe was green."""
-    assert cold_model_healthchecks(load_services(COMPOSE)) == []
-
-
-def test_a_download_only_healthcheck_is_caught(tmp_path):
-    cold = tmp_path / "docker-compose.yml"
-    cold.write_text(
-        "services:\n"
-        "  ollama:\n"
-        "    image: ollama/ollama:0.32.5\n"
-        "    healthcheck:\n"
-        "      test: ['CMD-SHELL', 'ollama list | grep -q qwen3.5']\n"
-    )
-    assert cold_model_healthchecks(load_services(cold)) == ["ollama"]
+def test_the_assistant_can_resolve_the_host_from_inside_the_network():
+    """`host.docker.internal` is free on Docker Desktop and does not exist on
+    Linux until it is mapped to the gateway. Without this line the stack builds,
+    boots, resolves nothing, and answers every question from the offline
+    fallback — the same silent degradation the model runner's healthcheck used
+    to guard against from inside the file."""
+    assistant = load_services(COMPOSE)["assistant"]
+    assert "host.docker.internal:host-gateway" in assistant["extra_hosts"]
+    assert "host.docker.internal" in assistant["environment"]["OLLAMA_HOST"]
 
 
 def test_only_the_assistant_reaches_the_host():
@@ -112,7 +105,7 @@ def test_the_checks_actually_catch_a_broken_file(tmp_path):
     ok, problems = compose_ok(bad)
     assert not ok
     text = "\n".join(problems)
-    assert "missing service" in text  # no mcp, no ollama
+    assert "missing service" in text  # no mcp
     assert "unpinned image" in text  # :latest
     assert "waits for start" in text  # list-form depends_on
     assert "publishes" in text  # qdrant on the host network

@@ -7,6 +7,14 @@ reach the network and CI stays free:
     ASSISTANT_DB                  -> SQLite-backed memory instead of in-process dict
     QDRANT_URL                    -> QdrantStore instead of the offline BM25 RagStore
     OLLAMA_HOST                   -> Ollama brain instead of the rule-based planner
+    ASSISTANT_PROVIDER            -> name the brain outright: ollama | openai | anthropic
+                                     | offline. Unset keeps the rule above. A hosted
+                                     provider without its key is a boot error, never a
+                                     quiet downgrade — see providers.py
+    ASSISTANT_CHAT_MODEL          -> the model tag for a hosted provider (no default:
+                                     guessing one bills you for a model you did not pick)
+    ASSISTANT_EMBED_PROVIDER      -> ollama (default) | openai. Chosen separately from
+                                     the chat provider and never inferred from it
     MCP_SERVER                    -> discover tools from a real MCP server
     ASSISTANT_MCP_READONLY_ALLOWLIST -> discovered tools the operator has reviewed as reads
                                      (the only thing that can ungate one; a server saying
@@ -60,6 +68,18 @@ class Settings:
     qdrant_collection: str = "assistant"
     ollama_host: str | None = None
     ollama_model: str = "qwen3.5:9b"
+    # Which brain, named rather than deduced. Empty keeps the historical rule
+    # (Ollama when a host is set, offline otherwise) so no existing deployment
+    # changes tier; anything else is an operator's explicit choice and is
+    # validated at boot. providers.py owns the vocabulary and the errors.
+    provider: str = ""
+    # The tag for a hosted provider. Deliberately without a default: `qwen3.5:9b`
+    # is free and local, and a default for a metered API is a bill nobody chose.
+    chat_model: str | None = None
+    # Which service computes vectors. Separate from the chat provider on purpose
+    # — deriving it would move an entire corpus onto a different embedder because
+    # someone swapped the model that writes prose.
+    embed_provider: str = ""
     mcp_server: str | None = None
     # Comma-separated names of DISCOVERED tools the operator has reviewed and
     # judged read-only. This is the only thing that can ungate one: a server's
@@ -145,6 +165,9 @@ class Settings:
             qdrant_collection=os.getenv("QDRANT_COLLECTION", "assistant"),
             ollama_host=os.getenv("OLLAMA_HOST"),
             ollama_model=os.getenv("OLLAMA_MODEL", "qwen3.5:9b"),
+            provider=os.getenv("ASSISTANT_PROVIDER", ""),
+            chat_model=os.getenv("ASSISTANT_CHAT_MODEL"),
+            embed_provider=os.getenv("ASSISTANT_EMBED_PROVIDER", ""),
             mcp_server=os.getenv("MCP_SERVER"),
             mcp_readonly_allowlist=_names(
                 os.getenv("ASSISTANT_MCP_READONLY_ALLOWLIST", "")

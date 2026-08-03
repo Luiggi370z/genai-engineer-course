@@ -24,32 +24,31 @@ this table exists to prevent.
 1. **The fast gates are green.** `make check` here, and `./src/verify-lessons.sh`
    from the repo root. A release measurement of code that does not pass its own
    tests measures nothing worth having.
-2. **The stack boots and every check passes.** `./src/verify-e2e.sh` — the
-   unqualified form, which is the release gate. On a Mac, `--host-model` is the
-   same fifteen checks against the host's GPU; use it while iterating and run the
-   default lane once before you publish, because the self-contained claim is
-   check 1's and only that lane proves it.
-3. **The judge model is pulled.** `ollama pull qwen3-coder:30b`. It is 18 GB and
+2. **Your Ollama is up, with both models warm.** `./src/preflight-ollama.sh`. The
+   model runs on this machine, not in the stack, so it is the one dependency
+   compose cannot start for you or wait on.
+3. **The stack boots and every check passes.** `./src/verify-e2e.sh --reset --down`
+   — the unqualified form, which is the release gate. It runs the preflight as
+   check 0 and attests the Ollama version and both model digests, so the evidence
+   names the bytes that answered rather than just a tag.
+4. **The judge model is pulled.** `ollama pull qwen3-coder:30b`. It is 18 GB and
    it is not the chat model; on a 16 GB machine, use a hosted judge and say so in
    the page rather than quietly swapping in the chat model.
 
 ## The run
 
 The measurement builds its own assistant in the host process — the release judge
-and the full dataset are not in the image — and points it at the same Qdrant and
-the same Ollama the stack answers with. Both have to be reachable from the host,
-and the base compose file publishes exactly one port on purpose, so boot with the
-release overlay:
+and the full dataset are not in the image — and points it at the same Qdrant the
+stack answers from and the same Ollama, which is already here. Qdrant has to be
+reachable from the host and the base compose file publishes exactly one port on
+purpose, so boot with the release overlay:
 
 ```bash
 cd src/phase8-deploy/01-compose/after
 docker compose -f docker-compose.yml -f docker-compose.release.yml up -d --build
-# on a Mac, add the host-model overlay and skip the in-stack model:
-#   docker compose -f docker-compose.yml -f docker-compose.hostmodel.yml \
-#     -f docker-compose.release.yml up -d --build
 
 cd ../../../workshops/assistant/after
-make release-evidence
+make release-evidence     # OLLAMA_HOST defaults to localhost:11434 — your daemon
 ```
 
 Output lands in `evidence/`: `RELEASE-EVIDENCE.md` for people and

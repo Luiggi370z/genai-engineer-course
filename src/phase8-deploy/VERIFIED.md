@@ -22,7 +22,8 @@ push; `phase4-agents/04-framework-bakeoff` pins 3.12 and says so itself. The lon
 
 | Lesson | Pin | Why it matters |
 |---|---|---|
-| `01-compose` | `qdrant/qdrant:v1.18.3`, `ollama/ollama:0.32.5`, `otel/opentelemetry-collector-contrib:0.157.0`, `quay.io/keycloak/keycloak:26.5.2` — each with the `@sha256:` digest that tag resolved to on the stamp date | Image pins in `docker-compose.yml` and the `observability` and `oauth` overlays. `:latest` means every reviewer runs a different stack — the lesson's own checks fail on it — and a version tag only narrows that, since a tag is a mutable pointer its publisher can repoint at a rebuild. The digests are multi-arch index digests, so the same line resolves on an ARM laptop and an x86 runner. Both app services build from `workshops/assistant/after`'s Dockerfile; the collector is overlay-only because its scratch image cannot carry a healthcheck and the base stack must stay reviewable by `src/health.py`. |
+| `01-compose` | `qdrant/qdrant:v1.18.3`, `otel/opentelemetry-collector-contrib:0.157.0`, `quay.io/keycloak/keycloak:26.5.2` — each with the `@sha256:` digest that tag resolved to on the stamp date | Image pins in `docker-compose.yml` and the `observability` and `oauth` overlays. `:latest` means every reviewer runs a different stack — the lesson's own checks fail on it — and a version tag only narrows that, since a tag is a mutable pointer its publisher can repoint at a rebuild. The digests are multi-arch index digests, so the same line resolves on an ARM laptop and an x86 runner. Both app services build from `workshops/assistant/after`'s Dockerfile; the collector is overlay-only because its scratch image cannot carry a healthcheck and the base stack must stay reviewable by `src/health.py`. |
+| `01-compose` (the model) | not pinned by compose at all — `qwen3.5:9b` and `nomic-embed-text` live on the host | Docker Desktop passes no GPU to containers, so the model runs outside the stack and the assistant reaches it at `host.docker.internal:11434`. The pin moves with it: `preflight-ollama.sh --json` records the Ollama version and both model **digests**, and `verify-e2e.sh` folds them into its attestation, so a release names the bytes that answered even though no compose line does. |
 | `03-deploy-observe` | `opentelemetry-sdk>=1.30,<2` | Verified against 1.44.0. The lesson uses `TracerProvider`, `SimpleSpanProcessor` and `InMemorySpanExporter` from `opentelemetry.sdk.trace.export.in_memory_span_exporter`, plus explicit `start_time` / `end_time` on spans so latency can be scripted without sleeping. The exporter's import path has moved before; if it moves again, that is the first thing to check. `recorder()` now also reads `OTEL_EXPORTER_OTLP_ENDPOINT` and lazily attaches the OTLP exporter (`integration` group). |
 | `03-deploy-observe` (release lane) | none — stdlib only | `release.py` is stdlib (`sqlite3`, `re`, `urllib`) so the entire release lane is unit-tested with no registry, no cloud account and no card. `deploy/` targets **Fly.io** and is **not live-provisioned**: the scripts are executable, gated behind `DEPLOY_LANE=fly`, and have never been run against a paid account by this repo. `flyctl` flag names are the one thing here that can drift silently, since nothing in CI exercises them — check `fly deploy --help` before trusting the script verbatim. |
 | `04-cost-latency` | none in the fast tier | The offline tier is pure standard library on purpose — the embedder and the clock are injected, so nothing about the cache logic depends on a model. `fastembed>=0.4,<1` sits in the `integration` group only. |
@@ -46,7 +47,7 @@ durability check must PLANT a memorable turn before restarting, because memory i
 deliberately selective and ordinary questions store nothing.
 
 A full pass is dominated by the local model, so the script takes `--from N` and
-`--only N` (and `--list`, `--no-build`, `--host-model`).
+`--only N` (and `--list`, `--no-build`).
 That is a debugging affordance, not a shorter suite: fix what check 12 caught and
 re-prove it in two minutes instead of re-running eleven checks that already
 passed. The checks share state deliberately — one corpus, one outbox, one set of
@@ -113,9 +114,7 @@ passed the whole time, and that is the part worth sitting with rather than the c
 nothing was broken, the answers were grounded, `/health` was green, and **the model
 was never the one answering**. The suite asked "is this answer grounded in the
 corpus", which the fallback composer also satisfies, and never asked "did the model
-write it". It is forty-five seconds now with `--host-model`, and twelve minutes on
-the self-contained lane — the twenty-five became twelve by spending it generating
-rather than timing out, with the model composing in both.
+write it". It is forty-five seconds now, with the model composing every answer.
 
 The second half of that took another failed run to see. Bounding the completion cut
 the work; it did not make the work fit, because 60 seconds was never a budget this
@@ -123,10 +122,11 @@ lane could meet — 0.52 tokens/second and a hundred tokens of answer is three m
 whatever you do to the prompt. So every composition still timed out, the fallback
 still answered, and check 4 — now that it asserts the model composed — failed the
 whole run on a stack with nothing wrong with it. The budget moved out of the library
-and into the deployment that knows its own hardware: `COMPOSE_TIMEOUT_SECONDS`, set
-to fifteen minutes in `docker-compose.yml` and back to sixty seconds in the
-host-model overlay. A constant that is correct behind a GPU and absurd without one
-is a configuration item wearing a constant's clothes.
+and into the deployment that knows its own hardware: `COMPOSE_TIMEOUT_SECONDS`,
+fifteen minutes while the model was in a container and sixty seconds now that it is
+not. A constant that is correct behind a GPU and absurd without one is a
+configuration item wearing a constant's clothes — which is why the setting survived
+the topology change that made its original value unnecessary.
 
 Raising it exposed the third one, which was the same mistake at a different layer.
 The secure overlay caps the whole request at `REQUEST_DEADLINE_SECONDS`, and
@@ -151,24 +151,39 @@ model composed the answer**, by reading `degraded.brain` off `/health` after the
 That assertion is the durable half of the fix; the timeout tuning is not.
 
 The 0.52 tokens/second is itself a fact about deployment rather than about this
-laptop: Docker Desktop on macOS gives containers **no GPU**, so the in-stack Ollama
-runs a 9B model on CPU inside a VM. The host's own Ollama, same model, same machine,
-with Metal: 81 tokens/second — 156×. `--host-model` and `docker-compose.hostmodel.yml`
-point the container at it through `host.docker.internal` and switch the in-stack
-service off with an unenabled profile, which also makes the overlay the smallest real
-use of `!override` in the repo (the base file's `depends_on` waits for a service the
-overlay has just turned off). The default lane stays self-contained, because check 1's
-claim is one command with nothing installed — and it is the self-contained lane the
-scheduled workflow runs, on a smaller model, so the claim is exercised rather than
-asserted.
+laptop: Docker Desktop on macOS gives containers **no GPU**, so a containerised
+Ollama runs a 9B model on CPU inside a VM. The host's own Ollama, same model, same
+machine, with Metal: 81 tokens/second — 156×.
 
-What the bounded composer did not rescue, on the CPU lane, is everything after the
-first few checks. Check 4 composes with a freshly loaded model and an idle machine and
-now makes its budget reliably; by check 10 the same call has started exceeding 60
-seconds again, because an abandoned generation does not stop when the client gives up
-— Ollama was still burning 395% CPU on work nobody was waiting for, and each later
-call queues behind that. A timeout is a promise to the caller, not a cancellation of
-the work. If you take one operational lesson from this phase, that is a good candidate.
+That number eventually decided the topology. The stack shipped a containerised
+Ollama for as long as it did because of a claim worth wanting — "one command,
+nothing installed, no keys" — and the claim was true; it was just true about a
+configuration in which the model could not answer within any reasonable budget.
+Two lanes were maintained in parallel for a while, which is the usual way a project
+avoids choosing. The choice, when it came, was to keep the honest half: infrastructure
+in compose, model on the host, `host.docker.internal:11434` between them, one lane.
+What "one command" cost to give up was small — `ollama serve` and two pulls — and
+what it bought was a suite where every check runs against the model that will
+actually serve users, in forty-five seconds instead of twelve minutes. The scheduled
+workflow installs Ollama on the runner the same way, so CI exercises the learner's
+path rather than a second one.
+
+The `!override` example went with it. It used to live in the host-model overlay,
+which turned off a service the base file's `depends_on` was waiting for; now the
+base file has no such service. The sequence-concatenation trap it demonstrated is
+still real and still worth knowing — the secure overlay's `ports` narrowing is the
+surviving example.
+
+What the bounded composer did not rescue, on the CPU lane, was everything after the
+first few checks. Check 4 composed with a freshly loaded model and an idle machine and
+made its budget reliably; by check 10 the same call was exceeding 60 seconds again,
+because an abandoned generation does not stop when the client gives up — Ollama was
+still burning 395% CPU on work nobody was waiting for, and each later call queued
+behind that. A timeout is a promise to the caller, not a cancellation of the work.
+The GPU hides this by finishing fast enough that the queue never builds, which makes
+it worth stating rather than observing: it is still true on the host lane, and it is
+what a saturated production deployment looks like. If you take one operational lesson
+from this phase, that is a good candidate.
 
 The **streaming** path is the sharper version of the same problem, and there it is
 structural rather than contention. `tier.stream` is safe-buffered — the gate screens
