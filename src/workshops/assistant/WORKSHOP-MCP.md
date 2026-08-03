@@ -1,6 +1,8 @@
 # Workshop · Your own MCP, used by the assistant  (ends Phase 7)
 
-**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.
+**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~3.5 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 Build an MCP server for a service you care about (see `phase7-mcp/02-rest-to-mcp`),
 then let the assistant gain its tools by **discovery** — not hard-coding.

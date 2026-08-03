@@ -2,6 +2,7 @@
 # End-to-end verification of the deployed stack — the slow lane.
 #
 #   ./verify-e2e.sh              build + boot the composed stack, run every check
+#   ./verify-e2e.sh --reset      wipe the state volumes first (keeps the model cache)
 #   ./verify-e2e.sh --down       same, then `docker compose down` when finished
 #   ./verify-e2e.sh --from 9     boot, then run checks 9..15 and skip 2..8
 #   ./verify-e2e.sh --only 12    boot, then run check 12 and nothing else
@@ -64,6 +65,14 @@
 # outlive the run; against an empty volume (a first run, or after `down -v`), only
 # a full pass is meaningful. `--from` is a debugging loop, not a shorter suite —
 # every lane that reports a result runs the whole thing.
+#
+# Which is why an unflagged run now REFUSES to start against volumes a previous run
+# left behind, rather than documenting that it should not. Shared state is the
+# design; inherited state is a different thing wearing the same clothes, and it
+# makes several checks easier to pass — check 15 asserts rows survived a restart and
+# cannot tell this run's writes from the last run's. `--reset` clears the two state
+# volumes; `--from`/`--only` are exempt because inheriting state is the point of
+# them, and they report a partial rather than a result.
 #
 # It runs the SECURE profile, not the zero-key demo one, so every check below is
 # made through the gate a deployed service actually has in front of it: a Bearer
@@ -158,6 +167,7 @@ TITLE=(
 TOTAL=15
 
 DOWN=0
+RESET=0
 FROM=1
 ONLY=0
 BUILD="--build"
@@ -169,6 +179,7 @@ CI_MODEL="qwen3.5:1.7b" # registered in app/src/data/reference.ts as the ci-tier
 while (($#)); do
   case "$1" in
     --down) DOWN=1 ;;
+    --reset) RESET=1 ;;
     --no-build) BUILD="" ;;
     --host-model) HOST_MODEL=1 ;;
     --ci) CI_LANE=1 ;;
@@ -182,7 +193,11 @@ while (($#)); do
     --list)
       for i in $(seq 1 $TOTAL); do printf '%2d  %s\n' "$i" "${TITLE[$i]}"; done
       exit 0 ;;
-    -h|--help) sed -n '2,48p' "$SELF"; exit 0 ;;
+    # Everything above "Where this actually runs" is written for someone deciding
+    # how to invoke this; everything below it is written for someone changing it.
+    # Bounded by that marker rather than by a line number, which the last edit to
+    # the header silently truncated mid-sentence.
+    -h|--help) awk '/^# Where this actually runs/{exit} NR>1' "$SELF"; exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
   shift
@@ -219,6 +234,97 @@ fi
 # The secure overlay refuses to start without this, on purpose: a committed
 # default is a published credential. Ephemeral per run — nothing outlives it.
 export ASSISTANT_JWT_SECRET="${ASSISTANT_JWT_SECRET:-$(head -c 48 /dev/urandom | base64 | tr -d '\n')}"
+
+# ---------------------------------------------------------------------------
+# A full run starts from nothing, and now has to prove it.
+#
+# The checks share state deliberately (see the header), which makes inherited
+# state invisible rather than harmless: check 5 asserts a re-ingest UPDATES rather
+# than duplicates, check 11 asserts one tenant's memory never reaches another's
+# recall, check 15 asserts rows survive a restart. Every one of those passes more
+# easily against a corpus and a database that a previous run already filled — and
+# check 15 in particular cannot tell "this run persisted its writes" from "last
+# run's writes are still there". A green line pasted into a pull request is
+# supposed to mean the stack does this from cold.
+#
+# The two state volumes are the subject. `ollama-models` is a cache, not state:
+# nothing asserts on its contents, and requiring it empty would add a multi-gigabyte
+# download to every release run to prove nothing.
+#
+# Existence is the test rather than emptiness, because `docker compose down -v` is
+# the operation being asked for and it removes the volume outright. Reading the
+# contents instead would mean mounting them into some container chosen for the
+# purpose, and a verifier that pulls an extra image to decide whether it may start
+# is worse than one that names the state it found.
+STATE_VOLUMES=(assistant-data qdrant-data)
+
+compose_project() {
+  # Asked of compose rather than assumed from the directory name, which is what
+  # `docker compose` defaults to and what COMPOSE_PROJECT_NAME or a `name:` key
+  # would override. Guessing `after_` here would mean the guard silently passes
+  # for anyone who set either.
+  $COMPOSE config --format json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])'
+}
+
+# Newline-separated -> one space-separated line. `tr '\n' ' '` leaves a trailing
+# space behind, and it lands in the middle of a copy-pasteable command below.
+# shellcheck disable=SC2086 # unquoted on purpose: the split IS the reformatting
+oneline() { echo $1; }
+
+existing_state_volumes() {
+  local project="$1" volume
+  for volume in "${STATE_VOLUMES[@]}"; do
+    if [[ -n "$(docker volume ls -q --filter "name=^${project}_${volume}$")" ]]; then
+      printf '%s_%s\n' "$project" "$volume"
+    fi
+  done
+}
+
+require_isolated_state() {
+  local project found
+  project="$(compose_project)"
+  [[ -n "$project" ]] || die "could not read the compose project name — is docker running?"
+  found="$(existing_state_volumes "$project")"
+
+  if ((RESET)); then
+    # `down` without `-v`, then the two by name: `down -v` would take the model
+    # cache with them.
+    $COMPOSE down --remove-orphans >/dev/null 2>&1 || true
+    if [[ -n "$found" ]]; then
+      echo "state: --reset removed $(oneline "$found")"
+      # shellcheck disable=SC2086 # deliberately word-split: one arg per volume
+      docker volume rm $found >/dev/null || die "could not remove $found — is something still using it?"
+    else
+      echo "state: --reset had nothing to remove"
+    fi
+    return 0
+  fi
+
+  [[ -z "$found" ]] && return 0
+
+  # `--from`/`--only` are the debugging loops, and they exist BECAUSE state is
+  # inherited — check 12 is worth re-running against what checks 2-11 left behind.
+  # They do not report a result, so they are not held to this.
+  if ((FROM > 1 || ONLY)); then
+    echo "state: resuming against $(oneline "$found") — a partial run, not a result"
+    return 0
+  fi
+
+  die "this run would inherit state from a previous one, so its result would not mean what it says.
+
+Found: $(oneline "$found")
+
+A full run is the release claim and has to start from cold — several checks pass
+more easily against a filled corpus, and check 15 cannot distinguish state this
+run persisted from state the last one left. Pick one:
+
+  ./verify-e2e.sh --reset          wipe the two state volumes and run (keeps the model cache)
+  ./verify-e2e.sh --from N         resume a previous run; reports a partial, not a result
+  ./verify-e2e.sh --only N         one check against inherited state
+
+Or clear them yourself:
+  (cd src/phase8-deploy/01-compose/after && docker compose down && docker volume rm $(oneline "$found"))"
+}
 
 # Baked into the image by `ARG GIT_SHA` so the running service can say which code
 # it is. Check 3 compares it to what /health reports — the one probe that catches
@@ -967,6 +1073,7 @@ EOF
 
 # ---------------------------------------------------------------------------
 
+require_isolated_state
 boot
 for n in $(seq 2 $TOTAL); do
   check "$n"

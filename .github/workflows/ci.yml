@@ -1,31 +1,60 @@
 # Repo-wide CI: the same checks the local verification scripts run, as separate
 # required jobs so a failure names its owner (a lesson, the scaffolds, parity,
 # the app, or the deployable image) instead of hiding in one long log.
+#
+# Every `uses:` here and in the other two workflows is pinned to a commit SHA with
+# its version in a trailing comment. `@v5` is a branch-like tag its owner can move,
+# so it names whatever that repository points it at on the morning CI happens to
+# run — and these jobs hold a token that can publish a release. The comment is what
+# makes the pin readable; the SHA is what makes it a pin. To bump one:
+#
+#   git ls-remote --tags https://github.com/actions/checkout v5
+#
+# and take the `refs/tags/v5^{}` hash, which is the commit the tag peels to.
 name: ci
 on: [push, pull_request]
 
 jobs:
   lessons-after:
     # every after/ lesson: sync + lint + fast tests + types (offline by design)
+    #
+    # On a named interpreter, once per version the course claims. `requires-python`
+    # is a claim like any other in this repo, and it was the one nothing checked: an
+    # unpinned `uv sync` takes the newest interpreter it can find, so every run
+    # proved the ceiling by accident and the floor never. 3.11 is the declared floor;
+    # 3.14 is the top of `<3.15`; 3.12 is here because one lesson lives only there —
+    # the framework bakeoff pins `>=3.12,<3.13` for CrewAI, and the other two lanes
+    # skip it by its own declaration rather than pretending to cover it.
+    #
+    # `fail-fast: false` because "the floor broke" and "the ceiling broke" are
+    # different bugs with different fixes, and cancelling one to report the other
+    # wastes the run that would have told you which.
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.14"]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
-      - run: ./src/verify-lessons.sh
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: ./src/verify-lessons.sh --python ${{ matrix.python }}
 
   lessons-before:
     # every before/ scaffold: lint + types green, tests failing BY DESIGN
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      # First and cheap: the lane below decides "red by design" with this file, and
+      # a judge nobody has watched get it wrong is a judge that always says yes.
+      - run: python3 src/before-contract.py --selftest
       - run: ./src/verify-lessons.sh --before
 
   parity:
     # before/after structure, matching tests, make targets, README claims
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - run: python3 src/verify-parity.py
 
   gates:
@@ -37,8 +66,8 @@ jobs:
       run:
         working-directory: src/phase8-deploy/02-ci/after
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: make eval
       - run: make redteam
       - run: make latency
@@ -52,8 +81,8 @@ jobs:
     # checks that somebody remembered to edit a file.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - run: docker build -t capstone:ci .
         working-directory: src/workshops/assistant/after
       # Inside the image, so the evidence describes the artifact that ships
@@ -102,7 +131,7 @@ jobs:
             --out "$GITHUB_WORKSPACE/evidence/EVIDENCE.md" \
             --json "$GITHUB_WORKSPACE/evidence/manifest.json"
         working-directory: src/workshops/assistant/after
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: capstone-evidence
@@ -115,11 +144,16 @@ jobs:
     # `check-claims` reaches outside app/ on purpose: it compares the canonical
     # tables in app/src/data/reference.ts against the two READMEs and the PRICE
     # dicts in the Python lessons, which is where the copies had already drifted.
+    #
+    # `check-doc-links` does too, and it reads git rather than the filesystem —
+    # the companion zip is `git archive HEAD -- src`, so a document's presence on
+    # disk says nothing about whether a student receives it. It needs the checkout
+    # `actions/checkout` gives it and refuses to guess without one.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -145,6 +179,12 @@ jobs:
         working-directory: app
       - run: pnpm check-a11y:browser
         working-directory: app
+      # Reading position and mobile folding, in the same Chromium. Both are pure
+      # geometry and per-phase state, so jsdom cannot see either: it reports every
+      # element at 0x0 and never navigates. This gate is where "tap a section, get
+      # that section" and "arrive at a phase folded" are held.
+      - run: pnpm check-sections
+        working-directory: app
 
   compose-build:
     # the capstone image must at least BUILD on every change. Booting the stack
@@ -153,7 +193,7 @@ jobs:
     # local release gate.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # Build the RELEASE artifact first, not the checkout: `git archive` is what the
       # student ZIP is cut from, so an ignored-but-present build input (the capstone
       # uv.lock) fails here instead of in a student's terminal.

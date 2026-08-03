@@ -8,6 +8,11 @@
 # The tag is the input, not the branch: `package.sh` refuses to build unless the
 # working tree matches HEAD, so the checkout below IS the release. Nothing here
 # rebuilds anything the local run would not.
+#
+# One precondition cannot be rebuilt here at all: the full-fidelity measurement
+# needs the real model and a GPU. It is carried as a committed artifact instead,
+# and the step before the upload refuses to publish a tag whose evidence measured
+# a different tree — see step 6 of docs/RELEASE-CHECKLIST.md.
 name: release
 
 on:
@@ -26,11 +31,11 @@ jobs:
     steps:
       # Full history: verify-dist.sh resolves trees and blobs at HEAD with
       # `git rev-parse` and `git archive`, and a shallow clone answers neither.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: pnpm
@@ -63,16 +68,90 @@ jobs:
             exit 1
           fi
           members=$(python3 -c 'import json;print(len(json.load(open("dist/BUILD.json"))["files"]))')
-          echo "release $GITHUB_REF_NAME · ${stamped:0:12} · $members verified zip members"
+          version=$(python3 -c 'import json;s=json.load(open("dist/BUILD.json"));print(s["version"],"from",s["version_source"])')
+          echo "release $GITHUB_REF_NAME · ${stamped:0:12} · $version · $members verified zip members"
 
-      - uses: actions/upload-artifact@v4
+      # The precondition the documentation has always stated and nothing ever
+      # checked. Steps 1-4 of the release checklist are the cheap gates, and this
+      # workflow runs all of them; step 6 is the full-fidelity measurement — the
+      # deployed stack, the real model, RAGAS, the whole red-team dataset — and it
+      # cannot run here. A hosted runner is four cores with no GPU, which is why
+      # the e2e lane is named "wiring, small model" and says so in its own title.
+      #
+      # So the artifact is carried instead of recomputed: the maintainer measures
+      # locally and commits the result, and this refuses to publish unless that
+      # result describes the source being published. `source_id` is asked of the
+      # capstone rather than reimplemented here, for the same reason
+      # `verify-e2e.sh` has `--print-commit` — a copy of the path list in a YAML
+      # file is a copy that will drift. It is stdlib-only, so there is no `uv sync`.
+      #
+      # A tag fails; a dispatch warns. A rehearsal is for proving the packaging
+      # path works, and refusing to rehearse without an hour of local measurement
+      # would just mean nobody rehearses.
+      - name: The full-fidelity evidence measures THIS source
+        run: |
+          set -euo pipefail
+          json=release/evidence/release-report.json
+          page=release/evidence/RELEASE-EVIDENCE.md
+          want=$(cd src/workshops/assistant/after \
+            && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id())')
+          echo "this source answers to: $want"
+
+          problem=""
+          # Before any comparison. `dirty-` and `unbound` are the ids `source_id`
+          # returns when it cannot bind a measurement to committed code, and two
+          # of them are equal to each other — so comparing first and validating
+          # second would let an unbindable release publish itself.
+          case "$want" in
+            dirty-*|unbound) problem="this checkout has no bindable source id ($want)" ;;
+          esac
+          if [ -n "$problem" ]; then :
+          elif [ ! -f "$json" ] || [ ! -f "$page" ]; then
+            problem="no committed full-fidelity evidence at $json and $page"
+          else
+            got=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["versions"].get("source","<none>"))' "$json")
+            echo "the committed evidence measured: $got"
+            case "$got" in
+              dirty-*) problem="the evidence was measured against uncommitted changes ($got)" ;;
+              unbound) problem="the evidence is not bound to any source ($got)" ;;
+            esac
+            if [ -n "$problem" ]; then :
+            elif [ "$got" != "$want" ]; then
+              problem="the evidence measured $got, this release is $want"
+            else
+              bypasses=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["redteam_bypasses"])' "$json")
+              [ "$bypasses" = "0" ] || problem="the evidence records $bypasses red-team bypass(es)"
+            fi
+          fi
+
+          if [ -z "$problem" ]; then
+            echo "full-fidelity evidence agrees with the source being published"
+            exit 0
+          fi
+          case "$GITHUB_REF" in
+            refs/tags/*)
+              echo "error: refusing to publish — $problem" >&2
+              echo "       Run the full-fidelity lane against this exact tree, then commit its output:" >&2
+              echo "         cd src/workshops/assistant/after && make release-evidence" >&2
+              echo "         mkdir -p ../../../../release/evidence" >&2
+              echo "         cp evidence/RELEASE-EVIDENCE.md evidence/release-report.json ../../../../release/evidence/" >&2
+              echo "       A 'dirty-' or 'unbound' id means the measurement was not taken against" >&2
+              echo "       committed code; see docs/RELEASE-CHECKLIST.md step 6." >&2
+              exit 1
+              ;;
+            *)
+              echo "::warning::rehearsal only — a tag would refuse here: $problem"
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ github.ref_name }}
           path: dist/
 
       # Only a tag publishes. A dispatch run has proved the same things and is
       # allowed to stop here.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
@@ -80,4 +159,5 @@ jobs:
             dist/README.md
             dist/genai-engineer-workbook-src.zip
             dist/BUILD.json
+            release/evidence/RELEASE-EVIDENCE.md
           generate_release_notes: true

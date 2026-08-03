@@ -25,7 +25,7 @@ def pytest_configure(config: pytest.Config) -> None:
             f"this lesson needs Python {REQUIRED[0]}.{REQUIRED[1]}; you are on {running}.\n"
             "CrewAI's tree does not build on anything newer — that bound is itself a "
             "finding for your matrix, and it is why this lesson pins where the rest of "
-            "the course says 3.11+.\n"
+            "the course says 3.11 through 3.14.\n"
             "Run `make setup` (uv reads requires-python and fetches 3.12), or "
             "`uv run --python 3.12 pytest`."
         )

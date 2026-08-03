@@ -130,7 +130,13 @@ services:
       retries: 12
 
   qdrant:
-    image: qdrant/qdrant:v1.18.3 # pinned — ':latest' means every reviewer runs a different stack
+    # Tag AND digest. ':latest' means every reviewer runs a different stack, and a
+    # tag alone only narrows that: a version tag is still a mutable pointer its
+    # publisher can repoint at a rebuild. The digest is the content address, so this
+    # line resolves to the same bytes next year or it fails loudly instead of
+    # quietly running something else. The tag stays because `@sha256:0bd98f…` tells
+    # a reader nothing about which Qdrant this is.
+    image: qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e212822e5a71334e28421182f72f209d5286
     restart: unless-stopped
     mem_limit: 1g
     cpus: 1.0
@@ -145,7 +151,7 @@ services:
       retries: 12
 
   ollama:
-    image: ollama/ollama:0.32.5 # pinned, same reason
+    image: ollama/ollama:0.32.5@sha256:4dea9fb511947e24a84237bb636b0203abcb2ff0d3fbc7b4ff865deb91362131 # pinned, same reason
     restart: unless-stopped
     mem_limit: 12g # a 9B model plus the embedder need real headroom
     cpus: 4.0

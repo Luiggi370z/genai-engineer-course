@@ -5,7 +5,7 @@ version = "0.1.0"
 # Chroma's Pydantic v1 shim, and the traceback names Chroma rather than the
 # interpreter. Pinning here means `uv sync` fetches a 3.12 and the integration
 # tier actually runs, instead of skipping and calling that a pass. The rest of
-# the course is 3.11+.
+# the course is 3.11 through 3.14.
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "pytest>=8,<9",

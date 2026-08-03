@@ -1,4 +1,22 @@
-docs/
+# Anchored to the root on purpose. A bare `docs/` matches a directory at ANY depth,
+# and there are three in this tree: this one, which holds audits, remediation plans
+# and handoff notes that are working documents rather than course material, plus
+# `src/workshops/assistant/{before,after}/docs/`, which hold the student-facing
+# release-evidence checklist. Seven places inside `src/` point at that checklist —
+# both Makefiles, `release.py`'s own failure message, two READMEs — and it was
+# ignored, so it never shipped, and every one of those references dangled in the
+# released ZIP. `check-doc-links.mjs` now fails the build if that recurs.
+#
+# `/docs/*` and not `/docs/`, because git does not descend into an excluded
+# directory and a negation cannot reach inside one — ignoring the directory makes
+# the `!` line below silently do nothing. Ignoring the *entries* leaves the
+# directory itself readable, so the exception applies.
+/docs/*
+# The one exception, because it is a runbook rather than a finding: it is the
+# maintainer's release order, `e2e.yml` cites it for the gate it cannot run
+# itself, and it is the only file under `/docs/` that anything outside `/docs/`
+# points at — the other fourteen are audits and plans with no inbound references.
+!/docs/RELEASE-CHECKLIST.md
 
 # pnpm
 .pnpm-store/

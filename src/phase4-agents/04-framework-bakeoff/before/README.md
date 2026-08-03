@@ -80,7 +80,7 @@ The interpreter bound is handled for you, in the only place that can be trusted
 to hold: this lesson pins `requires-python = ">=3.12,<3.13"`, so `make setup`
 fetches a 3.12 and builds the venv on it, and `tests/conftest.py` refuses to
 collect on anything else with a sentence that names the interpreter. Everywhere
-else the course is 3.11+; this is the one lesson that is not, and it says so
+else the course is 3.11 through 3.14; this is the one lesson that is not, and it says so
 loudly rather than failing obscurely.
 
 What it protects you from: on 3.13 CrewAI dies inside Chroma's Pydantic v1 shim

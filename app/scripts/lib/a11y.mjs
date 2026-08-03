@@ -28,14 +28,59 @@ const FOCUSABLE =
  * It started as a rule about navigation chrome and now covers every rendered
  * component, because the 9.5px kickers the round-3 audit flagged were on
  * exercise cards and callouts, not in the nav.
+ *
+ * 11px until round 4, which read the same chrome on a laptop and asked for 12.
+ * That is a legibility judgement rather than a measurement, and it is the reason
+ * the floor is a constant: raising it moved 82 call sites and the argument only
+ * had to be had once.
  */
-export const MIN_NAV_LABEL_PX = 11;
+export const MIN_NAV_LABEL_PX = 12;
 
 /** WCAG AA for text below 18.66px bold / 24px regular — which is all of ours. */
 export const MIN_CONTRAST = 4.5;
 
+/**
+ * The elements a screen reader offers in its landmark list.
+ *
+ * `section` is in here conditionally — it is only a landmark once it carries an
+ * accessible name — so the caller filters it. `form` is left out for the same
+ * reason and the workbook has none.
+ */
+const LANDMARKS =
+  "main, [role='main'], nav, [role='navigation'], header, [role='banner'], " +
+  "footer, [role='contentinfo'], aside, [role='complementary'], " +
+  "section[aria-label], section[aria-labelledby], [role='region']";
+
+/**
+ * How many landmarks a view may offer before the list stops being useful.
+ *
+ * Not a WCAG number. A landmark list is a table of contents for the page, and a
+ * table of contents with forty entries is a page with none — the round-4 audit
+ * hit exactly that on the deploy phase. The workbook's real structure is a
+ * banner, a main, three or four navs and the odd named region, so the cap sits
+ * well above that and still well below one-per-block.
+ */
+export const MAX_LANDMARKS = 12;
+
 export function focusables(doc) {
   return [...doc.querySelectorAll(FOCUSABLE)].filter((el) => !el.closest("[aria-hidden='true']"));
+}
+
+/**
+ * Everything a screen reader would offer in its landmark list.
+ *
+ * A bare `section` is excluded because it is only a landmark once it has a name —
+ * the selector asks for the named ones, and this drops any that slipped in
+ * without one.
+ */
+export function landmarks(doc) {
+  return [...doc.querySelectorAll(LANDMARKS)].filter(
+    (el) =>
+      !el.closest("[aria-hidden='true']") &&
+      (el.tagName !== "SECTION" ||
+        el.getAttribute("aria-label") ||
+        el.getAttribute("aria-labelledby")),
+  );
 }
 
 /**
@@ -175,6 +220,30 @@ export function keyboardFindings(doc) {
       `${mains.length} main landmarks — a skip link needs exactly one destination`,
     );
   }
+  // Landmarks describe the page, so there are a handful of them: banner, nav,
+  // main, the odd named region. They are not a per-block device, and the round-4
+  // audit found what happens when a repeated primitive becomes one — every code
+  // sample and wide table on a phase was a labelled `section`, so the deploy
+  // phase offered fourteen landmarks and the reader had to walk all of them to
+  // find the navigation. The cap is loose on purpose: it is here to catch a
+  // primitive that got promoted, not to police the page outline.
+  const marks = landmarks(doc);
+  if (marks.length > MAX_LANDMARKS) {
+    const roles = new Map();
+    for (const el of marks) {
+      const role = el.getAttribute("role") ?? el.tagName.toLowerCase();
+      roles.set(role, (roles.get(role) ?? 0) + 1);
+    }
+    const worst = [...roles].sort((a, b) => b[1] - a[1])[0];
+    fail(
+      "landmarks",
+      "document",
+      `${marks.length} landmarks, over the ${MAX_LANDMARKS} cap — ` +
+        `${worst[1]} of them are '${worst[0]}'. A reader listing landmarks has to ` +
+        "walk the lot; if one block primitive is repeating, make it role='group'",
+    );
+  }
+
   const navs = [...doc.querySelectorAll("nav, [role='navigation']")];
   if (navs.length > 1) {
     for (const nav of navs) {
@@ -203,21 +272,64 @@ export function keyboardFindings(doc) {
  * parsing, so every element computes to the 16px default. Scanning the arbitrary
  * `text-[Npx]` utilities in the handful of files that *are* the navigation is
  * narrower but honest — it fails on exactly the mistake it is meant to catch.
+ *
+ * Two spellings, because for a while it only knew one. A Tailwind utility is how
+ * a component sets type, and plain `font-size` is how the stylesheet does — and
+ * the skip link, which is the first control on the page and the one a keyboard
+ * user meets before anything else, is styled in the stylesheet. It sat at 11px
+ * through a round of this gate reporting the floor was clean.
  */
 export function navLabelFindings(sources, min = MIN_NAV_LABEL_PX, rule = "nav-label-size") {
   const out = [];
+  const patterns = [/text-\[(\d+(?:\.\d+)?)px\]/g, /font-size:\s*(\d+(?:\.\d+)?)px/g];
   for (const [file, source] of Object.entries(sources)) {
     const lines = source.split("\n");
     lines.forEach((line, index) => {
-      for (const match of line.matchAll(/text-\[(\d+(?:\.\d+)?)px\]/g)) {
-        const px = Number(match[1]);
-        if (px < min) {
-          out.push({
-            rule,
-            subject: `${file}:${index + 1}`,
-            message: `${match[0]} is below the ${min}px legibility floor`,
-          });
+      for (const pattern of patterns) {
+        for (const match of line.matchAll(pattern)) {
+          const px = Number(match[1]);
+          if (px < min) {
+            out.push({
+              rule,
+              subject: `${file}:${index + 1}`,
+              message: `${match[0]} is below the ${min}px legibility floor`,
+            });
+          }
         }
+      }
+    });
+  }
+  return out;
+}
+
+/**
+ * Motion that the reduced-motion preference cannot reach.
+ *
+ * `prefers-reduced-motion` is honoured in CSS by the reset in `index.css`, and
+ * that reset is powerless over one thing: an explicit `behavior` passed to
+ * `scrollIntoView` or `scrollTo` beats the `scroll-behavior` property, so a
+ * hardcoded `"smooth"` animates a whole page of scrolling for a reader who asked
+ * for none. The restored reading position is the worst case, because it fires on
+ * load without being asked for.
+ *
+ * A literal is the whole tell. The one call site that scrolls on purpose now
+ * reads the media query and passes `"auto"` or `"smooth"` accordingly, so any
+ * literal reintroduced anywhere is the regression.
+ */
+export function motionFindings(sources, rule = "reduced-motion") {
+  const out = [];
+  for (const [file, source] of Object.entries(sources)) {
+    source.split("\n").forEach((line, index) => {
+      // Prose in a docblock explaining the rule is not a violation of it.
+      if (/^\s*(\*|\/\/)/.test(line)) return;
+      for (const match of line.matchAll(/behaviou?r:\s*["']smooth["']/g)) {
+        out.push({
+          rule,
+          subject: `${file}:${index + 1}`,
+          message:
+            `${match[0]} is a literal — it overrides scroll-behavior and ignores ` +
+            "prefers-reduced-motion; derive it from matchMedia instead",
+        });
       }
     });
   }
@@ -280,8 +392,77 @@ export function accentContrastFindings(phases, surfaces, min = MIN_CONTRAST) {
           subject: `${phase.id}/${theme}`,
           message:
             `${accent} on ${name} (${bg}) is ${ratio.toFixed(2)}:1, below ${min}:1 — ` +
-            "labels in this accent are 11px, so AA applies",
+            "labels in this accent are 12px, so AA applies",
         });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The white-on-accent foregrounds, as alpha over whatever is behind them.
+ *
+ * `text-white/85` is the subtitle and the eyebrow on the workshop header,
+ * `text-white/90` is the chip text inside it, and plain white is the title.
+ */
+const ON_ACCENT = [
+  ["white", 1],
+  ["white/90", 0.9],
+  ["white/85", 0.85],
+];
+
+/**
+ * Reads `--accent-scrim` per theme out of the stylesheet.
+ *
+ * The scrim lives in `index.css` because that is where a theme becomes a palette.
+ * Parsing it back out means this gate measures what ships: drop the scrim to 0 in
+ * dark and the rule fails, which is the whole point of having it.
+ */
+export function scrimsFrom(css) {
+  const out = {};
+  for (const theme of ["light", "dark"]) {
+    const block = new RegExp(`\\.${theme}\\s*\\{([^}]*)\\}`).exec(css);
+    const declared = block && /--accent-scrim:\s*([\d.]+)%/.exec(block[1]);
+    if (declared) out[theme] = Number(declared[1]) / 100;
+  }
+  return out;
+}
+
+/**
+ * Contrast for the inverse job: the accent as a *fill* with white written on it.
+ *
+ * `accentContrastFindings` covers the accent as text. Three components fill a box
+ * with it instead — the workshop header, the ladder chip on an exercise card, and
+ * a selected answer button — and the dark accents are mid-tone, so white on them
+ * lands near 2.5:1. The browser sweep only caught it once mobile folding brought
+ * the workshop header within sampling range, which is late. This is the arithmetic
+ * version, and it runs in milliseconds.
+ */
+export function accentFillFindings(phases, scrims, min = MIN_CONTRAST) {
+  const out = [];
+  for (const phase of phases) {
+    for (const [theme, scrim] of Object.entries(scrims)) {
+      const accent = phase.accent?.[theme];
+      // A missing accent is already reported by accent-contrast.
+      if (!accent) continue;
+      const filled = mix("#000000", accent, scrim);
+      const surfaces = [
+        ["the filled accent", filled],
+        ["the black/20 chip on it", mix("#000000", filled, 0.2)],
+      ];
+      for (const [where, bg] of surfaces) {
+        for (const [label, alpha] of ON_ACCENT) {
+          const ratio = contrast(mix("#ffffff", bg, alpha), bg);
+          if (ratio >= min) continue;
+          out.push({
+            rule: "accent-fill",
+            subject: `${phase.id}/${theme}`,
+            message:
+              `${label} on ${where} (${bg}, accent ${accent} at ${Math.round(scrim * 100)}% scrim) ` +
+              `is ${ratio.toFixed(2)}:1, below ${min}:1 — raise --accent-scrim for .${theme}`,
+          });
+        }
       }
     }
   }

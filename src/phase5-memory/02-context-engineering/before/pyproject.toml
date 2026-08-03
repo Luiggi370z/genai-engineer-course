@@ -1,7 +1,7 @@
 [project]
 name = "context-engineering-before"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
   "rapidfuzz>=3.9,<4",   # near-duplicate detection, same tool as the Phase 3 golden set
   "pytest>=8,<9",

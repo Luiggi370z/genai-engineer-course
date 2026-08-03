@@ -23,7 +23,7 @@ export function Callout({ tone, title, text }: CalloutProps) {
         borderColor: color,
       }}
     >
-      <div className="mb-1 font-mono text-[11px] tracking-[0.14em]" style={{ color }}>
+      <div className="mb-1 font-mono text-[12px] tracking-[0.14em]" style={{ color }}>
         {label}
       </div>
       <div className="mb-0.5 text-[13px] font-semibold text-ink">{title}</div>

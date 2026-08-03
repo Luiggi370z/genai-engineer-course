@@ -1,6 +1,8 @@
 # Workshop · Deployed stack  (ends Phase 8)
 
-**Effort.** ~5 h of focused build time · +2 h for the integration tier · ~10 h realistic first pass.
+**Effort.** ~8 h of focused build time · +2 h for the integration tier · ~15 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 The assistant works, it is hardened, and it speaks MCP. It is also a black box that
 costs an amount nobody has measured and takes a length of time nobody has bounded.

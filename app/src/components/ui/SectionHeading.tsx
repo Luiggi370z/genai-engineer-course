@@ -10,7 +10,7 @@ export function SectionHeading({ kicker, title, accent, id }: SectionHeadingProp
   return (
     <div id={id} className="mt-12 mb-4 scroll-mt-6">
       <div
-        className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+        className="mb-1 font-mono text-[12px] uppercase tracking-[0.16em]"
         style={{ color: accent }}
       >
         {kicker}

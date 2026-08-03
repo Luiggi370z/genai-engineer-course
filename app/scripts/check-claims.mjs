@@ -11,6 +11,10 @@
  * them — the root and release READMEs, the `PRICE` dicts in the Python lessons —
  * and fails when a copy has drifted.
  *
+ * It also holds the two pin rules that have no registry behind them: one specifier
+ * per library across the lesson manifests, and every `uses:` in a workflow on a
+ * commit SHA rather than a movable tag.
+ *
  * Staleness is reported, never failed. See `STALE_DAYS` in `lib/claims.mjs` for
  * why a build that goes red on a date nobody chose makes the numbers *less*
  * trustworthy rather than more.
@@ -21,6 +25,7 @@ import { dirname, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  actionPinFindings,
   datasetFindings,
   modelFindings,
   pinFindings,
@@ -152,11 +157,20 @@ for await (const path of glob("src/**/pyproject.toml", { cwd: repo })) {
 }
 push(pinFindings({ manifests, sources: pythonFiles, packages: WATCHED_PACKAGES }));
 
+// --- 7. every action the CI runs is pinned to a commit ----------------------
+// The one dependency nothing installs, and the only one that runs with a token
+// able to publish a release.
+const workflows = [];
+for await (const path of glob(".github/workflows/*.yml", { cwd: repo })) {
+  workflows.push({ file: path, source: readFileSync(resolve(repo, path), "utf8") });
+}
+push(actionPinFindings({ workflows }));
+
 // --- report -----------------------------------------------------------------
 console.log(
   `Claims scan · ${sourced.length} sourced claim(s) · ${HARDWARE.length} hardware tiers · ` +
     `${Object.keys(TOKEN_PRICES).length} priced models · ${pythonFiles.length} python files · ` +
-    `${manifests.length} manifests`,
+    `${manifests.length} manifests · ${workflows.length} workflows`,
 );
 if (stale.length) {
   console.log(
@@ -181,5 +195,6 @@ if (findings.length) {
   process.exit(1);
 }
 console.log(
-  "\nClaims OK — one hardware table, one price list, one model per role, one pin per library.",
+  "\nClaims OK — one hardware table, one price list, one model per role, one pin per library, " +
+    "and every CI action on a commit.",
 );

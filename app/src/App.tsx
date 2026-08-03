@@ -281,7 +281,7 @@ export function App() {
             >
               <HugeiconsIcon icon={Menu01Icon} size={18} strokeWidth={2} />
             </button>
-            <span className="truncate font-mono text-[11px] uppercase tracking-[0.18em] text-graphite">
+            <span className="truncate font-mono text-[12px] uppercase tracking-[0.18em] text-graphite">
               {activePhase
                 ? `Phase ${String(activePhase.num).padStart(2, "0")} · ${activePhase.title}`
                 : view === "electives"
@@ -304,7 +304,14 @@ export function App() {
             className="flex-1 overflow-y-auto px-5 py-8 outline-none sm:px-8 lg:px-12"
           >
             {activePhase ? (
+              // Keyed by phase so moving between phases remounts rather than
+              // reuses. Without it React keeps the state of every component at the
+              // same tree position, and the mobile folds are that state: open the
+              // three long sections in one phase, walk to the next, and it arrives
+              // already unfolded — 20 screens of it, on a phone. Reading position
+              // and progress are deliberately outside this and survive.
               <PhaseView
+                key={activePhase.id}
                 phase={activePhase}
                 progress={progress}
                 onToggle={toggle}

@@ -30,7 +30,7 @@ export function PredictBlock({ prompt, answer, consolidation, accent }: PredictB
     <div className="my-4 overflow-hidden rounded-md border-2 border-dashed border-line">
       <div className="px-4 py-3">
         <div
-          className="mb-1.5 flex items-center gap-1.5 font-mono text-[11px] tracking-[0.14em]"
+          className="mb-1.5 flex items-center gap-1.5 font-mono text-[12px] tracking-[0.14em]"
           style={{ color: accent }}
         >
           <HugeiconsIcon icon={HelpCircleIcon} size={12} strokeWidth={2.5} />
@@ -46,7 +46,7 @@ export function PredictBlock({ prompt, answer, consolidation, accent }: PredictB
         {!revealed && (
           <button
             {...triggerProps}
-            className="mt-2.5 inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 font-mono text-[11px] transition-colors"
+            className="mt-2.5 inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 font-mono text-[12px] transition-colors"
             style={{ borderColor: accent, color: accent }}
           >
             <HugeiconsIcon icon={EyeIcon} size={12} strokeWidth={2.5} />
@@ -59,14 +59,14 @@ export function PredictBlock({ prompt, answer, consolidation, accent }: PredictB
           {...panelProps}
           className="border-t-2 border-dashed border-line bg-ink/[0.02] px-4 pt-3 pb-3.5"
         >
-          <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+          <div className="mb-1 font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
             What actually happens
           </div>
           <p className="text-[13px] leading-relaxed text-ink/85">
             <InlineText text={answer} />
           </p>
           <div className="mt-3 border-t border-line/60 pt-2.5">
-            <div className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+            <div className="mb-1 font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
               Why, and what to do with it
             </div>
             <p className="text-[13px] leading-relaxed text-ink/85">

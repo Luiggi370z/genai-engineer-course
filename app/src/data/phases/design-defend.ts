@@ -403,7 +403,7 @@ def looks_like_injection(text):
     subtitle: "Take your Phase-4 personal assistant and armor it against the full attack catalog.",
     repo: "workshops/assistant",
     doc: "WORKSHOP-HARDENED.md",
-    effort: { fast: 120, integration: 60, realistic: 240 },
+    effort: { fast: 210, integration: 60, realistic: 360 },
     proves: "operate",
     assesses: ["p4-o3", "p4-o4"],
     needs: ["p3-o2", "p3-o3"],

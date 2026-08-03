@@ -84,7 +84,16 @@ export const deploy: PhaseContent = {
   ollama:
     image: ollama/ollama:0.32.5    # pulls its models, THEN reports healthy
 # (healthchecks elided here — the lesson writes one per service)
+# (so are the @sha256 digests each image line carries — see below)
 # reviewers run ONE command and the assistant + MCP + retrieval all come up.`,
+        },
+        {
+          kind: "p",
+          text: "A version tag is not a pin. `v1.18.3` is a pointer its publisher can repoint at a rebuild, so the stack you demo and the one a reviewer boots months later can differ while every line of your compose file is identical. A digest is the content address: `qdrant/qdrant:v1.18.3@sha256:0bd98f…` resolves to the same bytes or fails loudly.",
+        },
+        {
+          kind: "p",
+          text: "Keep both — the tag is what a human reads, the digest is what makes the line reproducible. Read one off a tag you already trust with `docker buildx imagetools inspect qdrant/qdrant:v1.18.3`, and take the index digest rather than a per-platform one so the file still resolves on an ARM laptop and an x86 runner.",
         },
         {
           kind: "callout",
@@ -714,7 +723,7 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       "See the assistant before you optimize it: OpenTelemetry spans around the loop and every tool, then an answer cache that knows what it must refuse to store.",
     repo: "workshops/assistant",
     doc: "WORKSHOP-DEPLOYED-STACK.md",
-    effort: { fast: 300, integration: 120, realistic: 600 },
+    effort: { fast: 480, integration: 120, realistic: 900 },
     proves: "operate",
     assesses: ["p6-o1", "p6-o2", "p6-o3", "p6-o4", "p6-o5"],
     needs: ["p1-o2", "p-evals-o5", "p4-o4"],

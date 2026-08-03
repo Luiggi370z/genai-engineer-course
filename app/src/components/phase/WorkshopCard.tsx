@@ -1,5 +1,6 @@
 import type { Workshop } from "../../data/types";
-import { formatWorkshopEffort, summarizeEffort } from "../../lib/effort";
+import { accentUnderWhite } from "../../lib/accent";
+import { EFFORT_PROVENANCE, formatWorkshopEffort, summarizeEffort } from "../../lib/effort";
 import { InlineText } from "../../lib/markdown";
 import type { Progress } from "../../lib/progress";
 import { BlockList } from "../blocks/BlockList";
@@ -35,8 +36,8 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
         className="overflow-hidden rounded-xl border-2 shadow-sm"
         style={{ borderColor: accent }}
       >
-        <div className="px-5 py-4" style={{ background: accent }}>
-          <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-white/85">
+        <div className="px-5 py-4" style={{ background: accentUnderWhite(accent) }}>
+          <div className="font-mono text-[12px] uppercase tracking-[0.18em] text-white/85">
             Capstone workshop · build it end to end
           </div>
           <div className="mt-1 text-[18px] font-bold text-white">{workshop.title}</div>
@@ -44,25 +45,25 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
             <InlineText text={workshop.subtitle} />
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[11px] text-white/90">
+            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90">
               repo: {workshop.repo}
             </span>
             {/* Hours, not minutes — the thing to know before starting one of
                 these on a weeknight. Kept equal to the brief by the gate. */}
             <span
-              className="rounded bg-black/20 px-2 py-0.5 font-mono text-[11px] text-white/90"
-              title={formatWorkshopEffort(workshop.effort)}
+              className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90"
+              title={`${formatWorkshopEffort(workshop.effort)}\n\n${EFFORT_PROVENANCE}`}
             >
               {summarizeEffort(workshop.effort)}
             </span>
-            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[11px] text-white/90">
+            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90">
               brief: {workshop.doc}
             </span>
-            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[11px] text-white/90">
+            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90">
               {shipped}/{workshop.deliverables.length} deliverables
             </span>
             {/* The milestone worth celebrating, and the one a flat progress bar hides. */}
-            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[11px] text-white/90">
+            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90">
               {done
                 ? "minimum shipped"
                 : `minimum: ${minimum.filter((d) => progress[d.id]).length}/${minimum.length}`}
@@ -77,7 +78,7 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
             return (
               <div key={tier}>
                 <div
-                  className="mt-5 font-mono text-[11px] uppercase tracking-[0.14em]"
+                  className="mt-5 font-mono text-[12px] uppercase tracking-[0.14em]"
                   style={{ color: accent }}
                 >
                   {TIER[tier].heading}
@@ -102,7 +103,7 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
           })}
           {workshop.stretch && (
             <div className="mt-4">
-              <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-graphite">
+              <div className="mb-2 font-mono text-[12px] uppercase tracking-[0.14em] text-graphite">
                 Stretch — only if the full pass came easily
               </div>
               <ul className="space-y-1.5">

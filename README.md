@@ -64,11 +64,14 @@ is a design constraint of this course, not an accident. Running models locally i
 The hosted fallback and the optional "see the difference" comparisons against frontier
 providers need an account and cost real money — small, metered, and entirely optional.
 
-**Software.** Python 3.11+, [uv](https://docs.astral.sh/uv/),
+**Software.** Python **3.11 through 3.14**, [uv](https://docs.astral.sh/uv/),
 [Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.
-One lesson — 4.4, the framework bakeoff — pins **3.12** exactly, because CrewAI's
-dependency tree does not build on anything newer. It declares that itself and uv
-fetches the interpreter; you do not need 3.12 for anything else.
+That range is a range, not a floor: every lesson declares
+`requires-python = ">=3.11,<3.15"` and CI runs the whole set at both ends on every
+push, because an unbounded `3.11+` is a claim about versions that did not exist when
+it was written. One lesson — 4.4, the framework bakeoff — pins **3.12** exactly,
+because CrewAI's dependency tree does not build on anything newer. It declares that
+itself and uv fetches the interpreter; you do not need 3.12 for anything else.
 
 ---
 
@@ -102,10 +105,12 @@ That builds all three artifacts from one commit and stamps `dist/BUILD.json` wit
 and committing a megabyte of minified output per release would grow every clone
 forever. If you are the one publishing, run `./verify-dist.sh` first: it is what
 catches a `dist/` you built, kept working past, and were about to upload anyway. It
-checks the archive member by member — each of the 715 files' own sha256, recorded at
-package time and compared against both the zip and `git archive HEAD` — so a lesson
-that is present under the right name but carries the wrong bytes fails there rather
-than in a student's terminal.
+checks the archive member by member — every file's own sha256, recorded at package
+time and compared against both the zip and `git archive HEAD` — so a lesson that is
+present under the right name but carries the wrong bytes fails there rather than in
+a student's terminal. It also reads the stamp's own metadata: schema version,
+release version and where that number came from, build time, and the toolchain that
+produced the artifact.
 
 Publishing itself is a tag: pushing `v*` runs
 [`.github/workflows/release.yml`](.github/workflows/release.yml), which builds with
@@ -200,7 +205,9 @@ fortnight. Those are very different numbers and the course is careful never to b
 1. **Re-read the failing test.** The `before/` tests are written to describe the shape of
    the answer, not just to fail.
 2. **Check the phase's `VERIFIED.md`.** Each phase carries a dated stamp saying when its
-   lessons last passed and what library versions they were built against. GenAI
+   lessons last passed, and — where it recorded one — the exact version that run resolved
+   to. Most record the date and the declared *ranges* instead: the lessons are
+   version-bounded, not locked, and only the capstone ships a lockfile. GenAI
    dependencies break fast; if that date is old, expect drift, and upgrade one dependency
    at a time.
 3. **Open `after/`.** It is a reference, not a cheat — but read it, then close it and

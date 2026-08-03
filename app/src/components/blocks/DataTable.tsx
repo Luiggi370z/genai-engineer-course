@@ -22,7 +22,7 @@ export function DataTable({ headers, rows, accent }: DataTableProps) {
             {headers.map((header) => (
               <th
                 key={header}
-                className="whitespace-nowrap px-3 py-2 font-mono text-[11px] uppercase tracking-[0.1em]"
+                className="whitespace-nowrap px-3 py-2 font-mono text-[12px] uppercase tracking-[0.1em]"
                 style={{ color: accent }}
               >
                 {header}

@@ -16,7 +16,7 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
     <div className="max-w-[840px]">
       <header className="pt-2">
         <div className="mb-5 h-1 w-14 rounded-full border-b-2 border-dashed border-graphite" />
-        <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em] text-graphite">
+        <div className="mb-2 font-mono text-[12px] uppercase tracking-[0.18em] text-graphite">
           Optional · not part of your progress
         </div>
         <h1 className="text-[30px] font-bold leading-tight tracking-tight text-ink">
@@ -45,18 +45,18 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
             className="rounded-lg border border-line bg-card px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
           >
             <div className="flex flex-wrap items-baseline gap-3">
-              <span className="font-mono text-[11px] text-graphite">
+              <span className="font-mono text-[12px] text-graphite">
                 {String(i + 1).padStart(2, "0")}
               </span>
               <h3 className="text-[15.5px] font-bold tracking-tight text-ink">{elective.title}</h3>
-              <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-graphite">
+              <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[12px] uppercase tracking-wide text-graphite">
                 {elective.tag}
               </span>
             </div>
 
             <dl className="mt-3 space-y-2 rounded-md border border-line bg-ink/[0.02] px-4 py-3">
               <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+                <dt className="font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
                   Adoption trigger
                 </dt>
                 <dd className="mt-0.5 text-[13px] leading-relaxed text-ink/85">
@@ -64,7 +64,7 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
                 </dd>
               </div>
               <div>
-                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+                <dt className="font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
                   Honest cost
                 </dt>
                 <dd className="mt-0.5 text-[13px] leading-relaxed text-ink/85">
@@ -76,13 +76,13 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
             <BlockList blocks={elective.blocks} accent={ACCENT} />
 
             <div className="mt-4 border-t border-line/60 pt-3">
-              <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+              <div className="mb-2 font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
                 Where to start
               </div>
               <ul className="space-y-1.5">
                 {elective.resources.map((resource) => (
                   <li key={resource.url} className="flex items-baseline gap-2.5 text-[13px]">
-                    <span className="shrink-0 font-mono text-[11px] text-graphite">→</span>
+                    <span className="shrink-0 font-mono text-[12px] text-graphite">→</span>
                     <a
                       href={resource.url}
                       target="_blank"

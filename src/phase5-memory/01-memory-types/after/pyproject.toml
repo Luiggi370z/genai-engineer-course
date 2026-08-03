@@ -1,7 +1,7 @@
 [project]
 name = "memory-types-after"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
   "qdrant-client>=1.12,<2",   # in-memory for tests, a URL in production — same API
   "pytest>=8,<9",

@@ -8,6 +8,7 @@ comment is not a check.
 Implement the TODOs, watch them fail on this lesson's docker-compose.yml, then fix
 the compose file until the whole suite is green. Reference: ../after/src/health.py.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -37,8 +38,14 @@ def missing_services(services: dict) -> list[str]:
 
 
 def unpinned_images(services: dict) -> list[str]:
-    """TODO 2: services whose image has no tag, or the tag is ':latest'. Built
-    services (a `build:` key, no `image:`) are exempt — their pin is the Dockerfile."""
+    """TODO 2: services whose image is not pinned to specific bytes. Built services
+    (a `build:` key, no `image:`) are exempt — their pin is the Dockerfile.
+
+    Pinned means a digest (`name@sha256:…`) or a tag that is not ':latest'. Parse the
+    reference as `name[:tag][@digest]` and mind two colons that are not tag
+    separators: the one inside the digest, and the one in a registry port
+    (`localhost:5000/qdrant`). Reading the tag with `rsplit(":", 1)` finds the digest
+    hex on one and the port on the other."""
     raise NotImplementedError
 
 

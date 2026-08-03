@@ -36,10 +36,15 @@ import { fileURLToPath } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
 import {
   accentContrastFindings,
+  accentFillFindings,
   keyboardFindings,
+  landmarks,
+  MAX_LANDMARKS,
   MIN_CONTRAST,
   MIN_NAV_LABEL_PX,
+  motionFindings,
   navLabelFindings,
+  scrimsFrom,
   scrollRegionFindings,
 } from "./lib/a11y.mjs";
 import { loadCourseData } from "./lib/load-data.mjs";
@@ -70,8 +75,26 @@ const SURFACES = {
  * list. A floor with an allowlist is not a floor.
  */
 async function labelSources() {
-  const files = ["src/App.tsx"];
+  // The stylesheet is in here for one control: the skip link is styled in CSS,
+  // not by a utility class, so a `.tsx`-only scan called the floor clean while
+  // the first tab stop on the page sat below it.
+  const files = ["src/App.tsx", "src/styles/index.css"];
   for await (const path of glob("src/components/**/*.tsx", { cwd: app })) files.push(path);
+  return files.sort();
+}
+
+/**
+ * Every source file, for the motion rule.
+ *
+ * Wider than `labelSources` on purpose, and the difference is the whole point:
+ * the scroll that ignored the motion preference lives in
+ * `components/phase/useActiveSection.ts`, a `.ts` file the label floor's
+ * `.tsx`-only glob never opened.
+ */
+async function motionSources() {
+  const files = [];
+  for await (const path of glob("src/**/*.ts", { cwd: app })) files.push(path);
+  for await (const path of glob("src/**/*.tsx", { cwd: app })) files.push(path);
   return files.sort();
 }
 
@@ -259,12 +282,33 @@ const sources = Object.fromEntries(
 );
 collect("labels", navLabelFindings(sources, MIN_NAV_LABEL_PX, "label-size"));
 
+// --- motion the preference cannot reach -------------------------------------
+const motion = Object.fromEntries(
+  [...(await motionSources())].map((file) => [file, readFileSync(resolve(app, file), "utf8")]),
+);
+collect("motion", motionFindings(motion));
+
 // --- phase accents, against the surfaces they are drawn on ------------------
 // Data, not DOM: jsdom resolves every custom property to nothing, so the only
 // honest place to check a palette here is the palette. The browser tier measures
 // the rendered pixels.
 const { phases } = await loadCourseData();
 collect("accents", accentContrastFindings(phases, SURFACES));
+
+// The inverse job: the accent as a fill, white on top. Read out of the stylesheet
+// so the check tracks the shipped scrim instead of a copy of it.
+const scrims = scrimsFrom(readFileSync(resolve(app, "src/styles/index.css"), "utf8"));
+for (const theme of Object.keys(SURFACES)) {
+  if (theme in scrims) continue;
+  collect("accents", [
+    {
+      rule: "accent-fill",
+      subject: theme,
+      message: "no --accent-scrim declared for this theme in src/styles/index.css",
+    },
+  ]);
+}
+collect("accents", accentFillFindings(phases, scrims));
 
 // --- scroll containers, on the dashboard too --------------------------------
 collect("dashboard", scrollRegionFindings(doc));
@@ -274,7 +318,11 @@ console.log(
   `A11y scan · ${doc.querySelectorAll("button, a[href], input").length} controls · ` +
     `axe ${AXE_TAGS.length} rule sets · ${Object.keys(sources).length} components at the ` +
     `${MIN_NAV_LABEL_PX}px label floor · ${phases.length} accents × ` +
-    `${Object.keys(SURFACES).length} themes at ${MIN_CONTRAST}:1`,
+    `${Object.keys(SURFACES).length} themes at ${MIN_CONTRAST}:1 · ` +
+    // Printed because the number is the finding: the deploy phase offered 16 of
+    // these when every code block was one, and a count nobody prints is a
+    // regression nobody notices until it is in an audit.
+    `${landmarks(doc).length}/${MAX_LANDMARKS} landmarks`,
 );
 if (report) {
   const stops = [...doc.querySelectorAll("a[href], button:not([disabled]), input:not([disabled])")];

@@ -58,7 +58,7 @@ jobs:
         -f docker-compose.observability.yml
         -f docker-compose.ci.yml
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       # Two model downloads and four images. Without this the runner runs out of
       # room partway through the ollama pull, which surfaces as a healthcheck
@@ -82,7 +82,7 @@ jobs:
         run: docker compose $COMPOSE_FILES logs --no-color > "$RUNNER_TEMP/stack.log" || true
         working-directory: src/phase8-deploy/01-compose/after
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: e2e-stack-logs

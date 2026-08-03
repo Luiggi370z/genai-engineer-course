@@ -65,8 +65,8 @@ export function PhaseToc({
   }, [active, entries]);
 
   return (
-    <nav aria-label="On this page" className="text-[11.5px]">
-      <div className="mb-2.5 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+    <nav aria-label="On this page" className="text-[12px]">
+      <div className="mb-2.5 font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
         On this page
       </div>
       <div className="relative pl-3.5">

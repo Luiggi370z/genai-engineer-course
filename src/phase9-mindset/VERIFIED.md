@@ -4,6 +4,18 @@
 **How:** every `after/` reference passed `make check` (ruff + pyright + pytest) on this date,
 and every `before/` scaffold passed lint + type with its tests failing by design.
 
+**What this stamp pins — and what it does not.** Ranges, not versions. Every lesson's
+`pyproject.toml` declares upper-bounded *ranges* (`ragas>=0.4,<0.5`), so a fresh
+`uv sync` resolves the newest release inside the range, which is usually — not
+necessarily — what the date above was taken against. Where this file names an exact
+version, that is a **record** of what the verified run resolved to, not a constraint
+that reinstalls it. Exactly one lockfile is tracked in the whole repo,
+`workshops/assistant/after/uv.lock`: the capstone is the only bit-reproducible thing
+here, because it is the only thing that gets deployed. Everything else is
+version-bounded. Interpreter: **3.11 through 3.14** (`>=3.11,<3.15`), with both ends
+run in CI on every push; `phase4-agents/04-framework-bakeoff` pins 3.12 and says so
+itself. The long version is in [`../README.md`](../README.md).
+
 ## Why this file exists
 
 GenAI libraries move fast enough to break a course between readings. On 2026-07-28 the

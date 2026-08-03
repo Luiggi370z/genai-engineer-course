@@ -1,6 +1,8 @@
 # Workshop · The model bench  (ends Phase 1)
 
-**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.
+**Effort.** ~2.5 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 Your team is about to ship an extraction feature and someone asks the only question
 that matters: **which model should we use?** The answers in the room are a vendor

@@ -1,6 +1,8 @@
 # Workshop · Eval suite + CI gate  (ends Phase 3)
 
-**Effort.** ~2.5 h of focused build time · +30 min for the integration tier · ~5 h realistic first pass.
+**Effort.** ~2 h of focused build time · +30 min for the integration tier · ~3 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 The previous layer gave the assistant a retrieval core that answers questions. This
 one answers the only question that matters next: **how do you know it's any good?**

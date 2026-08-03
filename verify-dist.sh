@@ -11,8 +11,10 @@
 # your working directory a dozen commits later. A minified bundle looks equally
 # plausible whatever it was built from, so opening the file cannot tell you.
 #
-# Five checks, cheapest first:
+# Six checks, cheapest first:
 #
+#   0. dist/BUILD.json declares a schema this script understands, and carries the
+#      release metadata — version, build time, toolchain — rather than only hashes
 #   1. dist/BUILD.json exists and names a commit git knows
 #   2. the src/, app/ and release/ trees it was built from are the trees at HEAD —
 #      content, not commits, so a docs-only commit does not invalidate a good dist
@@ -36,6 +38,8 @@ cd "$(dirname "$0")"
 
 NAME="genai-engineer-workbook-src"
 STAMP="dist/BUILD.json"
+#: The stamp schema this script knows how to read. See SCHEMA_VERSION in package.sh.
+SCHEMA_VERSION=1
 
 if [ ! -f "$STAMP" ]; then
   echo "error: no $STAMP — run ./package.sh to build a release first" >&2
@@ -47,6 +51,95 @@ note() {
   echo "error: $1" >&2
   fail=1
 }
+
+# 0. The metadata, before anything is read out of the stamp on the assumption that
+# its keys still mean what this script thinks. A stamp with no `schema_version` is
+# from a package.sh that predates it; a higher one is from a newer package.sh and
+# this script has no business guessing at it.
+if ! python3 - "$STAMP" "$SCHEMA_VERSION" <<'PY'
+import datetime as dt, json, re, sys
+
+path, known = sys.argv[1], int(sys.argv[2])
+stamp = json.load(open(path))
+bad = []
+
+declared = stamp.get("schema_version")
+if declared is None:
+    bad.append(
+        "no schema_version — this stamp predates release metadata. Re-run ./package.sh."
+    )
+elif not isinstance(declared, int):
+    bad.append(f"schema_version is {declared!r}, which is not an integer")
+elif declared > known:
+    bad.append(
+        f"schema_version {declared} is newer than the {known} this script reads. "
+        "Update verify-dist.sh rather than trusting a stamp you cannot parse."
+    )
+
+for key in ("version", "version_source"):
+    if not str(stamp.get(key, "")).strip():
+        bad.append(f"{key} is missing or empty")
+
+built = str(stamp.get("built_at", ""))
+if not built:
+    bad.append("built_at is missing")
+elif not built.endswith("Z"):
+    bad.append(f"built_at is {built!r} — a release timestamp has to state its zone")
+else:
+    try:
+        when = dt.datetime.fromisoformat(built.replace("Z", "+00:00"))
+    except ValueError:
+        bad.append(f"built_at is {built!r}, which is not an ISO-8601 instant")
+    else:
+        # A stamp from the future is a clock problem, and it silently breaks any
+        # later attempt to order two releases by when they were built.
+        ahead = (when - dt.datetime.now(dt.UTC)).total_seconds()
+        if ahead > 300:
+            bad.append(f"built_at is {round(ahead / 60)} minute(s) in the future")
+
+toolchain = stamp.get("toolchain")
+if not isinstance(toolchain, dict):
+    bad.append("toolchain is missing")
+else:
+    for tool in ("node", "pnpm", "python", "uv", "git"):
+        if not str(toolchain.get(tool, "")).strip():
+            bad.append(f"toolchain.{tool} is missing")
+    # `node` and `pnpm` built course.html. If either is "absent" the stamp is
+    # describing a build that could not have happened.
+    for tool in ("node", "pnpm", "python", "git"):
+        if str(toolchain.get(tool, "")) == "absent":
+            bad.append(f"toolchain.{tool} is 'absent', but package.sh cannot run without it")
+    for tool, value in toolchain.items():
+        if value != "absent" and not re.search(r"\d+\.\d+", str(value)):
+            bad.append(f"toolchain.{tool} is {value!r}, which carries no version number")
+
+for line in bad:
+    print(f"error: {path}: {line}", file=sys.stderr)
+if bad:
+    raise SystemExit(1)
+print(
+    f"    stamp schema {declared} · version {stamp['version']} "
+    f"(from {stamp['version_source']}) · built {built}"
+)
+PY
+then
+  fail=1
+fi
+
+# The tag is authoritative at release time, so when there is one it and the stamp
+# have to agree — and so does `app/package.json`, which is the number the stamp
+# falls back to off a tag. Two sources for one version with no tie-break is how a
+# release ends up called two things at once.
+if tag=$(git describe --exact-match --tags HEAD 2>/dev/null); then
+  stamped_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$STAMP")
+  if [ "$stamped_version" != "$tag" ]; then
+    note "HEAD is tagged $tag but the stamp says $stamped_version — run ./package.sh on the tag"
+  fi
+  declared=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' app/package.json)
+  if [ "${tag#v}" != "$declared" ]; then
+    note "tag $tag and app/package.json $declared disagree — bump package.json to ${tag#v}"
+  fi
+fi
 
 commit=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["commit"])' "$STAMP")
 if ! git cat-file -e "$commit^{commit}" 2>/dev/null; then

@@ -4,6 +4,23 @@ import type { Effort } from "../data/types";
 export const EFFORT_PREFIX = "**Effort.**";
 
 /**
+ * What kind of number this is, said where the number is.
+ *
+ * Deliberately not part of `formatEffort`: that string is re-rendered by the
+ * integrity gate and matched against the lesson's `**Effort.**` line character for
+ * character, so anything added to it would have to be pasted into forty-one files to
+ * mean nothing new. This travels alongside instead.
+ *
+ * The workshop figures are bounded by measured volume — deliverables, TODO groups,
+ * tests, brief length — and `app/scripts/check-effort.mjs` fails the build if one
+ * drifts outside the range its evidence spans. Bounded is not measured, and a learner
+ * deciding whether a workshop fits into a Saturday deserves the difference.
+ */
+export const EFFORT_PROVENANCE =
+  "An estimate, not a measurement: bounded by the size of the work (deliverables, " +
+  "stubs, tests, brief length), not by learner telemetry. Use it for relative sizing.";
+
+/**
  * The one rendering of an effort estimate.
  *
  * Written once and used twice: the workbook prints it on the exercise card, and

@@ -523,6 +523,17 @@ class Assistant:
             # client. Buffering here to make the metering tidier would trade the
             # feature for the instrumentation, which is the wrong way round.
             began, text = time.time_ns(), []
+            # The one string this turn is metered from. `gated_chunks` ends with the
+            # whole answer rather than a delta, so appending that terminal payload
+            # to the list that already holds every released chunk counts the answer
+            # twice — 2x output tokens and 2x cost, on the span you are about to be
+            # asked to bill from. `metered` is assigned, never accumulated, which is
+            # what makes a second contributor impossible instead of merely unlikely.
+            #
+            # The rule: `metered` is the answer the client was given. A blocked
+            # stream is the exception — its answer is a fixed redaction string, and
+            # pricing a constant is meaningless, so the released prefix stands in.
+            metered: str | None = None
             blocked = truncated = False
             for kind, chunk in gated_chunks(produced, self.settings.stream_mode):
                 # TODO 9: stop here when `deadline.expired()` (import it), recording the
@@ -540,11 +551,16 @@ class Assistant:
                 # rendered, and a stream that simply stops looks exactly like a
                 # dropped connection — so the half stays on screen reading as the
                 # whole. Every way this stream can end has to end in `done`.
+                #
+                # Set `metered` to the text you put in that frame, for the same
+                # reason every other branch below sets it: one canonical string per
+                # stream, whichever frame ends it.
                 if kind == "chunk":
                     text.append(chunk)
                     yield sse("chunk", {"text": chunk})
                 elif kind == "blocked":
                     blocked = True
+                    metered = "".join(text)
                     yield sse("done", {
                         "answer": chunk, "redacted": True, "request_id": request_id,
                         "citations": citations, "audit": gathered["audit"],
@@ -554,7 +570,7 @@ class Assistant:
                     # that says so. A client rendering this as a finished answer
                     # is now doing it against an explicit flag, not by omission.
                     truncated = True
-                    text.append(chunk)
+                    metered = chunk
                     yield sse("done", {
                         "answer": chunk, "truncated": True,
                         "degraded": dict(self.degraded), "citations": citations,
@@ -562,7 +578,7 @@ class Assistant:
                         "audit": gathered["audit"],
                     })
                 else:
-                    text.append(chunk)
+                    metered = chunk
                     yield sse("done", {"answer": chunk, "citations": citations,
                                        "request_id": request_id,
                                        "grounding": grounding,
@@ -572,7 +588,10 @@ class Assistant:
             used = measure_usage(
                 composers.grounded_prompt(gathered["goal"], gathered["contexts"],
                                           gathered["state"], gathered["memories"]),
-                "".join(text),
+                # `is None` rather than `or`: an empty answer is a real answer and
+                # has to meter as zero output tokens, not fall through to the
+                # released chunks.
+                "".join(text) if metered is None else metered,
             )
             tier = self.settings.price_tier
             observe.mark(tracer, observe.COMPOSE_SPAN, root, start_time=began,

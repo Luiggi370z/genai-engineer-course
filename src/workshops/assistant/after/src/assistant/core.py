@@ -579,6 +579,21 @@ class Assistant:
             # client. Buffering here to make the metering tidier would trade the
             # feature for the instrumentation, which is the wrong way round.
             began, text = time.time_ns(), []
+            # The one string this turn is metered from, and there is exactly one
+            # because there used to be two. A terminal frame carries the whole
+            # answer rather than a delta, so appending it to `text` alongside the
+            # chunks it repeats metered every completed *and* every truncated
+            # stream twice: 2x output tokens and 2x cost, on the span this course
+            # tells students to bill from. Assigned rather than accumulated, so a
+            # future branch cannot add a third contributor by accident.
+            #
+            # The rule: `metered` is the answer the client was given. The one
+            # exception is a blocked stream, whose answer is a fixed redaction
+            # string — metering that would price the constant, so the released
+            # prefix stands in. It undercounts a model that generated a page and
+            # had all of it withheld; the gate does not hand the withheld text
+            # back, and inventing a number for it would be worse.
+            metered: str | None = None
             blocked = truncated = False
             for kind, chunk in gated_chunks(produced, self.settings.stream_mode):
                 # Checked per frame, which is the only place a long stream can be
@@ -596,8 +611,9 @@ class Assistant:
                     why = deadline.expired() or "the request budget ran out"
                     root.set_attribute(observe.ABANDONED, why)
                     truncated = True
+                    metered = "".join(text)
                     yield sse("done", {
-                        "answer": "".join(text), "truncated": True,
+                        "answer": metered, "truncated": True,
                         "abandoned": why, "degraded": dict(self.degraded),
                         "citations": citations, "request_id": request_id,
                         "grounding": grounding, "audit": gathered["audit"],
@@ -608,6 +624,7 @@ class Assistant:
                     yield sse("chunk", {"text": chunk})
                 elif kind == "blocked":
                     blocked = True
+                    metered = "".join(text)
                     yield sse("done", {
                         "answer": chunk, "redacted": True, "request_id": request_id,
                         "citations": citations, "audit": gathered["audit"],
@@ -617,7 +634,7 @@ class Assistant:
                     # that says so. A client rendering this as a finished answer
                     # is now doing it against an explicit flag, not by omission.
                     truncated = True
-                    text.append(chunk)
+                    metered = chunk
                     yield sse("done", {
                         "answer": chunk, "truncated": True,
                         "degraded": dict(self.degraded), "citations": citations,
@@ -625,7 +642,7 @@ class Assistant:
                         "audit": gathered["audit"],
                     })
                 else:
-                    text.append(chunk)
+                    metered = chunk
                     yield sse("done", {"answer": chunk, "citations": citations,
                                        "request_id": request_id,
                                        "grounding": grounding,
@@ -635,7 +652,10 @@ class Assistant:
             used = measure_usage(
                 composers.grounded_prompt(gathered["goal"], gathered["contexts"],
                                           gathered["state"], gathered["memories"]),
-                "".join(text),
+                # `is None` rather than `or`: an empty answer is a real answer and
+                # has to meter as zero output tokens, not fall through to the
+                # released chunks.
+                "".join(text) if metered is None else metered,
             )
             tier = self.settings.price_tier
             observe.mark(tracer, observe.COMPOSE_SPAN, root, start_time=began,

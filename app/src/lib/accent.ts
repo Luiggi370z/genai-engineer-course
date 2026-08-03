@@ -24,3 +24,26 @@ export function accentVars(theme: Theme): CSSProperties {
 export function accentOf(phaseId: string): string {
   return `var(--accent-${phaseId})`;
 }
+
+/**
+ * The accent, darkened enough to carry white text.
+ *
+ * An accent has one job in this palette: be legible *as text* on paper and on a
+ * card. `accentContrastFindings` checks exactly that and every accent passes it in
+ * both themes. Filling a block with the accent and writing white on top is the
+ * inverse job, and the dark accents fail it badly — white on `#1AAD7B` is 2.48:1
+ * against a 4.5:1 requirement, and the same held for all nine.
+ *
+ * The light accents are already dark enough, and only just: 4.81 to 4.90:1 across
+ * the nine, which is a palette that was tuned for this and a reason not to touch
+ * it. So the scrim is 0% in light and 40% in dark, set in `index.css` beside the
+ * rest of the theme.
+ *
+ * The three places that need this are the workshop header, the ladder chip on an
+ * exercise card, and a selected answer button. They went unnoticed because axe can
+ * only decide contrast for an element it can sample, and all three sat thousands
+ * of pixels below the viewport on an unfolded phase page.
+ */
+export function accentUnderWhite(accent: string): string {
+  return `color-mix(in oklab, #000 var(--accent-scrim, 0%), ${accent})`;
+}

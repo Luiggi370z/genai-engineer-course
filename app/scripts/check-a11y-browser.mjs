@@ -111,6 +111,13 @@ try {
       }
       for (const phase of phases) {
         await openPhase(page, phase, `${viewport.name}/${theme}`);
+        // A phone folds the long sections away by default, so scanning as-loaded
+        // would quietly stop checking the contrast of most of the course at the
+        // width where it is hardest to read. Opening them first keeps the scan
+        // over the same content it covered before the fold existed — and the
+        // trigger is on screen either way, so nothing is lost by not scanning the
+        // closed state.
+        await expandSections(page);
         await scan(page, `${viewport.name}/${theme}/phase-${String(phase).padStart(2, "0")}`);
       }
       await context.close();
@@ -163,6 +170,25 @@ async function scan(page, view) {
         detail: (node.any ?? []).map((c) => c.message).join("; "),
       });
     }
+  }
+}
+
+/**
+ * Open every folded phase section, so the scan sees the whole page.
+ *
+ * A no-op above the `xl` breakpoint, where nothing folds and no trigger exists.
+ * Matched on the accessible name rather than a test id, which means a rename that
+ * makes the control unreadable also makes this stop finding it.
+ */
+async function expandSections(page) {
+  const triggers = page.getByRole("button", { name: /^Show / });
+  // Re-queried each time: opening a section changes its own label to "Hide", so
+  // the collection shrinks as it is worked through.
+  for (let guard = 0; guard < 12; guard++) {
+    const next = triggers.first();
+    if ((await triggers.count()) === 0) return;
+    await next.click();
+    await page.waitForTimeout(30);
   }
 }
 

@@ -1,6 +1,8 @@
 # Workshop · Memory + research crew  (ends Phase 5)
 
-**Effort.** ~3 h of focused build time · +30 min for the integration tier · ~6 h realistic first pass.
+**Effort.** ~3.5 h of focused build time · +30 min for the integration tier · ~5.5 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 The assistant currently starts every session as a stranger and does every job on the
 frontier model. This layer adds the two things that make it feel like software: **memory

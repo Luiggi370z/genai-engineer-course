@@ -15,4 +15,4 @@ npx @modelcontextprotocol/inspector uv run python -m src.server   # manual poke
 ```
 
 > **SDK version:** targets **`mcp>=2.0.0`** (spec 2026-07-28). See
-> [`../SDK-V2-MIGRATION.md`](../SDK-V2-MIGRATION.md).
+> [`../../SDK-V2-MIGRATION.md`](../../SDK-V2-MIGRATION.md).

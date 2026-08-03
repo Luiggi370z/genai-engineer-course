@@ -684,7 +684,7 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       "A CLI that runs one real task across every provider and reports tokens, cost and latency side by side — ranked on the number that actually decides the purchase.",
     repo: "workshops/model-bench",
     doc: "WORKSHOP-MODEL-BENCH.md",
-    effort: { fast: 120, integration: 60, realistic: 240 },
+    effort: { fast: 150, integration: 60, realistic: 240 },
     proves: "integrate",
     assesses: ["p1-o1", "p1-o2", "p1-o4"],
     blocks: [

@@ -13,7 +13,7 @@ make check
 
 > **SDK version:** these lessons target **`mcp>=2.0.0`** (spec 2026-07-28).
 > v1 code (`from mcp.server.fastmcp import FastMCP`) will **not** run — see
-> [`../SDK-V2-MIGRATION.md`](../SDK-V2-MIGRATION.md).
+> [`../../SDK-V2-MIGRATION.md`](../../SDK-V2-MIGRATION.md).
 
 ## Concept → framework primitive
 

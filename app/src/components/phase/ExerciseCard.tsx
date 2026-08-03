@@ -4,7 +4,8 @@ import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { Exercise } from "../../data/types";
-import { formatEffort, summarizeEffort } from "../../lib/effort";
+import { accentUnderWhite } from "../../lib/accent";
+import { EFFORT_PROVENANCE, formatEffort, summarizeEffort } from "../../lib/effort";
 import { InlineText } from "../../lib/markdown";
 import { CodeBlock } from "../blocks/CodeBlock";
 
@@ -45,7 +46,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
         </button>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-2">
-            <span className="font-mono text-[11px] text-graphite">EX.{index + 1}</span>
+            <span className="font-mono text-[12px] text-graphite">EX.{index + 1}</span>
             {/* h3, matching the concept cards: the section above is an h2, and a
                 document that jumps h2 → h4 tells a reader navigating by heading
                 that they missed a level. */}
@@ -53,10 +54,10 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
               {exercise.title}
             </h3>
             <span
-              className="rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide"
+              className="rounded px-1.5 py-0.5 font-mono text-[12px] uppercase tracking-wide"
               style={
                 blank
-                  ? { background: accent, color: "#fff" }
+                  ? { background: accentUnderWhite(accent), color: "#fff" }
                   : {
                       background: `color-mix(in oklab, ${accent} 12%, transparent)`,
                       color: accent,
@@ -70,7 +71,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
                 actually demonstrates — a blank-editor task can still only prove
                 you can build in isolation. */}
             <span
-              className="rounded border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-graphite"
+              className="rounded border border-line px-1.5 py-0.5 font-mono text-[12px] uppercase tracking-wide text-graphite"
               title="What finishing this demonstrates: understand → implement → integrate → operate"
             >
               proves {exercise.proves}
@@ -80,7 +81,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
             <InlineText text={exercise.task} />
           </p>
           {exercise.repo && (
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-graphite">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[12px] text-graphite">
               <span className="rounded border border-line bg-ink/[0.03] px-1.5 py-0.5">
                 repo: {exercise.repo}
               </span>
@@ -89,7 +90,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
               {exercise.effort && (
                 <span
                   className="rounded border border-line px-1.5 py-0.5"
-                  title={formatEffort(exercise.effort)}
+                  title={`${formatEffort(exercise.effort)}\n\n${EFFORT_PROVENANCE}`}
                 >
                   {summarizeEffort(exercise.effort)}
                 </span>
@@ -97,7 +98,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
             </div>
           )}
           {blank && (
-            <div className="mt-1.5 font-mono text-[11px] text-graphite">
+            <div className="mt-1.5 font-mono text-[12px] text-graphite">
               <span className="rounded border border-dashed border-line px-1.5 py-0.5">
                 no repo — new directory, uv init, nothing else
               </span>
@@ -107,7 +108,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
             type="button"
             onClick={() => setShowSolution((v) => !v)}
             aria-expanded={showSolution}
-            className="mt-2 inline-flex items-center gap-1 font-mono text-[11px] underline-offset-2 hover:underline"
+            className="mt-2 inline-flex items-center gap-1 font-mono text-[12px] underline-offset-2 hover:underline"
             style={{ color: accent }}
           >
             <HugeiconsIcon

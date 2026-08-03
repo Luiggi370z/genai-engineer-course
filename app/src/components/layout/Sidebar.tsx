@@ -47,7 +47,7 @@ export function Sidebar({
         onClick={() => navigate("dash")}
         className="border-b border-line/70 px-5 pt-6 pb-4 text-left hover:bg-ink/[0.02]"
       >
-        <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-graphite">
+        <div className="font-mono text-[12px] uppercase tracking-[0.18em] text-graphite">
           Workbook · 2026
         </div>
         <div className="mt-1 text-[15px] font-bold leading-tight tracking-tight text-ink">
@@ -60,7 +60,7 @@ export function Sidebar({
               style={{ width: `${overallPct * 100}%` }}
             />
           </div>
-          <span className="font-mono text-[11px] text-graphite">{formatPct(overallPct)}</span>
+          <span className="font-mono text-[12px] text-graphite">{formatPct(overallPct)}</span>
         </div>
       </button>
 
@@ -108,7 +108,7 @@ export function Sidebar({
                     style={{ background: pct >= 1 || active ? accentOf(phase.id) : "transparent" }}
                   />
                   <div
-                    className="font-mono text-[11px] uppercase tracking-[0.12em]"
+                    className="font-mono text-[12px] uppercase tracking-[0.12em]"
                     style={{ color: accentOf(phase.id) }}
                   >
                     Phase {String(phase.num).padStart(2, "0")}
@@ -147,7 +147,7 @@ export function Sidebar({
             <span className="block text-[12.5px] font-semibold leading-snug text-ink/80">
               Electives shelf
             </span>
-            <span className="block font-mono text-[11px] uppercase tracking-[0.12em] text-graphite">
+            <span className="block font-mono text-[12px] uppercase tracking-[0.12em] text-graphite">
               Optional · unscored
             </span>
           </span>
@@ -156,7 +156,7 @@ export function Sidebar({
 
       <div className="border-t border-line/70 px-5 py-4">
         <div className="flex items-center justify-between gap-2">
-          <p className="font-mono text-[11px] leading-relaxed tracking-wide text-graphite">
+          <p className="font-mono text-[12px] leading-relaxed tracking-wide text-graphite">
             GATES, NOT DATES.
             <br />
             SHIP WITH METRICS.
@@ -177,14 +177,14 @@ export function Sidebar({
           <button
             type="button"
             onClick={onExport}
-            className="rounded border border-line px-1.5 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/[0.05] hover:text-ink"
+            className="rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/[0.05] hover:text-ink"
           >
             Export
           </button>
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded border border-line px-1.5 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/[0.05] hover:text-ink"
+            className="rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:bg-ink/[0.05] hover:text-ink"
           >
             Import
           </button>
@@ -203,7 +203,7 @@ export function Sidebar({
           <button
             type="button"
             onClick={onReset}
-            className="ml-auto rounded border border-line px-1.5 py-1 font-mono text-[11px] uppercase tracking-[0.08em] text-graphite transition-colors hover:border-red-400/60 hover:text-red-500"
+            className="ml-auto rounded border border-line px-1.5 py-1 font-mono text-[12px] uppercase tracking-[0.08em] text-graphite transition-colors hover:border-red-400/60 hover:text-red-500"
           >
             Reset
           </button>

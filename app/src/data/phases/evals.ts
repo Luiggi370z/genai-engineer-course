@@ -683,7 +683,7 @@ jobs:
       "Put the Workshop-2 service on trial: golden set, calibrated judge, and a CI gate that blocks your own merges.",
     repo: "workshops/assistant",
     doc: "WORKSHOP-EVAL-SUITE.md",
-    effort: { fast: 150, integration: 30, realistic: 300 },
+    effort: { fast: 120, integration: 30, realistic: 180 },
     proves: "operate",
     assesses: ["p-evals-o1", "p-evals-o2", "p-evals-o3", "p-evals-o4", "p-evals-o5"],
     needs: ["p2-o1", "p2-o3"],

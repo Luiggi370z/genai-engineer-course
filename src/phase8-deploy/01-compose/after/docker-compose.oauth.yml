@@ -22,7 +22,7 @@
 # real TLS and a real database behind Keycloak — but a real protocol.
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.5.2 # pinned, same reason as everything else
+    image: quay.io/keycloak/keycloak:26.5.2@sha256:fb31a59deb46f746f2aaa25adc5da39ceccac4fd22d36a519562b0bf02e8df20 # tag + digest, same reason as everything else
     restart: unless-stopped
     mem_limit: 1g
     cpus: 1.0

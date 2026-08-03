@@ -248,7 +248,7 @@ export const mindset: PhaseContent = {
       "The only workshop with no code, because the artifact is a habit: a scored design mock, a metrics sheet that traces every claim to a file, and a funnel with a fix attached.",
     repo: "workshops/interview-loop",
     doc: "WORKSHOP-INTERVIEW-LOOP.md",
-    effort: { fast: 120, integration: null, realistic: 240 },
+    effort: { fast: 180, integration: null, realistic: 300 },
     proves: "understand",
     assesses: ["p7-o1", "p7-o2", "p7-o3", "p7-o4"],
     needs: ["p4-o1", "p4-o2", "p6-o5"],

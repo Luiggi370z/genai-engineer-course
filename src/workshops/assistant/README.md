@@ -93,7 +93,7 @@ and benign requests that were wrongly refused. A guardrail change that improves
 the first by wrecking the second is visible in one glance instead of shipping as
 a win.
 
-`docs/RELEASE-CHECKLIST.md` makes a stamped run of this a precondition for
+`after/docs/RELEASE-CHECKLIST.md` makes a stamped run of this a precondition for
 publishing, and carries the table of which lane may claim what.
 
 ## `make evidence` — the log for the whole course

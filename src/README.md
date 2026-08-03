@@ -45,7 +45,9 @@ You wire libraries together; you do **not** implement algorithms:
 | eval | `ragas` (LLM judge) + `rapidfuzz` (fast offline gate) |
 | memory | your own store on `qdrant-client`, plus `mem0ai` / `langmem` adapters |
 
-Requirements: **Python 3.11+**, [uv](https://docs.astral.sh/uv/), and (for most lessons)
+Requirements: **Python 3.11 through 3.14** (`>=3.11,<3.15`, and CI proves both ends —
+`./verify-lessons.sh --python 3.11` runs the set on the floor),
+[uv](https://docs.astral.sh/uv/), and (for most lessons)
 [Ollama](https://ollama.com) running locally so everything works with **zero API keys**.
 `phase4-agents/04-framework-bakeoff` is the single exception: it pins **3.12** in its own
 `pyproject.toml` (CrewAI's tree does not build on newer) and uv fetches that interpreter
@@ -91,6 +93,26 @@ Every dependency here carries an **upper bound** (e.g. `mcp>=2.0.0,<3`). That is
 deliberate: on 2026-07-28 the MCP Python SDK shipped v2 and *removed*
 `mcp.server.fastmcp`, breaking every unpinned v1 example overnight. Each phase has a
 `VERIFIED.md` stamp saying when it last passed `make check`.
+
+Three strengths of pin live in this repo, and the difference matters the first time a
+lesson installs something newer than the stamp:
+
+| Strength | Where | What it promises |
+|---|---|---|
+| **Bounded range** | every lesson's `pyproject.toml` | the newest release inside the range resolves and the API you were taught still exists. Not that you get the same bytes as anyone else. |
+| **Recorded resolution** | a `VERIFIED.md` naming an exact version (`verified against ragas 0.4.3`) | what that dated run actually resolved to. It is evidence for bisecting a future break — nothing reinstalls it. |
+| **Locked** | `workshops/assistant/after/uv.lock`, the only tracked lockfile | every transitive dependency by hash. `uv sync --frozen` gets the same tree on any machine. |
+
+So: **only the capstone is reproducible; the lessons are version-bounded.** That is a
+choice, not an omission. A lockfile per lesson would freeze 34 dependency trees that
+exist to be upgraded — the course teaches you to raise a cap deliberately and re-run
+`make check`, and a lockfile would hide the drift it wants you to practise on. The
+capstone is locked because it is the one artifact that gets deployed, where "works on
+my machine" is the failure being prevented.
+
+The interpreter follows the same rule: `>=3.11,<3.15`, and CI runs the whole lesson set
+at **both ends** of that range on every push, so the bound is tested rather than
+asserted. Run the floor yourself with `./verify-lessons.sh --python 3.11`.
 
 The MCP lessons target **SDK v2** — see `phase7-mcp/SDK-V2-MIGRATION.md`.
 

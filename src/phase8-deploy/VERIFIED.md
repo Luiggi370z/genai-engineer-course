@@ -4,11 +4,23 @@
 **How:** every `after/` reference passed `make check` (ruff + pyright + pytest) on this date,
 and every `before/` scaffold passed lint + type with its tests failing by design.
 
+**What this stamp pins — and what it does not.** Ranges, not versions. Every lesson's
+`pyproject.toml` declares upper-bounded *ranges* (`ragas>=0.4,<0.5`), so a fresh
+`uv sync` resolves the newest release inside the range, which is usually — not
+necessarily — what the date above was taken against. Where this file names an exact
+version, that is a **record** of what the verified run resolved to, not a constraint
+that reinstalls it. Exactly one lockfile is tracked in the whole repo,
+`workshops/assistant/after/uv.lock`: the capstone is the only bit-reproducible thing
+here, because it is the only thing that gets deployed. Everything else is
+version-bounded. Interpreter: **3.11 through 3.14** (`>=3.11,<3.15`), with both ends
+run in CI on every push; `phase4-agents/04-framework-bakeoff` pins 3.12 and says so
+itself. The long version is in [`../README.md`](../README.md).
+
 ## What the pins here are load-bearing for
 
 | Lesson | Pin | Why it matters |
 |---|---|---|
-| `01-compose` | `qdrant/qdrant:v1.18.3`, `ollama/ollama:0.32.5`, `otel/opentelemetry-collector-contrib:0.157.0` | Image pins in `docker-compose.yml` and the `docker-compose.observability.yml` overlay (current on the stamp date). `:latest` means every reviewer runs a different stack — the lesson's own checks fail on it. Both app services build from `workshops/assistant/after`'s Dockerfile; the collector is overlay-only because its scratch image cannot carry a healthcheck and the base stack must stay reviewable by `src/health.py`. |
+| `01-compose` | `qdrant/qdrant:v1.18.3`, `ollama/ollama:0.32.5`, `otel/opentelemetry-collector-contrib:0.157.0`, `quay.io/keycloak/keycloak:26.5.2` — each with the `@sha256:` digest that tag resolved to on the stamp date | Image pins in `docker-compose.yml` and the `observability` and `oauth` overlays. `:latest` means every reviewer runs a different stack — the lesson's own checks fail on it — and a version tag only narrows that, since a tag is a mutable pointer its publisher can repoint at a rebuild. The digests are multi-arch index digests, so the same line resolves on an ARM laptop and an x86 runner. Both app services build from `workshops/assistant/after`'s Dockerfile; the collector is overlay-only because its scratch image cannot carry a healthcheck and the base stack must stay reviewable by `src/health.py`. |
 | `03-deploy-observe` | `opentelemetry-sdk>=1.30,<2` | Verified against 1.44.0. The lesson uses `TracerProvider`, `SimpleSpanProcessor` and `InMemorySpanExporter` from `opentelemetry.sdk.trace.export.in_memory_span_exporter`, plus explicit `start_time` / `end_time` on spans so latency can be scripted without sleeping. The exporter's import path has moved before; if it moves again, that is the first thing to check. `recorder()` now also reads `OTEL_EXPORTER_OTLP_ENDPOINT` and lazily attaches the OTLP exporter (`integration` group). |
 | `03-deploy-observe` (release lane) | none — stdlib only | `release.py` is stdlib (`sqlite3`, `re`, `urllib`) so the entire release lane is unit-tested with no registry, no cloud account and no card. `deploy/` targets **Fly.io** and is **not live-provisioned**: the scripts are executable, gated behind `DEPLOY_LANE=fly`, and have never been run against a paid account by this repo. `flyctl` flag names are the one thing here that can drift silently, since nothing in CI exercises them — check `fly deploy --help` before trusting the script verbatim. |
 | `04-cost-latency` | none in the fast tier | The offline tier is pure standard library on purpose — the embedder and the clock are injected, so nothing about the cache logic depends on a model. `fastembed>=0.4,<1` sits in the `integration` group only. |

@@ -22,11 +22,30 @@ import inspect
 import os
 import subprocess
 from collections.abc import Iterable
+from pathlib import Path
 
 STAMP_LENGTH = 8
 #: Git's conventional short form. Long enough to be unique in any repo a person
 #: will work on, short enough to read out loud during an incident.
 SHA_LENGTH = 12
+
+#: The course source root. `provenance.py` sits at
+#: `<src>/workshops/assistant/after/src/assistant/`.
+SRC = Path(__file__).resolve().parents[5]
+
+#: Everything the full-fidelity release numbers are a measurement of, under `SRC`.
+#:
+#: Two entries because the red team is one dataset shared with the lesson that
+#: maintains it, so a row added there changes what a containment number means
+#: without touching a line of capstone code.
+#:
+#: Both are deliberately outside `release/evidence/`, where the published artifact
+#: is committed. If the evidence lived inside what it measures, committing it would
+#: change the answer, and no evidence could ever match the release carrying it.
+MEASURED_SOURCE = (
+    "workshops/assistant/after",
+    "phase6-design-defend/01-red-team/after/evals/redteam.jsonl",
+)
 
 
 def build_version() -> str:
@@ -87,3 +106,67 @@ def dataset_version(label: str, questions: Iterable[str]) -> str:
     """A stamp for an eval set: its name, its size, and its content."""
     items = [str(q) for q in questions]
     return f"{label}-{len(items)}-{digest(*items)}"
+
+
+def source_id() -> str:
+    """A stable name for the exact code and data a measurement was taken against.
+
+    The same rule as every other stamp here, applied one level up: `build_version`
+    says which commit is *serving*, and this says which source was *measured*. The
+    release evidence carried a date and a list of model versions, and a date cannot
+    say whether numbers describe the code about to be published or the tree from a
+    fortnight ago — so `release.yml` had nothing to check and published anyway.
+
+    Git object ids rather than a commit sha, because the evidence has to be
+    committed *to* the release it certifies: a sha changes when the evidence file
+    lands, a tree hash of the measured paths does not. So the maintainer can run the
+    measurement, commit the result, and tag — and the binding still holds.
+
+    Four answers, all of them honest:
+
+      ``<8 hex>``         a clean checkout; this is the measured source.
+      ``dirty-<8 hex>``   a checkout with uncommitted changes under those paths.
+                          Prefixed rather than reported as a separate flag: a gate
+                          that compares ids cannot forget to also check a boolean,
+                          and this id matches nothing.
+      ``release-<sha12>`` unpacked from the ZIP, which has no git. `package.sh`
+                          writes the commit into `src/RELEASE_COMMIT`, so the
+                          measurement is still bound to something — the release it
+                          came from rather than a tree.
+      ``unbound``         no git and no stamp. Says so, rather than inventing a
+                          value that would compare equal to something.
+    """
+    if not _git("rev-parse", "--git-dir"):
+        stamp = SRC / "RELEASE_COMMIT"
+        if stamp.is_file() and (sha := stamp.read_text().strip()):
+            return f"release-{sha[:SHA_LENGTH]}"
+        return "unbound"
+
+    ids = []
+    for path in MEASURED_SOURCE:
+        # `HEAD:<path>` is always read from the repo root, whatever the cwd.
+        oid = _git("rev-parse", f"HEAD:src/{path}")
+        if not oid:
+            return "unbound"
+        ids.append(f"{path}={oid}")
+
+    # A pathspec, unlike a revision, IS resolved against the cwd — and the cwd here
+    # is `src/`, so a plain `src/workshops/...` would look for `src/src/workshops/...`,
+    # match nothing, and report a dirty tree as clean. `:/` pins it to the root.
+    pending = _git("status", "--porcelain", "--", *(f":/src/{p}" for p in MEASURED_SOURCE))
+    return f"dirty-{digest(*ids)}" if pending else digest(*ids)
+
+
+def _git(*args: str) -> str:
+    """Git's answer, or "" when git cannot answer — including not being installed."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(SRC), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""

@@ -100,6 +100,21 @@ if unzip -l "$STAGE/$NAME.zip" | grep -Eq '(\.venv/|__pycache__/|\.pyc$|\.pytest
   exit 1
 fi
 
+# The other direction, which is the one that actually went wrong: documents
+# falling *out*. A bare `docs/` in .gitignore matched three directories instead of
+# one, so the capstone's release checklist was never tracked and never packaged
+# while seven places in `src/` told the student to read it. `check-doc-links`
+# (inside `pnpm build`, above) fails on the reference; this counts the files,
+# because a `.gitattributes` export-ignore would drop a *tracked* document from
+# the archive and leave every reference to it looking fine.
+want=$(git ls-files -- src | grep -c '\.md$' || true)
+got=$(unzip -l "$STAGE/$NAME.zip" | grep -c '\.md$' || true)
+if [ "$want" -ne "$got" ]; then
+  echo "error: $want tracked document(s) under src/, but $got reached the zip." >&2
+  echo "       git archive dropped something — check .gitattributes for export-ignore." >&2
+  exit 1
+fi
+
 # The stamp. It travels with the release so whoever holds these three files can
 # say which commit produced them, and `verify-dist.sh` reads it to answer "is the
 # dist/ in this working directory still the release of the commit I am on" before
@@ -108,10 +123,18 @@ fi
 # plausible whatever it was built from.
 echo "==> Stamping the build"
 python3 - "$STAGE" "$commit" "$NAME" <<'PY'
-import hashlib, json, subprocess, sys, zipfile
+import datetime as dt, hashlib, json, re, subprocess, sys, zipfile
 from pathlib import Path
 
 stage, commit, name = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+
+#: Bumped when a consumer would have to change to read this file correctly —
+#: a key renamed or removed, or a value's meaning altered. Adding a key is not a
+#: bump: `verify-dist.sh` and `release.yml` both read keys by name, so a new one is
+#: inert until something asks for it. The point of declaring it is that a *future*
+#: reader can refuse a stamp it does not understand instead of silently reading
+#: `trees` out of a file where that word came to mean something else.
+SCHEMA_VERSION = 1
 
 def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -120,6 +143,45 @@ def tree(prefix):
     return subprocess.run(
         ["git", "rev-parse", f"HEAD:{prefix}"], capture_output=True, text=True, check=True
     ).stdout.strip()
+
+def run(*args):
+    """First line of a tool's own version output, or "absent"."""
+    try:
+        done = subprocess.run(args, capture_output=True, text=True, check=False)
+    except OSError:
+        return "absent"
+    if done.returncode != 0:
+        return "absent"
+    return done.stdout.strip().splitlines()[0] if done.stdout.strip() else "absent"
+
+def tool_version(*args):
+    """Just the number. Every one of these prints it differently — `v24.15.0`,
+    `Python 3.12.11`, `git version 2.54.0`, and uv appends its build platform — and
+    a field called `node` reading `v24.15.0` invites a string comparison against
+    `24.15.0` that quietly never matches."""
+    raw = run(*args)
+    if raw == "absent":
+        return raw
+    found = re.search(r"\d+(?:\.\d+)+", raw)
+    return found.group(0) if found else raw
+
+def version():
+    """The release's number, and where it came from.
+
+    The tag wins. `app/package.json` carries a version too, and nothing reconciled
+    the two — the workflow triggers on `v*` tags while that file said `1.0.0`
+    regardless, so "which version is this" had two answers and no tie-break. At
+    release time the tag is the answer, because it is the thing a person typed on
+    purpose and the thing the release is named after. Off a tag there is no tag to
+    read, so `package.json` stands in and says so.
+    """
+    tag = run("git", "describe", "--exact-match", "--tags", "HEAD")
+    if tag != "absent":
+        return tag, "git-tag"
+    declared = json.loads(Path("app/package.json").read_text())["version"]
+    return declared, "app/package.json"
+
+course_version, version_source = version()
 
 # One digest per member, of the member's CONTENT rather than of the archive.
 # The archive's own hash is already in `artifacts`, and it answers a narrower
@@ -136,6 +198,25 @@ with zipfile.ZipFile(stage / f"{name}.zip") as zf:
     }
 
 stamp = {
+    "schema_version": SCHEMA_VERSION,
+    "version": course_version,
+    "version_source": version_source,
+    # UTC with an explicit `Z`, because a release stamp read six months later on
+    # another continent should not need the reader to guess an offset.
+    "built_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+    # What built it, not what it needs. A course.html that only reproduces under
+    # one bundler version is a fact worth recording rather than discovering: the
+    # tree hashes below can match while the artifact differs, and this is the
+    # first thing to compare when they do. `uv` is here even though it builds
+    # nothing in `dist/` — it is the toolchain the shipped lessons are run with,
+    # and "absent" is a truthful answer on a machine that packaged without it.
+    "toolchain": {
+        "node": tool_version("node", "--version"),
+        "pnpm": tool_version("pnpm", "--version"),
+        "python": tool_version("python3", "--version"),
+        "uv": tool_version("uv", "--version"),
+        "git": tool_version("git", "--version"),
+    },
     "commit": commit,
     # Tree hashes, not just the commit: they answer "did the content change"
     # rather than "was there a commit", so a docs-only commit does not make a
@@ -165,6 +246,11 @@ echo
 echo "  $OUT/README.md           $(du -h "$OUT/README.md" | cut -f1)"
 echo "  $OUT/course.html         $(du -h "$OUT/course.html" | cut -f1)"
 echo "  $OUT/$NAME.zip  $(du -h "$OUT/$NAME.zip" | cut -f1)"
-members=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["files"]))' "$OUT/BUILD.json")
+read -r stamp_version stamp_source members < <(python3 -c '
+import json, sys
+s = json.load(open(sys.argv[1]))
+print(s["version"], s["version_source"], len(s["files"]))
+' "$OUT/BUILD.json")
 echo "  $OUT/BUILD.json          ${commit:0:12} · $members members hashed"
+echo "  version $stamp_version (from $stamp_source)"
 echo "  $((lessons / 2)) lesson pairs · no build artifacts"

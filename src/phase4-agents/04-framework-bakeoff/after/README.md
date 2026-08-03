@@ -102,7 +102,9 @@ version bound wearing a library bug's clothes.
 So the bound is declared where it binds: `requires-python = ">=3.12,<3.13"` in
 this lesson's `pyproject.toml`, which makes `uv sync` fetch a 3.12, and a
 `tests/conftest.py` guard that refuses to collect on anything else and names the
-interpreter in the failure. The rest of the course is 3.11+. Isolating the pin to
+interpreter in the failure. The rest of the course is 3.11 through 3.14, and CI runs
+it at both ends, which is how this lesson's narrower bound stays visible instead of
+becoming the course's. Isolating the pin to
 one lesson beats raising the course floor for one framework, and beats a skip
 that quietly turns "cannot run" into "passed".
 

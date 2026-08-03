@@ -1,6 +1,8 @@
 # Workshop · The interview loop  (ends Phase 9)
 
-**Effort.** ~2 h of focused build time · no integration tier · ~4 h realistic first pass.
+**Effort.** ~3 h of focused build time · no integration tier · ~5 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 Eight workshops in, you have a system: a bench, a retrieval service, an eval suite, an
 agent with memory and guardrails, an MCP server, and a deployment with traces and a

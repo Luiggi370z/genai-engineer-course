@@ -5,6 +5,18 @@
 # Multi-stage: uv resolves and installs in the first stage, the runtime stage gets
 # the finished virtualenv and the source, nothing else. Both stages are bookworm so
 # the venv's interpreter path survives the copy.
+#
+# These two bases are tags, not digests, and that is deliberate — the compose stack
+# next door pins every image it PULLS by `tag@sha256:`, so the difference is worth
+# stating rather than leaving to look like an oversight. A base image is the one
+# place where a floating tag is the safer choice: `python:3.12-slim-bookworm` is
+# rebuilt when Debian patches something in it, and a digest here would pin this
+# image to a known-vulnerable OS layer until someone remembered to bump it. What
+# makes the build reproducible is `uv.lock` with `--frozen`, which fixes every
+# Python dependency by hash; the base supplies libc and OpenSSL, where "latest
+# patch of 3.12 on bookworm" is what you actually want. Reproducibility and
+# patching pull in opposite directions here, and the lockfile is what lets this
+# side choose patching.
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy

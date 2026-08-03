@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  actionPinFindings,
   datasetFindings,
   MARKER,
   modelFindings,
@@ -293,4 +294,51 @@ test("prose that agrees with the dataset passes", () => {
 test("the finding points at the line, because these sentences repeat", () => {
   const found = datasetRules("fine\nalso fine\nall 58 rows of the red-team dataset\n");
   assert.equal(found[0].subject, "src/x.md:3");
+});
+
+// --- action pins ---------------------------------------------------------------
+const SHA = "fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09";
+const actionRules = (source) =>
+  actionPinFindings({ workflows: [{ file: ".github/workflows/ci.yml", source }] });
+
+test("a commit pin with its version in a comment passes", () => {
+  assert.deepEqual(actionRules(`      - uses: actions/checkout@${SHA} # v5.1.0\n`), []);
+});
+
+test("a mutable major is caught, and the message says how to resolve it", () => {
+  const [found] = actionRules("      - uses: actions/checkout@v5\n");
+  assert.equal(found.rule, "action-pin");
+  assert.match(found.message, /mutable tag `v5`/);
+  assert.match(found.message, /git ls-remote --tags .*actions\/checkout v5/);
+});
+
+test("a branch or a floating patch tag is a tag too", () => {
+  assert.equal(actionRules("      - uses: actions/checkout@main\n").length, 1);
+  assert.equal(actionRules("      - uses: actions/checkout@v5.1.0\n").length, 1);
+});
+
+test("no version at all is its own message", () => {
+  const [found] = actionRules("      - uses: actions/checkout\n");
+  assert.match(found.message, /names no version at all/);
+});
+
+test("a bare SHA with no comment is caught: a pin nobody can read is a pin nobody bumps", () => {
+  const [found] = actionRules(`      - uses: actions/checkout@${SHA}\n`);
+  assert.match(found.message, /no version in a trailing comment/);
+});
+
+test("an empty trailing comment does not count as one", () => {
+  assert.equal(actionRules(`      - uses: actions/checkout@${SHA} #\n`).length, 1);
+});
+
+test("a local action is this repo at this commit, so it needs no pin", () => {
+  assert.deepEqual(actionRules("      - uses: ./.github/actions/setup\n"), []);
+});
+
+test("the finding names the line, because a workflow repeats the same action", () => {
+  const found = actionRules(
+    `      - uses: actions/checkout@${SHA} # v5.1.0\n      - uses: astral-sh/setup-uv@v6\n`,
+  );
+  assert.equal(found.length, 1);
+  assert.equal(found[0].subject, ".github/workflows/ci.yml:2");
 });

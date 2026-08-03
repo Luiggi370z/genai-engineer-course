@@ -45,11 +45,14 @@ smaller or hosted judge), and `llama-guard3:8b` for the Phase 6 guardrails.
 
 ## What you need
 
-**Software.** Python 3.11+, [uv](https://docs.astral.sh/uv/),
+**Software.** Python **3.11 through 3.14**, [uv](https://docs.astral.sh/uv/),
 [Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.
-One lesson — 4.4, the framework bakeoff — pins **3.12** exactly, because CrewAI's
-dependency tree does not build on anything newer. It declares that itself and uv
-fetches the interpreter; you do not need 3.12 for anything else.
+That range is a range, not a floor: every lesson declares
+`requires-python = ">=3.11,<3.15"` and CI runs the whole set at both ends on every
+push, because an unbounded `3.11+` is a claim about versions that did not exist when
+it was written. One lesson — 4.4, the framework bakeoff — pins **3.12** exactly,
+because CrewAI's dependency tree does not build on anything newer. It declares that
+itself and uv fetches the interpreter; you do not need 3.12 for anything else.
 
 **Hardware.** Four honest tiers — pick yours and nothing you *learn* changes:
 
@@ -88,8 +91,11 @@ place.
 1. **Re-read the failing test.** The `before/` tests describe the shape of the answer,
    not just that you are wrong.
 2. **Check the phase's `VERIFIED.md`.** Each carries a dated stamp saying when its
-   lessons last passed and against which library versions. GenAI dependencies break
-   fast; if that date is old, expect drift, and upgrade one dependency at a time.
+   lessons last passed, and — where it recorded one — the exact version that run
+   resolved to. Most record the date and the declared *ranges* rather than exact
+   versions, because the lessons are version-bounded rather than locked: only the
+   capstone ships a lockfile. GenAI dependencies break fast; if that date is old,
+   expect drift, and upgrade one dependency at a time.
 3. **Open `after/`.** It is a reference, not a cheat — read it, close it, then write
    your own.
 4. **Run `genai-engineer-workbook-src/src/verify-lessons.sh`** if something looks broken

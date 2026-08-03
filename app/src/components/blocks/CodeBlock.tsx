@@ -80,7 +80,7 @@ export function CodeBlock({ code, title, accent }: CodeBlockProps) {
       {title && (
         <div className="flex items-center gap-2 border-b border-white/10 bg-terminal-bar px-3.5 py-2">
           <span className="h-2 w-2 rounded-full" style={{ background: accent }} />
-          <span className="font-mono text-[11px] tracking-wide text-white/60">{title}</span>
+          <span className="font-mono text-[12px] tracking-wide text-white/60">{title}</span>
         </div>
       )}
       {/* The snippet scrolls sideways rather than wrapping, because a wrapped

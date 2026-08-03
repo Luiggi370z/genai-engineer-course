@@ -59,7 +59,7 @@ function ResumeCard({ place, onResume }: { place: Place; onResume: () => void })
       <HugeiconsIcon icon={BookmarkAdd02Icon} size={16} style={{ color: accent }} />
       <div className="min-w-0">
         <div
-          className="font-mono text-[11px] uppercase tracking-[0.16em]"
+          className="font-mono text-[12px] uppercase tracking-[0.16em]"
           style={{ color: accent }}
         >
           Pick up where you left off
@@ -77,7 +77,7 @@ function SectionLabel({ kicker, title, tone }: { kicker: string; title: string; 
   return (
     <>
       <div
-        className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em]"
+        className="mb-1 font-mono text-[12px] uppercase tracking-[0.16em]"
         style={{ color: tone ?? "var(--color-graphite)" }}
       >
         {kicker}
@@ -102,7 +102,7 @@ export function Dashboard({
   return (
     <div className="max-w-[840px]">
       <header className="pt-2 pb-2">
-        <div className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-graphite">
+        <div className="mb-3 font-mono text-[12px] uppercase tracking-[0.2em] text-graphite">
           Self-paced · {phases.length} phases · {workshopCount} workshops · {dashboard.refreshed}
         </div>
         <h1 className="max-w-[24ch] text-[34px] font-bold leading-[1.12] tracking-tight text-ink">
@@ -119,11 +119,11 @@ export function Dashboard({
               <span className="text-[20px] font-bold leading-none text-ink">
                 {formatPct(overallPct)}
               </span>
-              <span className="font-mono text-[11px] text-graphite">
+              <span className="font-mono text-[12px] text-graphite">
                 {overall.done} of {overall.total}
               </span>
             </div>
-            <div className="mt-0.5 font-mono text-[11px] tracking-wide text-graphite">
+            <div className="mt-0.5 font-mono text-[12px] tracking-wide text-graphite">
               {dashboard.progressCaption}
             </div>
           </div>
@@ -146,7 +146,7 @@ export function Dashboard({
           >
             <div className="flex items-center justify-between gap-2">
               <span
-                className="font-mono text-[11px] uppercase tracking-[0.16em]"
+                className="font-mono text-[12px] uppercase tracking-[0.16em]"
                 style={{ color: accentOf(phase.id) }}
               >
                 Phase {String(phase.num).padStart(2, "0")} · {phase.weeks}
@@ -168,7 +168,7 @@ export function Dashboard({
         <div className="space-y-2.5 rounded-lg border border-line bg-card px-5 py-4">
           {dashboard.loop.map((item) => (
             <div key={item.step} className="flex gap-3 text-[13.5px] leading-relaxed text-ink/85">
-              <span className="mt-0.5 shrink-0 font-mono text-[11px] text-graphite">
+              <span className="mt-0.5 shrink-0 font-mono text-[12px] text-graphite">
                 {item.step}
               </span>
               <span>
@@ -249,7 +249,7 @@ export function Dashboard({
         <div className="divide-y divide-line/60 rounded-lg border border-line bg-card">
           {milestones.map((milestone, i) => (
             <div key={milestone.stage} className="flex gap-4 px-4 py-3">
-              <span className="mt-0.5 w-6 shrink-0 font-mono text-[11px] text-graphite">
+              <span className="mt-0.5 w-6 shrink-0 font-mono text-[12px] text-graphite">
                 G{i + 1}
               </span>
               <div>

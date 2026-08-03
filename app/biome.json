@@ -50,6 +50,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["src/components/ui/ScrollRegion.tsx"],
+      "linter": {
+        "rules": {
+          "a11y": {
+            "useSemanticElements": "off"
+          }
+        }
+      }
     }
   ]
 }

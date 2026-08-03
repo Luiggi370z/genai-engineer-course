@@ -8,9 +8,11 @@ import { accentOf } from "../../lib/accent";
 import { InlineText } from "../../lib/markdown";
 import type { Progress } from "../../lib/progress";
 import { readingMinutes } from "../../lib/reading-time";
+import { isLongSection } from "../../lib/section-size";
 import { BlockList } from "../blocks/BlockList";
 import { CheckItem } from "../ui/CheckItem";
 import { SectionHeading } from "../ui/SectionHeading";
+import { CollapsibleSection } from "./CollapsibleSection";
 import { ExerciseCard } from "./ExerciseCard";
 import { LadderRail } from "./LadderRail";
 import { PhaseToc, type TocEntry } from "./PhaseToc";
@@ -81,7 +83,7 @@ export function PhaseView({
         <header className="pt-2">
           <div className="mb-5 h-1 w-14 rounded-full" style={{ background: accent }} />
           <div
-            className="mb-2 font-mono text-[11px] uppercase tracking-[0.18em]"
+            className="mb-2 font-mono text-[12px] uppercase tracking-[0.18em]"
             style={{ color: accent }}
           >
             Phase {String(phase.num).padStart(2, "0")} · {phase.weeks}
@@ -102,7 +104,7 @@ export function PhaseView({
           >
             <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <span
-                className="font-mono text-[11px] uppercase tracking-[0.16em]"
+                className="font-mono text-[12px] uppercase tracking-[0.16em]"
                 style={{ color: accent }}
               >
                 The 60-second version
@@ -112,7 +114,7 @@ export function PhaseView({
               runs a fortnight would read as the time the phase takes, which is the
               exact misconception the course spends nine phases attacking.
             */}
-              <span className="font-mono text-[11px] text-graphite">
+              <span className="font-mono text-[12px] text-graphite">
                 ~{minutes} min to read — the work itself runs {phase.weeks}
               </span>
             </div>
@@ -128,8 +130,8 @@ export function PhaseView({
           */}
           <p className="mt-3 max-w-[68ch] text-[12.5px] leading-[1.65] text-graphite">
             <span className="font-medium text-ink/75">Attempt before you read.</span> Every lesson
-            ships a <code className="font-mono text-[11.5px]">before/</code> you write and an{" "}
-            <code className="font-mono text-[11.5px]">after/</code> that already works. Open the
+            ships a <code className="font-mono text-[12px]">before/</code> you write and an{" "}
+            <code className="font-mono text-[12px]">after/</code> that already works. Open the
             reference only once your own attempt runs or you are genuinely stuck, and diff it
             against what you wrote. Reading a working solution feels like learning and mostly is
             not: the struggle you skip is the part that makes it stick, and a solution you have read
@@ -196,37 +198,46 @@ export function PhaseView({
           title="Core concepts"
           accent={accent}
         />
-        <div className="space-y-5">
-          {phase.concepts.map((concept, i) => (
-            <article
-              key={concept.id}
-              // Stable per-card anchor. The id is already unique course-wide (the
-              // integrity gate enforces it) and it is what `scripts/screenshot.mjs`
-              // navigates to when it photographs each block kind.
-              id={concept.id}
-              className="rounded-lg border border-line bg-card px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-            >
-              <div className="flex flex-wrap items-baseline gap-3">
-                <span className="font-mono text-[11px]" style={{ color: accent }}>
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <h3 className="text-[15.5px] font-bold tracking-tight text-ink">{concept.title}</h3>
-                {concept.tag && (
-                  <span
-                    className="rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide"
-                    style={{
-                      background: `color-mix(in oklab, ${accent} 12%, transparent)`,
-                      color: accent,
-                    }}
-                  >
-                    {concept.tag}
+        <CollapsibleSection
+          title="Core concepts"
+          summary={`${phase.concepts.length} cards`}
+          accent={accent}
+          collapsible={isLongSection(phase, "concepts")}
+        >
+          <div className="space-y-5">
+            {phase.concepts.map((concept, i) => (
+              <article
+                key={concept.id}
+                // Stable per-card anchor. The id is already unique course-wide (the
+                // integrity gate enforces it) and it is what `scripts/screenshot.mjs`
+                // navigates to when it photographs each block kind.
+                id={concept.id}
+                className="rounded-lg border border-line bg-card px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+              >
+                <div className="flex flex-wrap items-baseline gap-3">
+                  <span className="font-mono text-[12px]" style={{ color: accent }}>
+                    {String(i + 1).padStart(2, "0")}
                   </span>
-                )}
-              </div>
-              <BlockList blocks={concept.blocks} accent={accent} />
-            </article>
-          ))}
-        </div>
+                  <h3 className="text-[15.5px] font-bold tracking-tight text-ink">
+                    {concept.title}
+                  </h3>
+                  {concept.tag && (
+                    <span
+                      className="rounded px-1.5 py-0.5 font-mono text-[12px] uppercase tracking-wide"
+                      style={{
+                        background: `color-mix(in oklab, ${accent} 12%, transparent)`,
+                        color: accent,
+                      }}
+                    >
+                      {concept.tag}
+                    </span>
+                  )}
+                </div>
+                <BlockList blocks={concept.blocks} accent={accent} />
+              </article>
+            ))}
+          </div>
+        </CollapsibleSection>
 
         {phase.example && (
           <div
@@ -238,7 +249,7 @@ export function PhaseView({
             }}
           >
             <div
-              className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.16em]"
+              className="mb-1.5 font-mono text-[12px] uppercase tracking-[0.16em]"
               style={{ color: accent }}
             >
               {phase.example.title}
@@ -255,28 +266,45 @@ export function PhaseView({
           title="Exercises"
           accent={accent}
         />
-        <LadderRail exercises={phase.exercises} accent={accent} />
-        <div className="space-y-3">
-          {phase.exercises.map((exercise, i) => (
-            <ExerciseCard
-              key={exercise.id}
-              exercise={exercise}
-              index={i}
-              done={!!progress[exercise.id]}
-              onToggle={onToggle}
-              accent={accent}
-            />
-          ))}
-        </div>
+        <CollapsibleSection
+          title="Exercises"
+          summary={`${phase.exercises.length} exercises`}
+          accent={accent}
+          collapsible={isLongSection(phase, "exercises")}
+        >
+          <LadderRail exercises={phase.exercises} accent={accent} />
+          <div className="space-y-3">
+            {phase.exercises.map((exercise, i) => (
+              <ExerciseCard
+                key={exercise.id}
+                exercise={exercise}
+                index={i}
+                done={!!progress[exercise.id]}
+                onToggle={onToggle}
+                accent={accent}
+              />
+            ))}
+          </div>
+        </CollapsibleSection>
 
         {phase.workshop && (
+          // The anchor stays outside the collapse, always mounted: the chip bar
+          // and the rail both link to `#workshop`, and the a11y gate fails a link
+          // that points at nothing.
           <div id="workshop" className="scroll-mt-6">
-            <WorkshopCard
-              workshop={phase.workshop}
-              progress={progress}
-              onToggle={onToggle}
+            <CollapsibleSection
+              title="Workshop"
+              summary={`${phase.workshop.deliverables.length} deliverables`}
               accent={accent}
-            />
+              collapsible={isLongSection(phase, "workshop")}
+            >
+              <WorkshopCard
+                workshop={phase.workshop}
+                progress={progress}
+                onToggle={onToggle}
+                accent={accent}
+              />
+            </CollapsibleSection>
           </div>
         )}
 
@@ -316,26 +344,33 @@ export function PhaseView({
               title="Interview question bank"
               accent={accent}
             />
-            <div className="space-y-6">
-              {phase.qbank.map((group) => (
-                <div key={group.group}>
-                  <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.14em] text-graphite">
-                    {group.group}
+            <CollapsibleSection
+              title="the question bank"
+              summary={`${phase.qbank.reduce((n, g) => n + g.items.length, 0)} questions`}
+              accent={accent}
+              collapsible={isLongSection(phase, "qbank")}
+            >
+              <div className="space-y-6">
+                {phase.qbank.map((group) => (
+                  <div key={group.group}>
+                    <div className="mb-2 font-mono text-[12px] uppercase tracking-[0.14em] text-graphite">
+                      {group.group}
+                    </div>
+                    <div className="space-y-2">
+                      {group.items.map((q) => (
+                        <QuestionCard
+                          key={q.id}
+                          q={q}
+                          accent={accent}
+                          progress={progress}
+                          onToggle={onToggle}
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    {group.items.map((q) => (
-                      <QuestionCard
-                        key={q.id}
-                        q={q}
-                        accent={accent}
-                        progress={progress}
-                        onToggle={onToggle}
-                      />
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </CollapsibleSection>
           </>
         )}
 
@@ -351,7 +386,7 @@ export function PhaseView({
               key={resource.url}
               className="flex items-baseline gap-2.5 text-[13px] leading-relaxed"
             >
-              <span className="shrink-0 font-mono text-[11px]" style={{ color: accent }}>
+              <span className="shrink-0 font-mono text-[12px]" style={{ color: accent }}>
                 {String(i + 1).padStart(2, "0")}
               </span>
               <a
@@ -362,7 +397,7 @@ export function PhaseView({
               >
                 {resource.label}
               </a>
-              <span className="hidden truncate font-mono text-[11px] text-graphite sm:inline">
+              <span className="hidden truncate font-mono text-[12px] text-graphite sm:inline">
                 {resource.url.replace(/^https?:\/\//, "").split("/")[0]}
               </span>
             </li>
@@ -381,7 +416,7 @@ export function PhaseView({
             >
               <div className="text-left">
                 <div
-                  className="font-mono text-[11px] uppercase tracking-[0.14em]"
+                  className="font-mono text-[12px] uppercase tracking-[0.14em]"
                   style={{ color: accentOf(nextPhase.id) }}
                 >
                   Next · Phase {String(nextPhase.num).padStart(2, "0")}

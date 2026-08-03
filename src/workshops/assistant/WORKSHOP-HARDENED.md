@@ -1,6 +1,8 @@
 # Workshop · Harden the assistant  (ends Phase 6)
 
-**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.
+**Effort.** ~3.5 h of focused build time · +60 min for the integration tier · ~6 h realistic first pass.
+
+*An author's estimate, bounded by measured volume — deliverables, TODO groups, tests, brief length — and not by learner telemetry, which this course does not collect. Treat it as relative sizing, not a stopwatch.*
 
 Armor the assistant against the attack catalog. The bar is **containment**: a
 landed injection may produce junk text, but must never fire a gated tool or leak PII.

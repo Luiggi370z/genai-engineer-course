@@ -15,11 +15,27 @@ Reference: ../../after/src/assistant/provenance.py.
 """
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Iterable
+from pathlib import Path
 
 STAMP_LENGTH = 8
 #: Git's conventional short form.
 SHA_LENGTH = 12
+
+#: The course source root. `provenance.py` sits at
+#: `<src>/workshops/assistant/before/src/assistant/`.
+SRC = Path(__file__).resolve().parents[5]
+
+#: Everything the full-fidelity release numbers are a measurement of, under `SRC`.
+#:
+#: Two entries because the red team is one dataset shared with the lesson that
+#: maintains it, so a row added there changes what a containment number means
+#: without touching a line of capstone code.
+MEASURED_SOURCE = (
+    "workshops/assistant/after",
+    "phase6-design-defend/01-red-team/after/evals/redteam.jsonl",
+)
 
 
 def build_version() -> str:
@@ -75,3 +91,50 @@ def corpus_version(docs: Iterable[str]) -> str:
 def dataset_version(label: str, questions: Iterable[str]) -> str:
     """TODO 5: a stamp for an eval set: `<label>-<count>-<digest>`."""
     raise NotImplementedError
+
+
+def source_id() -> str:
+    """TODO 6: a stable name for the code and data a measurement was taken against.
+
+    The same rule as every stamp above, one level up: `build_version` says which
+    commit is *serving*, this says which source was *measured*. `release.yml` reads
+    it out of the committed evidence and refuses to publish a tag whose tree answers
+    differently — so a release cannot quote numbers taken against other code.
+
+    Return four different things, and the distinctions are the exercise:
+
+      ``<8 hex>``         `digest` over `"<path>=<oid>"` for each MEASURED_SOURCE
+                          entry, where the oid is `git rev-parse HEAD:src/<path>`.
+                          Hash the git object ids, NOT the commit sha — the evidence
+                          has to be committed to the release it certifies, and a
+                          commit sha changes when the evidence file lands while a
+                          tree hash of the measured paths does not.
+      ``dirty-<8 hex>``   when `git status --porcelain` reports anything under those
+                          paths. Prefix the same digest rather than returning a
+                          separate flag: a gate that compares ids cannot forget to
+                          also check a boolean, and this id matches nothing.
+                          Careful — a pathspec resolves against the cwd, so use the
+                          `:/` root-relative form or a clean tree will read dirty.
+      ``release-<sha12>`` no git, but `SRC / "RELEASE_COMMIT"` exists — the ZIP
+                          lane, where `package.sh` wrote the release's own commit.
+      ``unbound``         neither. Never invent a value here: an id that compares
+                          equal to a real one is worse than admitting you have none.
+
+    `_git` below is written for you; the judgement being tested is what to hash.
+    """
+    raise NotImplementedError
+
+
+def _git(*args: str) -> str:
+    """Git's answer, or "" when git cannot answer — including not being installed."""
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(SRC), *args],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip() if done.returncode == 0 else ""

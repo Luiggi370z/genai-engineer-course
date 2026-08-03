@@ -632,7 +632,7 @@ class LangMemStore:                    # langmem over a LangGraph store
       "Give the assistant a memory it can invalidate, a context budget it respects, and a research crew it delegates to — with the cost written down.",
     repo: "workshops/assistant",
     doc: "WORKSHOP-MEMORY-CREW.md",
-    effort: { fast: 180, integration: 30, realistic: 360 },
+    effort: { fast: 210, integration: 30, realistic: 330 },
     proves: "integrate",
     assesses: ["p-memory-o1", "p-memory-o2", "p-memory-o3", "p-memory-o4"],
     needs: ["p3-o2", "p-evals-o5"],

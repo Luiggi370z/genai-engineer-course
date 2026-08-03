@@ -642,7 +642,7 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
     subtitle: "Everything from Phases 1–2, wired into one running system you can curl.",
     repo: "workshops/assistant",
     doc: "WORKSHOP-RAG-SERVICE.md",
-    effort: { fast: 120, integration: 60, realistic: 240 },
+    effort: { fast: 120, integration: 60, realistic: 210 },
     proves: "integrate",
     assesses: ["p2-o1", "p2-o2", "p2-o3", "p2-o4"],
     needs: ["p1-o1", "p1-o2", "p1-o3"],

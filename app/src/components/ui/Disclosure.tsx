@@ -25,9 +25,14 @@ interface Disclosure {
  * The chrome stays separate on purpose. A predict prompt must read as a task you
  * owe an answer to and a deep dive as an aside you may skip — if the two looked
  * alike, students would learn one habit for both, and the habit would be skipping.
+ *
+ * Closed by default, because the two original consumers hide something you should
+ * try to answer first. `CollapsibleSection` passes `true`: a phase section is
+ * ordinary reading that a phone happens to need folded, and defaulting that shut
+ * on a desktop would hide the course.
  */
-export function useDisclosure(): Disclosure {
-  const [open, setOpen] = useState(false);
+export function useDisclosure(initiallyOpen = false): Disclosure {
+  const [open, setOpen] = useState(initiallyOpen);
   const panelId = useId();
   const toggle = useCallback(() => setOpen((prev) => !prev), []);
 

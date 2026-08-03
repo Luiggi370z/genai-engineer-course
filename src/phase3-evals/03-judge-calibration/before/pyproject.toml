@@ -1,7 +1,7 @@
 [project]
 name = "judge-calibration-before"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
   "scikit-learn>=1.5,<2",   # cohen_kappa_score — don't hand-roll inter-rater stats
   "pytest>=8,<9",

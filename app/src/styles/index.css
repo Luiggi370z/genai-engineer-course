@@ -37,6 +37,9 @@
   --color-graphite: #5a6663;
   --color-card: #ffffff;
   --color-line: #e2e5e0;
+  /* See `accentUnderWhite` in `lib/accent.ts`. The light accents already clear
+     4.5:1 under white — by 0.31 at the tightest — so they are left alone. */
+  --accent-scrim: 0%;
 }
 
 .dark {
@@ -45,6 +48,10 @@
   --color-graphite: #9ea8a3;
   --color-card: #1c211f;
   --color-line: #3e4642;
+  /* The dark accents are mid-tone, so white on them is about 2.5:1. 32% is the
+     computed minimum across the nine; 40% buys margin, and the browser tier
+     measures the result rather than trusting this arithmetic. */
+  --accent-scrim: 40%;
 }
 
 body {
@@ -92,7 +99,7 @@ body {
   background: var(--color-ink);
   color: var(--color-paper);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -105,6 +112,11 @@ body {
        reset has to win against every utility class it is overriding */
     transition: none !important;
     animation: none !important;
+    /* Covers a smooth scroll asked for in CSS. It cannot cover one asked for in
+       JS — an explicit `behavior` argument outranks this property — so
+       `goToSection` reads the same preference itself, and the `reduced-motion`
+       rule in `scripts/lib/a11y.mjs` fails the build if a literal comes back. */
+    scroll-behavior: auto !important;
     /* biome-ignore-end lint/complexity/noImportantStyles: see above */
   }
 }

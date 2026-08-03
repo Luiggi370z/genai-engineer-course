@@ -212,6 +212,57 @@ export function pinFindings({ manifests, sources = [], packages }) {
 }
 
 /**
+ * Every `uses:` in a workflow names a commit, not a tag.
+ *
+ * The same rule as the rest of this file, applied to the one dependency the repo
+ * does not install: `actions/checkout@v5` is a tag its owner can move, so it
+ * resolves to whatever that repository points it at on the morning CI runs — and
+ * these jobs hold a token that can publish a release. A tag is also invisible drift
+ * in a way a version specifier is not, because nothing in the file changes.
+ *
+ * The trailing comment is required, not decoration. A bare 40-hex SHA cannot be
+ * read, compared or bumped by a person, so a pin without one is a pin nobody will
+ * maintain — which is how a pinned action ends up four years stale.
+ *
+ * Local actions (`./.github/actions/...`) and docker refs are left alone: the first
+ * is this repository's own code at this commit, and the second is not a git ref.
+ */
+export function actionPinFindings({ workflows }) {
+  const out = [];
+  const USES = /^\s*-?\s*uses:\s*(\S+)(.*)$/gm;
+  for (const { file, source } of workflows) {
+    for (const match of source.matchAll(USES)) {
+      const [, ref, rest] = match;
+      if (ref.startsWith("./") || ref.startsWith("docker://")) continue;
+      const line = source.slice(0, match.index).split("\n").length;
+      const [, version] = ref.split("@");
+      if (!version) {
+        out.push({
+          rule: "action-pin",
+          subject: `${file}:${line}`,
+          message: `\`${ref}\` names no version at all — pin it to a commit SHA`,
+        });
+      } else if (!/^[0-9a-f]{40}$/.test(version)) {
+        out.push({
+          rule: "action-pin",
+          subject: `${file}:${line}`,
+          message:
+            `\`${ref}\` is pinned to the mutable tag \`${version}\`. Take the commit ` +
+            `it peels to:\n  git ls-remote --tags https://github.com/${ref.split("@")[0]} ${version}`,
+        });
+      } else if (!/#\s*\S/.test(rest)) {
+        out.push({
+          rule: "action-pin",
+          subject: `${file}:${line}`,
+          message: `pinned to ${version.slice(0, 12)}… with no version in a trailing comment`,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * No file names a model tag that competes with the canonical one for its role.
  *
  * `rivals` is authored rather than inferred: only a human knows that

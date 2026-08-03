@@ -336,7 +336,7 @@ if __name__ == "__main__":
       "Build an MCP server for a service you care about — then let your Phase-4 assistant consume it as a tool.",
     repo: "workshops/assistant",
     doc: "WORKSHOP-MCP.md",
-    effort: { fast: 120, integration: 60, realistic: 240 },
+    effort: { fast: 120, integration: 60, realistic: 210 },
     proves: "integrate",
     assesses: ["p5-o2", "p5-o3", "p5-o4"],
     needs: ["p3-o2"],

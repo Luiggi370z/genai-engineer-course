@@ -29,6 +29,10 @@ Two rules this lane exists to enforce:
    this refuses to run. A release measurement that silently substitutes the
    offline retriever when Qdrant is unreachable is worse than no measurement,
    because it comes with a date and a stamp.
+3. **A measurement names the code it measured.** A date is not a binding: it
+   cannot tell anyone whether the numbers describe what is about to be published
+   or the tree from two weeks ago. `source_id` answers that, and `release.yml`
+   refuses to publish a release whose evidence answers with a different tree.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from pathlib import Path
 from assistant import observe, report
 from assistant.core import Assistant
 from assistant.evals import Judge
+from assistant.provenance import source_id  # stdlib-only: the gate imports it alone
 from assistant.service import build_assistant
 from assistant.settings import Settings
 
@@ -57,6 +62,7 @@ REDTEAM = (
 #: A landed injection may not reach these. The bar is containment, not detection:
 #: the filter is allowed to miss, the gate is not allowed to open.
 GATED = frozenset({"send_telegram"})
+
 
 
 @dataclass(frozen=True)
@@ -245,6 +251,46 @@ def require_real_tiers(assistant: Assistant) -> dict[str, str | float | int]:
     return tier
 
 
+def require_no_fallback_during(
+    assistant: Assistant, tier_before: dict[str, str | float | int]
+) -> None:
+    """The pre-flight check is not the claim the page makes.
+
+    `require_real_tiers` runs before `rag.add` and before the first question, so it
+    proves the stack was up at t=0 and nothing more. Every adapter here fails
+    *open* — right for a service, wrong for a measurement — so an Ollama that stops
+    answering on question nine hands the rest of the suite to the offline stitcher,
+    and the page still prints "No component fell back", because a pre-flight check
+    wrote that sentence about a different moment.
+
+    That is not hypothetical: a run reporting faithfulness 0.650 under a
+    no-fallback claim is what sent this back for a second look, and a pre-flight
+    check cannot tell a hard question from a composer that quietly went away.
+
+    Called after the evals and the red team, before any number is assembled, so a
+    fallen-back run produces an error instead of a page.
+    """
+    wrong = []
+    if assistant.degraded:
+        wrong.append(f"degraded={dict(assistant.degraded)}")
+    drift = {
+        k: (tier_before.get(k), v) for k, v in assistant.tier().items() if tier_before.get(k) != v
+    }
+    if drift:
+        wrong.append(f"tier moved mid-run: {drift}")
+    if not wrong:
+        return
+    raise SystemExit(
+        "this run fell back DURING the measurement, so its numbers are a mix of "
+        "two tiers:\n  "
+        + "\n  ".join(wrong)
+        + "\n\nThe pre-flight check passed, which is why nothing said so until now. "
+        "Re-run once the stack is stable; a partially degraded run cannot be "
+        "published under a full-fidelity heading, and cannot be repaired after the "
+        "fact either — nobody can say which answers came from which tier."
+    )
+
+
 def provenance(assistant: Assistant, judge_model: str, rows: int, tokens: str) -> str:
     """What was measured, stated before any number is. See rule 1 in the header."""
     s, tier = assistant.settings, assistant.tier()
@@ -256,8 +302,10 @@ def provenance(assistant: Assistant, judge_model: str, rows: int, tokens: str) -
         f"`{_ragas_version()}` with `{judge_model}` at temperature 0; tokens "
         f"{report.TOKEN_SOURCE_NOTE[tokens]}; red team = "
         f"all {rows} rows of the Phase 6 versioned dataset, benign controls "
-        "included. No component fell back — this lane refuses to run if one "
-        "does.\n"
+        "included. No component fell back — checked before the first question and "
+        "again after the last one, and this lane refuses to publish either way. "
+        f"Measured against source `{source_id()}`; `release.yml` will not publish a "
+        "release whose code answers to a different one.\n"
     )
 
 
@@ -271,7 +319,7 @@ def measure(judge_model: str = "qwen3-coder:30b") -> tuple[str, report.Measured]
     """One full-fidelity trial: the release page, and the gate's numbers."""
     settings = Settings.from_env()
     assistant = build_assistant(settings)
-    require_real_tiers(assistant)
+    tier_before = require_real_tiers(assistant)
 
     assistant.rag.add(report.CORPUS)
     meter: dict[str, int] = {}
@@ -282,6 +330,10 @@ def measure(judge_model: str = "qwen3-coder:30b") -> tuple[str, report.Measured]
 
     rows = load_redteam()
     redteam = run_redteam(assistant, rows)
+
+    # Before a single number is read out of `suite` or `redteam`. Everything below
+    # this line assumes one tier answered every question.
+    require_no_fallback_during(assistant, tier_before)
 
     from assistant.observe import duration_ms, percentile
 
@@ -313,6 +365,9 @@ def measure(judge_model: str = "qwen3-coder:30b") -> tuple[str, report.Measured]
             **report.versions_for(assistant),
             "judge": f"ragas-{_ragas_version()}/{judge_model}",
             "redteam": f"v{rows[0].version}+rows-{len(rows)}",
+            # The binding `release.yml` checks. Everything else in this table says
+            # what the instrument was; this says what was on the bench.
+            "source": source_id(),
         },
     )
 
@@ -357,7 +412,16 @@ def main() -> int:
     parser.add_argument("--out", default="evidence/RELEASE-EVIDENCE.md")
     parser.add_argument("--json", default="evidence/release-report.json")
     parser.add_argument("--judge", default="qwen3-coder:30b", help="the pinned judge model")
+    # Lets the publication gate ask THIS module what the current tree answers to,
+    # instead of a copy of the path list in a workflow file drifting away from it.
+    # Same reason `verify-e2e.sh` has `--print-commit`.
+    parser.add_argument(
+        "--print-source-id", action="store_true", help="print the source binding and exit"
+    )
     args = parser.parse_args()
+    if args.print_source_id:
+        print(source_id())
+        return 0
     page, measured = measure(args.judge)
     for path, body in ((args.out, page), (args.json, report.dump(measured))):
         target = Path(path)

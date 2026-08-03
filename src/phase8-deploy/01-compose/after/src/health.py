@@ -56,17 +56,42 @@ def missing_services(services: dict) -> list[str]:
     return [name for name in REQUIRED_SERVICES if name not in services]
 
 
+def image_reference(image: str) -> tuple[str, str]:
+    """An image reference split into its tag and its digest, either of which may be
+    empty. `name[:tag][@digest]`, and the awkward parts are both real:
+
+    - the digest contains a colon (`@sha256:0bd98f…`), so reading the tag with a
+      naive `rsplit(":", 1)` on a digest-pinned image returns the hex and calls it a
+      version. It looks pinned, and it is — but a check that cannot tell the two
+      apart cannot report which kind of pin it found;
+    - a registry host may carry a port (`localhost:5000/qdrant`), so the tag is only
+      the colon AFTER the last slash.
+    """
+    remainder, _, digest = image.partition("@")
+    name = remainder.rpartition("/")[2]
+    tag = name.rpartition(":")[2] if ":" in name else ""
+    return tag, digest
+
+
 def unpinned_images(services: dict) -> list[str]:
-    """Services whose image has no tag, or the tag is ':latest'. Built services are
-    exempt — their pin is the Dockerfile. ':latest' means every reviewer runs a
-    different stack, which is the opposite of reproducible."""
+    """Services whose image is not pinned to specific bytes. Built services are
+    exempt — their pin is the Dockerfile.
+
+    Pinned means a digest, or a tag that is not ':latest'. The two are not equally
+    strong and the ordering matters: ':latest' means every reviewer runs a different
+    stack, and a version tag narrows that without closing it, because a tag is a
+    mutable pointer its publisher can repoint at a rebuild. Only the digest is a
+    content address. This accepts a bare version tag anyway — most of the ecosystem
+    ships that way and refusing it would fail every compose file a student has ever
+    seen — but the stack it reviews carries both, and so should anything you deploy.
+    """
     offenders = []
     for name, spec in services.items():
         image = (spec or {}).get("image")
         if image is None:
             continue
-        tag = image.rsplit(":", 1)[1] if ":" in image else ""
-        if not tag or tag == "latest":
+        tag, digest = image_reference(image)
+        if not digest and (not tag or tag == "latest"):
             offenders.append(name)
     return offenders
 

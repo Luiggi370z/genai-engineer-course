@@ -52,7 +52,9 @@ and a check that passes on one is not a check.
 
 1. Parse once with `yaml.safe_load`, then walk dicts. A service pulls an image if
    it has an `image:` key; built services are exempt from the pin check — their
-   pin is the Dockerfile.
+   pin is the Dockerfile. An image reference is `name[:tag][@digest]`, and two of
+   its colons are not tag separators: the one inside `@sha256:…` and the one in a
+   registry port like `localhost:5000/qdrant`. Split the digest off first.
 2. `depends_on: [qdrant]` (list form) always waits for start only. The map form
    must carry `condition: service_healthy` — a started Qdrant is not a ready
    Qdrant. The reference wiring, including the ollama model bootstrap, is in

@@ -24,7 +24,7 @@ export function FlowDiagram({ title, shape = "linear", nodes, accent }: FlowDiag
   return (
     <div className="my-4">
       {title && (
-        <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.12em] text-graphite">
+        <div className="mb-2 font-mono text-[12px] uppercase tracking-[0.12em] text-graphite">
           {title}
         </div>
       )}

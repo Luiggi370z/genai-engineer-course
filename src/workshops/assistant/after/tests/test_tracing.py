@@ -8,14 +8,17 @@ tier and fails in CI rather than in a dashboard three weeks from now.
 """
 from __future__ import annotations
 
+import json
+
 from fastapi.testclient import TestClient
 
-from assistant import observe
+from assistant import composers, observe
 from assistant.api import create_app
 from assistant.core import Assistant
 from assistant.observe import attr, children_of, descendants_of, one_trace
 from assistant.service import build_assistant
 from assistant.settings import Settings
+from assistant.usage import measure as measure_usage
 
 CORPUS = ["approved refunds are processed within five business days"]
 
@@ -267,3 +270,61 @@ def test_a_rejected_token_is_a_span_with_a_reason_and_no_pipeline():
     assert attr(auth_span, observe.AUTH_REASON)
     assert attr(auth_span, observe.AUTH_MODE) == "shared-secret"
     assert [s for s in spans if s.name == observe.PIPELINE_SPAN] == []
+
+
+# --- streamed and batched answers cost the same --------------------------------
+
+
+def compose_out(made: Assistant) -> int:
+    return attr(made.rec.named(observe.COMPOSE_SPAN)[0], observe.TOKENS_OUT)
+
+
+def test_a_streamed_answer_meters_the_same_tokens_as_the_batched_one():
+    """The transport is not a price.
+
+    `gated_chunks` ends with the whole answer, not a delta, and `ask_stream` used
+    to append that terminal payload to the list that had already collected every
+    released chunk. So `"".join(text)` was the answer twice and every completed
+    stream billed double — on the compose span, which is the span this course
+    tells students to bill from.
+
+    Asserted against the batch path rather than against a number, because a
+    hardcoded token count is a test that passes after the composer is reworded and
+    tells you nothing about whether the two paths agree.
+    """
+    batched = assistant()
+    answer = batched.ask("how long do refunds take", "alice")["answer"]
+
+    streamed = assistant()
+    frames = list(streamed.ask_stream("how long do refunds take", "alice"))
+    done = json.loads(frames[-1].split("data: ", 1)[1])
+    assert done["answer"] == answer, "same question, same composer, same answer"
+
+    assert compose_out(streamed) == compose_out(batched)
+    # And the shape of the old bug specifically: it reported exactly 2x, so a
+    # regression that halves or doubles is worth naming rather than just failing
+    # an equality.
+    assert compose_out(streamed) != 2 * compose_out(batched)
+
+
+def test_a_truncated_stream_meters_what_escaped_and_not_twice_over():
+    """The truncated branch double-counted the same way the completed one did.
+
+    Metering it from the partial answer the client was handed is the whole rule:
+    one canonical string per stream, whichever frame ends it.
+    """
+
+    def dies_after_an_opening(*_args, **_kwargs):
+        yield "Refunds are processed within "
+        raise composers.StreamTruncated("no chunk within 60.0s")
+
+    made = assistant()
+    made.stream_compose = dies_after_an_opening
+    frames = list(made.ask_stream("how long do refunds take", "alice"))
+    done = json.loads(frames[-1].split("data: ", 1)[1])
+    assert done["truncated"] is True
+
+    partial = done["answer"]
+    assert partial, "the fragment that escaped is what there is to meter"
+    expected = measure_usage("", partial).tokens_out
+    assert compose_out(made) == expected

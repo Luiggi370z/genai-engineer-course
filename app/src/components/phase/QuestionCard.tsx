@@ -3,6 +3,7 @@ import PlusSignIcon from "@hugeicons/core-free-icons/PlusSignIcon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { DefenseElement, QuestionAnswer } from "../../data/types";
+import { accentUnderWhite } from "../../lib/accent";
 import { InlineText } from "../../lib/markdown";
 import type { Progress } from "../../lib/progress";
 
@@ -44,7 +45,7 @@ export function QuestionCard({ q, accent, progress, onToggle, source }: Question
         className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-ink/[0.03]"
       >
         <span
-          className="mt-1 shrink-0 rounded px-1.5 py-0.5 font-mono text-[11px]"
+          className="mt-1 shrink-0 rounded px-1.5 py-0.5 font-mono text-[12px]"
           style={{
             background: known ? accent : "color-mix(in oklab, var(--color-ink) 8%, transparent)",
             color: known ? "#fff" : "var(--color-graphite)",
@@ -55,7 +56,7 @@ export function QuestionCard({ q, accent, progress, onToggle, source }: Question
         <span className="flex-1 text-[13.5px] font-medium leading-snug text-ink">
           <InlineText text={q.q} />
           {source && (
-            <span className="ml-2 whitespace-nowrap font-mono text-[11px] uppercase tracking-[0.12em] text-graphite">
+            <span className="ml-2 whitespace-nowrap font-mono text-[12px] uppercase tracking-[0.12em] text-graphite">
               ← {source}
             </span>
           )}
@@ -68,14 +69,14 @@ export function QuestionCard({ q, accent, progress, onToggle, source }: Question
           answer is a bar you grade yourself against, and everyone passes that one. */}
       {q.demands && q.demands.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 px-4 pb-2.5 pl-[52px]">
-          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-graphite">
+          <span className="font-mono text-[12px] uppercase tracking-[0.12em] text-graphite">
             your answer must name
           </span>
           {q.demands.map((d) => (
             <span
               key={d}
               title={DEMAND[d].means}
-              className="rounded-full border border-line px-2 py-0.5 text-[11px] text-graphite"
+              className="rounded-full border border-line px-2 py-0.5 text-[12px] text-graphite"
             >
               {DEMAND[d].label}
             </span>
@@ -90,11 +91,15 @@ export function QuestionCard({ q, accent, progress, onToggle, source }: Question
           <button
             type="button"
             onClick={() => onToggle(q.id)}
-            className="rounded border px-2.5 py-1.5 font-mono text-[11px] transition-colors"
+            className="rounded border px-2.5 py-1.5 font-mono text-[12px] transition-colors"
             style={
               known
                 ? { borderColor: accent, color: accent, background: "transparent" }
-                : { borderColor: accent, background: accent, color: "#fff" }
+                : {
+                    borderColor: accent,
+                    background: accentUnderWhite(accent),
+                    color: "#fff",
+                  }
             }
           >
             {known ? "Mark as not learned" : "I could answer this cold"}

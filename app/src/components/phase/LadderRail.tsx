@@ -51,23 +51,23 @@ export function LadderRail({ exercises, accent }: LadderRailProps) {
 
   return (
     <div className="mb-4 overflow-hidden rounded-lg border border-line bg-card">
-      <div className="border-b border-line/60 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
+      <div className="border-b border-line/60 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.16em] text-graphite">
         The ladder · each rung takes away one more crutch
       </div>
       <div className="grid gap-px bg-line/40 sm:grid-cols-3">
         {rungs.map((rung, i) => (
           <div key={rung.label} className="bg-card px-4 py-3">
             <div className="flex items-baseline gap-2">
-              <span className="font-mono text-[11px] text-graphite">{i + 1}</span>
+              <span className="font-mono text-[12px] text-graphite">{i + 1}</span>
               <span className="text-[12.5px] font-bold tracking-tight" style={{ color: accent }}>
                 {rung.label}
               </span>
-              <span className="font-mono text-[11px] text-graphite">{rung.count}</span>
+              <span className="font-mono text-[12px] text-graphite">{rung.count}</span>
             </div>
             <p className="mt-1 text-[12px] leading-[1.6] text-ink/70">
               {rung.where.split("`").map((part, j) =>
                 j % 2 === 1 ? (
-                  <code key={j} className="font-mono text-[11px] text-ink/85">
+                  <code key={j} className="font-mono text-[12px] text-ink/85">
                     {part}
                   </code>
                 ) : (
@@ -82,7 +82,7 @@ export function LadderRail({ exercises, accent }: LadderRailProps) {
         <p className="text-[12px] leading-[1.6] text-ink/70">
           <span className="font-semibold text-ink">A second, independent axis.</span> The rungs
           above say how much scaffolding a task removes. Each exercise also carries a{" "}
-          <span className="font-mono text-[11px] text-ink/85">proves</span> chip saying what
+          <span className="font-mono text-[12px] text-ink/85">proves</span> chip saying what
           finishing it <em>demonstrates</em> — and the two come apart: a blank-editor task can still
           only prove you can build a thing in isolation. The highest this phase reaches is{" "}
           <span className="font-semibold" style={{ color: accent }}>

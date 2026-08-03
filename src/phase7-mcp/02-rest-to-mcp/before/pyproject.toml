@@ -1,7 +1,7 @@
 [project]
 name = "rest-to-mcp-before"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"
 dependencies = [
   "mcp>=2.0.0,<3",   # SDK v2 (spec 2026-07-28). v1 code will NOT run on this.
   "pytest>=8,<9",

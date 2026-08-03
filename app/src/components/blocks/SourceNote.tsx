@@ -16,7 +16,7 @@ export function SourceNote({
   items: { label: string; url: string }[];
 }) {
   return (
-    <p className="my-2.5 text-[11.5px] leading-relaxed text-graphite">
+    <p className="my-2.5 text-[12px] leading-relaxed text-graphite">
       <span className="font-mono uppercase tracking-[0.1em]">Verified {verifiedOn}</span>
       {" · "}
       {items.map((item, i) => (

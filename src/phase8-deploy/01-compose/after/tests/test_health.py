@@ -43,6 +43,32 @@ def test_every_pulled_image_is_pinned():
     assert unpinned_images(load_services(COMPOSE)) == []
 
 
+def test_a_digest_counts_as_pinned_and_a_digests_hex_is_not_a_tag(tmp_path):
+    """The stack pins `tag@sha256:…`, which breaks the obvious way to read a tag.
+
+    `"qdrant/qdrant:v1.18.3@sha256:0bd9…".rsplit(":", 1)[1]` is the hex, not the
+    version — so a check written that way calls a digest-pinned image pinned by
+    accident, and calls `qdrant/qdrant@sha256:0bd9…` pinned for the same wrong
+    reason. Both verdicts are right; neither is earned. A registry port is the same
+    trap from the other side: the colon in `localhost:5000/qdrant` is not a tag.
+    """
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        "services:\n"
+        "  tag_and_digest:\n"
+        "    image: qdrant/qdrant:v1.18.3@sha256:0bd98fa7977f1e75694779359ca4e21\n"
+        "  digest_only:\n"
+        "    image: qdrant/qdrant@sha256:0bd98fa7977f1e75694779359ca4e21\n"
+        "  latest_with_a_digest:\n"  # the digest wins: it names bytes, ':latest' does not
+        "    image: qdrant/qdrant:latest@sha256:0bd98fa7977f1e75694779359ca4e21\n"
+        "  port_in_the_host_no_tag:\n"
+        "    image: localhost:5000/qdrant\n"
+        "  port_in_the_host_with_tag:\n"
+        "    image: localhost:5000/qdrant:v1.18.3\n"
+    )
+    assert unpinned_images(load_services(compose)) == ["port_in_the_host_no_tag"]
+
+
 def test_every_service_has_a_healthcheck():
     assert services_without_healthcheck(load_services(COMPOSE)) == []
 
@@ -86,10 +112,10 @@ def test_the_checks_actually_catch_a_broken_file(tmp_path):
     ok, problems = compose_ok(bad)
     assert not ok
     text = "\n".join(problems)
-    assert "missing service" in text        # no mcp, no ollama
-    assert "unpinned image" in text         # :latest
-    assert "waits for start" in text        # list-form depends_on
-    assert "publishes" in text              # qdrant on the host network
+    assert "missing service" in text  # no mcp, no ollama
+    assert "unpinned image" in text  # :latest
+    assert "waits for start" in text  # list-form depends_on
+    assert "publishes" in text  # qdrant on the host network
     assert "no healthcheck" in text
 
 
