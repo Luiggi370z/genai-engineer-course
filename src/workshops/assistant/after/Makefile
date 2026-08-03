@@ -27,19 +27,27 @@ report:           ## run the service on trial: PORTFOLIO.md for humans, evals/re
 # measured over — so retrieval metrics for a release would be partly a measurement
 # of the previous test run.
 #
-# `QDRANT_COLLECTION` is therefore release-specific rather than the shared
-# `assistant`, the same way `ASSISTANT_DB` is a fresh file rather than the
-# deployed volume's.
+# **Neither is set here any more, and that is the fix.** Both used to be, and both
+# were fixed names: `assistant-release` and `evidence/release.db`. A fixed name is
+# not a fresh one — it is the SAME state on every run, and `docker compose down -v`
+# reaches the volume but never the host file. The audited copy of that database held
+# 306 audit rows and 18 memories from previous runs, so the percentiles were measured
+# against a warm cache, tenancy against other subjects' memories, and containment
+# against approvals granted weeks earlier.
+#
+# So `release.py` derives both when they are unset — `evidence/runs/<id>/release.db`
+# and `assistant-release-<id>` — asserts every table and the collection start empty,
+# and removes them afterwards. Set either explicitly and you get exactly what you
+# named, which is what `--reuse-state` is for; the report is stamped `reused` and the
+# publication gate refuses it.
 RELEASE_ENV := QDRANT_URL=$${QDRANT_URL:-http://localhost:6333} \
   OLLAMA_HOST=$${OLLAMA_HOST:-http://localhost:11434} \
   ASSISTANT_EMBED_MODEL=$${ASSISTANT_EMBED_MODEL:-nomic-embed-text} \
   ASSISTANT_RERANK_MODEL=$${ASSISTANT_RERANK_MODEL:-BAAI/bge-reranker-base} \
-  QDRANT_COLLECTION=$${QDRANT_COLLECTION:-assistant-release} \
-  ASSISTANT_MIN_SCORE=$${ASSISTANT_MIN_SCORE:-0.58} \
-  ASSISTANT_DB=$${ASSISTANT_DB:-evidence/release.db}
+  ASSISTANT_MIN_SCORE=$${ASSISTANT_MIN_SCORE:-0.58}
 
 .PHONY: release-evidence
-release-evidence: ## full fidelity: deployed stack, RAGAS judge, the whole red-team dataset
+release-evidence: ## smoke evidence on the real rig: deployed stack, RAGAS judge, whole red team
 	@mkdir -p evidence
 	$(RELEASE_ENV) PYTHONPATH=src \
 	  uv run --group integration --group release python -m assistant.release

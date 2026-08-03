@@ -106,11 +106,19 @@ test("what ends in .md and is not a document reference is left alone", () => {
     "cp METRICS-WORKSHEET.md ~/job-search/metrics.md", // outside the checkout
     "the `workshops/assistant/WORKSHOP-*.md` set", //    a glob, not a path
     "see https://example.com/guide.md for more", //      somewhere else entirely
+    'RELEASE_INPUTS = ("src", "app", "release/README.md")', // the bundle's namespace
+    "#: `release/README.md` is named individually rather than taking `release/`",
   ].join("\n");
   // Nothing at all: the `cp` line contributes neither side — `~/job-search/...`
   // is outside the checkout, and the bare, unbackticked `METRICS-WORKSHEET.md`
   // is a shell argument rather than a citation, which is why only backticked
   // basenames are collected.
+  //
+  // The last two are `provenance.RELEASE_INPUTS`, which is a list of arguments to
+  // `git rev-parse HEAD:<path>` and therefore repository paths by requirement. The
+  // README it names ships beside the zip, next to `course.html` — so it is not
+  // missing, it is in the bundle's namespace rather than the zip's, and rewriting the
+  // constant to resolve here would break the digest it computes.
   assert.deepEqual(referencesIn("src/verify-e2e.sh", source), []);
 });
 

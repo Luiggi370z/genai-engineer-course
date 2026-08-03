@@ -99,10 +99,16 @@ jobs:
       # The logic is a script rather than sixty lines of shell in a YAML string,
       # because a gate nobody can run locally is a gate nobody tests — and this
       # one is checking evidence for a bug class that reached production twice.
-      # `source_id` is asked of the capstone rather than reimplemented, for the
-      # same reason `verify-e2e.sh` has `--print-commit`: a copy of the path list
-      # in a workflow file is a copy that will drift. Both are stdlib-only, so
-      # there is no `uv sync` here.
+      # Both ids are asked of the capstone rather than reimplemented, for the same
+      # reason `verify-e2e.sh` has `--print-commit`: a copy of the path list in a
+      # workflow file is a copy that will drift. Both are stdlib-only, so there is
+      # no `uv sync` here.
+      #
+      # `--inputs` is what `--commit "$GITHUB_SHA"` used to be, and the change is the
+      # difference between a gate and a deadlock. A tag's commit CONTAINS the
+      # evidence, so an attestation recorded before that commit existed can never
+      # name it; the tree ids behind `release_inputs_id` exclude `release/evidence/`
+      # and therefore do not move when the evidence is committed.
       #
       # A tag fails; a dispatch warns. A rehearsal is for proving the packaging
       # path works, and refusing to rehearse without an hour of local measurement
@@ -110,12 +116,12 @@ jobs:
       - name: The committed evidence measures THIS source
         run: |
           set -euo pipefail
-          want=$(cd src/workshops/assistant/after \
-            && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id())')
+          read -r want inputs < <(cd src/workshops/assistant/after \
+            && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id(), p.release_inputs_id())')
           warn=""
           case "$GITHUB_REF" in refs/tags/*) ;; *) warn="--warn-only" ;; esac
           python3 .github/scripts/check-release-evidence.py \
-            --source "$want" --commit "$GITHUB_SHA" $warn
+            --source "$want" --inputs "$inputs" $warn
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

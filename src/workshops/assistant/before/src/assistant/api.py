@@ -148,13 +148,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # `request.is_disconnected()` only becomes true once something has awaited
     # the receive channel. Poll it from an `asyncio.create_task` sibling, set an
     # `asyncio.Event`, and pass `event.is_set` as `cancelled` to
-    # `deadline.budget`. Cancel the watcher in a `finally`.
+    # `deadline.budget`.
     #
     # Read the body (`await request.body()`) BEFORE starting the watcher. The
     # watcher reads from the same receive channel the route does, so a poll that
     # lands while the body is still in flight can take a body message and drop
     # it — an intermittently empty request, which is about the worst bug shape
     # there is.
+    #
+    # **Where you cancel the watcher is the exercise, and the obvious answer is
+    # wrong.** `try: ... finally: watcher.cancel()` around `call_next` looks right
+    # and cannot work for a streaming response: `call_next` returns as soon as the
+    # response OBJECT exists, and the body is iterated afterwards while the server
+    # sends it. So the watcher dies before the client has had any chance to leave,
+    # and `/ask/stream` — the endpoint where an abandoned request is most expensive
+    # — is the one endpoint where a disconnect is never noticed.
+    #
+    # Give the watcher the body's lifetime instead: when the response has a
+    # `body_iterator`, wrap it in an async generator that cancels the watcher in its
+    # own `finally` (reached on exhaustion, on an exception, and on the `aclose()`
+    # the server performs when the connection drops). A buffered response has no
+    # body to outlive, so tear it down where you were going to.
+    #
+    # The budget's ContextVar needs no such treatment, and knowing why saves an
+    # afternoon: `call_next` runs the downstream app in its own task, that task
+    # copies the context at creation, and a reset here cannot reach the copy. The
+    # flag it reads is the same `Event` object. Watcher lifetime is the only thing
+    # in play.
+    #
+    # `tests/test_disconnect.py` is the one test that can tell you if you got this
+    # right, and note what it asserts on: `deadline.expired()` from inside the
+    # running model, NOT the number of chunks produced. A chunk count passes on the
+    # broken version, because Starlette's zero-buffer stream breaks when the
+    # transport dies and the generator gets collected anyway — an accident of two
+    # libraries' buffer sizing, not a cancellation, and nothing else that reads the
+    # flag ever wakes up.
 
     # TODO 2: an exception handler for `deadline.Expired` — 504 when the reason
     # is a deadline, 499 ("client closed request") when the caller disconnected.

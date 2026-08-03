@@ -48,6 +48,26 @@ MEASURED_SOURCE = (
     "phase6-design-defend/01-red-team/after/evals/redteam.jsonl",
 )
 
+#: Everything a RELEASE is made of, as paths from the repository root — a wider
+#: circle than `MEASURED_SOURCE`, which covers only what the numbers measure.
+#:
+#: This exists because the attestation used to carry a commit sha and the tag gate
+#: required it to equal the commit being tagged. That is unsatisfiable by
+#: construction: the run records the commit it measured, committing the record
+#: produces a NEW commit, and the record now names its own parent. Every numeric
+#: gate passed and publication still exited 1, forever.
+#:
+#: A tree object id is the fix, for exactly the reason `source_id` already uses one
+#: a level down. `release/evidence/` is deliberately absent: it is the only place
+#: generated evidence is committed (`src/workshops/assistant/*/evidence/` is
+#: gitignored), so `HEAD:src` and `HEAD:app` cannot move when the evidence lands.
+#: The binding is a fixed point rather than a race.
+#:
+#: `release/README.md` is named individually rather than taking `release/` whole,
+#: because taking the directory would put the evidence back inside the thing it is
+#: bound to and restore the circularity this replaced.
+RELEASE_INPUTS = ("src", "app", "release/README.md")
+
 
 def source_root() -> Path | None:
     """The course source root above this file, or `None` when there is not one.
@@ -180,6 +200,39 @@ def source_id() -> str:
     # is `src/`, so a plain `src/workshops/...` would look for `src/src/workshops/...`,
     # match nothing, and report a dirty tree as clean. `:/` pins it to the root.
     pending = _git("status", "--porcelain", "--", *(f":/src/{p}" for p in MEASURED_SOURCE))
+    return f"dirty-{digest(*ids)}" if pending else digest(*ids)
+
+
+def release_inputs_id() -> str:
+    """A stable name for every input a release is built from.
+
+    `source_id` answers "which code produced these numbers". This answers "which
+    code is being published", and the two are different questions: the workbook
+    under `app/` is in the release and in none of the measurements, and the compose
+    stack and this verifier live under `src/` outside the capstone.
+
+    The reason it is a separate function rather than a wider `MEASURED_SOURCE` is
+    that widening the measured set would make the evidence claim things it never
+    measured. So there are two bindings and the gate checks both.
+
+    Same four answers as `source_id`, and for the same reasons — see `RELEASE_INPUTS`
+    for why committing evidence cannot move this value.
+    """
+    if not _git("rev-parse", "--git-dir"):
+        root = source_root()
+        stamp = root / "RELEASE_COMMIT" if root else None
+        if stamp and stamp.is_file() and (sha := stamp.read_text().strip()):
+            return f"release-{sha[:SHA_LENGTH]}"
+        return "unbound"
+
+    ids = []
+    for path in RELEASE_INPUTS:
+        oid = _git("rev-parse", f"HEAD:{path}")
+        if not oid:
+            return "unbound"
+        ids.append(f"{path}={oid}")
+
+    pending = _git("status", "--porcelain", "--", *(f":/{p}" for p in RELEASE_INPUTS))
     return f"dirty-{digest(*ids)}" if pending else digest(*ids)
 
 

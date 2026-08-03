@@ -144,6 +144,23 @@ def tree(prefix):
         ["git", "rev-parse", f"HEAD:{prefix}"], capture_output=True, text=True, check=True
     ).stdout.strip()
 
+def release_inputs():
+    """The id the tag gate compares an attestation against.
+
+    Imported from the capstone rather than recomputed from `trees` below, even
+    though the ingredients overlap: `release/evidence/` has to be EXCLUDED, and a
+    second implementation of that exclusion is a second place for it to be
+    forgotten — which is the failure the id exists to prevent. `provenance` is
+    stdlib-only and `assistant/__init__` imports nothing, so this costs a path
+    insert.
+    """
+    sys.path.insert(0, str(Path("src/workshops/assistant/after/src").resolve()))
+    try:
+        from assistant.provenance import release_inputs_id
+    finally:
+        sys.path.pop(0)
+    return release_inputs_id()
+
 def run(*args):
     """First line of a tool's own version output, or "absent"."""
     try:
@@ -222,6 +239,11 @@ stamp = {
     # rather than "was there a commit", so a docs-only commit does not make a
     # perfectly good dist/ read as stale.
     "trees": {prefix: tree(prefix) for prefix in ("src", "app", "release")},
+    # The same three trees, minus `release/evidence/`, folded into the one id the
+    # release gate compares against the e2e attestation. `trees["release"]` above
+    # moves when the evidence is committed and this does not, which is the entire
+    # reason it is a separate field rather than a view over that one.
+    "release_inputs": release_inputs(),
     "artifacts": {
         "course.html": sha256(stage / "course.html"),
         "README.md": sha256(stage / "README.md"),

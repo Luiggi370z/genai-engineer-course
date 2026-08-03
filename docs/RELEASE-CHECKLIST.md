@@ -76,12 +76,26 @@ the exact `ollama pull` if not.
 ./src/verify-e2e.sh --reset --attest release/evidence/e2e-attestation.json
 ```
 
-`--attest` writes `{source, commit, lane, model, ollama_version, model_digests,
-checks_run, checks_total, finished_at}` and only on a run that reached the last
-check. It refuses `--from` and `--only` outright, before booting anything, because
-a resumed run inherits state from an earlier one whose source may differ. This is
-what turns "the deployed stack passes its end-to-end suite" from a sentence in
-`RELEASE-EVIDENCE.md` into something `release.yml` can check.
+`--attest` writes `{source, inputs, commit, lane, model, ollama_version,
+model_digests, checks_run, checks_total, finished_at}` and only on a run that reached
+the last check. It refuses `--from` and `--only` outright, before booting anything,
+because a resumed run inherits state from an earlier one whose source may differ.
+This is what turns "the deployed stack passes its end-to-end suite" from a sentence
+in `RELEASE-EVIDENCE.md` into something `release.yml` can check.
+
+**Two bindings, and `commit` is not one of them.** `source` is the tree id of what
+the numbers measure; `inputs` is the tree id of everything the release is *made*
+of — the workbook under `app/` and the compose stack as well. The gate compares both
+and ignores `commit`, which is recorded for a reader and is useless to a gate: it is
+the commit the run happened *at*, and by the time this file is committed that is the
+parent commit.
+
+That used to be the whole problem. The gate required `commit` to equal the commit
+being tagged, and a tag's commit *contains* the attestation — so the file was being
+asked to name a commit that did not exist when it was written. Every numeric gate
+passed and publication exited 1, permanently, and no amount of re-measuring could
+help. Both ids now exclude `release/evidence/`, which makes committing the evidence
+unable to move the value the evidence is compared against.
 
 **Which lane to attest.** There is one lane that can carry a release claim, and
 the gate accepts only it:
@@ -106,7 +120,7 @@ nothing. The cold-start question the old lane answered is now answered earlier a
 more directly — `preflight-ollama.sh` refuses to start a run whose models are
 present but not warm.
 
-## 6. Full-fidelity evidence
+## 6. Release-path smoke evidence
 
 ```bash
 cd src/phase8-deploy/01-compose/after
@@ -119,10 +133,25 @@ cd ../../../workshops/assistant/after && make release-evidence
 this same Qdrant, and that script ingests a refund policy, an expenses page, an
 escalation page, and the poisoned document from the injection check. Anything left
 in the collection is part of the corpus the recall number is measured over, which
-makes a release metric partly a measurement of the previous test run. `make
-release-evidence` also writes to `assistant-release` rather than the shared
-`assistant` collection, so the two lanes cannot contaminate each other even when
-somebody skips the `down -v`.
+makes a release metric partly a measurement of the previous test run.
+
+**The run no longer depends on you remembering that.** `make release-evidence` sets
+neither `ASSISTANT_DB` nor `QDRANT_COLLECTION`, so `release.py` derives a pair per
+run — `evidence/runs/<id>/release.db` and `assistant-release-<id>` — asserts every
+stateful table and the collection start empty, refuses to run if they do not, and
+removes both afterwards.
+
+Both used to be fixed names, and a fixed name is not a fresh one. `docker compose
+down -v` reaches the Qdrant volume but never a host file, so the database survived
+every reset: the audited copy held **306 audit rows and 18 memories** from earlier
+runs. That moved every number on the page — percentiles against a warm cache,
+tenancy against other subjects' memories, containment probes against approvals
+granted weeks earlier — and none of it was visible in the output.
+
+Set either variable explicitly and you get exactly what you named, which is what
+`--reuse-state` is for. It stamps `state: "reused"` into `release-report.json` and
+the publication gate accepts only `"fresh"`, so a diagnosis run cannot become a
+release.
 
 This is the measurement a release quotes. It runs against the deployed stack —
 Qdrant with the semantic embedder, hybrid retrieval, **reranking on**, a RAGAS
@@ -130,6 +159,21 @@ Qdrant with the semantic embedder, hybrid retrieval, **reranking on**, a RAGAS
 dataset including the eleven benign controls. It refuses to run if any component
 has fallen back, because a release number produced against the offline proxy is
 not a weaker measurement — it is a different one wearing the same heading.
+
+**The rig is full fidelity; the eval suite is not, and the page now says so.** Five
+golden rows across two slices (`core`, `abstention`) against the course's own
+50-row/five-slice standard, under a `0.60` collapse-detector floor rather than the
+0.85 the Phase 3 milestone sets. So the report carries `evidence_class: "smoke"`,
+the page is headed *Release-path smoke evidence* and opens with a "What this does not
+prove" table, and `check-release-evidence.py` prints the class beside the gate
+verdict. The red-team half keeps its full standing — 58 rows, controls included,
+every payload delivered on its channel — so read the containment table as evidence
+and the eval table as a canary.
+
+That relabelling is the whole fix and it is deliberate. The alternative was writing 45
+more golden rows to make the old heading true, which is real work on the eval suite
+and not a release blocker; what *was* a defect is a page that read as a certification
+while measuring a smoke test.
 
 It also refuses to run without `ASSISTANT_MIN_SCORE`. A store with no relevance
 floor returns its three nearest rows for every question and never abstains, so
@@ -155,7 +199,7 @@ cp evidence/RELEASE-EVIDENCE.md evidence/release-report.json ../../../../release
 this step itself: a hosted runner has four cores and no GPU, which is why the
 nightly e2e lane is called *wiring, small model*. So it carries the evidence
 instead, and `.github/scripts/check-release-evidence.py` refuses to publish a tag
-unless all five of these hold:
+unless all six of these hold:
 
 1. `versions.source` in the report equals what the tagged tree answers to;
 2. the numbers clear the same four merge gates the course teaches — quality,
@@ -167,28 +211,37 @@ unless all five of these hold:
    none skipped;
 5. the attested lane is the one that runs the real model — and the attestation
    says which Ollama and which model digests served it, since the models now run
-   on the releaser's own machine and `qwen3.5:9b` is a mutable pointer.
+   on the releaser's own machine and `qwen3.5:9b` is a mutable pointer;
+6. the attestation's `inputs` equals what the tagged tree's release inputs answer
+   to — so the workbook and the compose stack are covered too, not only the
+   capstone the numbers measure.
 
-Run it yourself before you tag — it is stdlib-only and takes no arguments beyond
-the source id:
+Run it yourself before you tag — it is stdlib-only and takes the two ids:
 
 ```bash
-python3 .github/scripts/check-release-evidence.py --source "$(cd src/workshops/assistant/after \
-  && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id())')"
+read -r source inputs < <(cd src/workshops/assistant/after \
+  && PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id(), p.release_inputs_id())')
+python3 .github/scripts/check-release-evidence.py --source "$source" --inputs "$inputs"
 ```
 
 Ask the tree what it answers to on its own with:
 
 ```bash
 cd src/workshops/assistant/after
-PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id())'
+PYTHONPATH=src python3 -c 'import assistant.provenance as p; print(p.source_id(), p.release_inputs_id())'
 ```
 
 A bare hash means a clean checkout. `dirty-…` means the measurement covers
 uncommitted changes and will be refused; `unbound` means it is tied to nothing at
-all. Commit the code first, then measure, then commit the evidence — the id is a
-hash of the measured trees rather than of `HEAD`, so committing the evidence does
-not invalidate it.
+all. Commit the code first, then measure, then commit the evidence — both ids are
+hashes of git trees rather than of `HEAD`, and both exclude `release/evidence/`, so
+committing the evidence does not invalidate the evidence.
+
+That last clause is the fix for a deadlock, not a convenience. The gate used to also
+require the attestation's `commit` to equal the commit being tagged, which nothing
+could satisfy: the tag's commit is the one that *adds* the attestation, so the file
+had to name its own child. `commit` is still recorded for a reader and no longer
+compared to anything.
 
 Read both before you believe either. Specifically:
 

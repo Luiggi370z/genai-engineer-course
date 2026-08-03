@@ -149,6 +149,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         shape there is. Reading first makes the middleware's request the owner of
         the body (Starlette replays the cached copy downstream) and leaves the
         channel with nothing on it but the disconnect the watcher is looking for.
+
+        **The watcher outlives `call_next`, and for a streaming response that is
+        the whole mechanism.** `call_next` returns as soon as the response OBJECT
+        exists; the body is iterated afterwards, while the server sends it. So a
+        watcher cancelled when `call_next` returns is a watcher cancelled before
+        the client has had a chance to leave — which is what this used to do. The
+        unit tests still passed, because they inject `cancelled=` by hand and
+        prove the generator obeys it; nothing proved an ASGI disconnect ever set
+        it. A real probe left after 0.8 seconds having read nothing and the server
+        went on to drain all 200 source chunks for an audience of nobody.
+
+        So the teardown moves onto the body iterator. The budget's ContextVar does
+        NOT need the same treatment: `call_next` starts the downstream app in its
+        own task, that task copies the context at creation — inside the `with`
+        below — and a `reset` here cannot reach the copy. The flag it reads is this
+        same `asyncio.Event`, so the only thing that was missing is somebody still
+        polling. That asymmetry is worth knowing before editing either half.
         """
         await request.body()
 
@@ -161,13 +178,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 left.set()
 
         watcher = asyncio.create_task(watch())
-        try:
-            with deadline.budget(s.request_deadline, cancelled=left.is_set):
-                return await call_next(request)
-        finally:
+
+        async def stop_watching() -> None:
             watcher.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await watcher
+
+        try:
+            with deadline.budget(s.request_deadline, cancelled=left.is_set):
+                response = await call_next(request)
+        except BaseException:
+            await stop_watching()
+            raise
+
+        # A buffered response is already generated and already gated: there is no
+        # more work a disconnect could save, so it is torn down here.
+        body = getattr(response, "body_iterator", None)
+        if body is None:
+            await stop_watching()
+            return response
+
+        async def watched(source):
+            try:
+                async for chunk in source:
+                    yield chunk
+            finally:
+                # Reached on exhaustion, on an exception, and on the `aclose()` the
+                # server performs when the connection drops — the last of which is
+                # the case that matters and the reason this is a `finally`.
+                await stop_watching()
+
+        response.body_iterator = watched(body)
+        return response
 
     @app.exception_handler(deadline.Expired)
     async def expired(request: Request, exc: deadline.Expired) -> JSONResponse:

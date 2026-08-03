@@ -12,7 +12,10 @@ functions that touch a socket, and each takes its URL as an argument.
 """
 
 import json
+import re
+import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +23,13 @@ from src import preflight
 from src.preflight import Check, Preflight, check_present, client_url, report
 
 WARM = Check("daemon", True, "Ollama 0.32.5 at http://localhost:11434")
+
+#: `src/`, four directories up: tests -> after -> 01-compose -> phase8-deploy.
+SRC = Path(__file__).resolve().parents[4]
+#: A PATH with the platform's own tools and no `ollama` on it. Ollama installs to
+#: /usr/local/bin or /opt/homebrew/bin on the two platforms this runs on, and never
+#: to /usr/bin — so this is a real absence rather than a mocked one.
+BARE_PATH = "/usr/bin:/bin"
 
 
 def _daemon_up(url):
@@ -205,6 +215,45 @@ def test_a_docker_that_never_ran_the_probe_is_not_evidence_against_ollama(monkey
     refused = docker_says("curl: (7) Failed to connect to host.docker.internal port 11434")
     assert not refused.ok
     assert refused.remedy == preflight.REACH_REMEDY
+
+
+def test_asking_the_verifier_which_commit_it_expects_does_not_need_a_model():
+    """`--print-commit` answers a question about a string, so it must not run this.
+
+    `verify-dist.sh` captures the output and compares it to a commit, which makes
+    the contract "exactly one line on stdout" rather than "the right line somewhere
+    in the output". The preflight used to run first, and the consequences were both
+    of the ones that shape look like: the captured value became six `ok` lines plus
+    a sha and the comparison failed on a healthy release, and the same command
+    exited 1 on any machine with no warm 9B — a packaging check that could not run
+    without six gigabytes of model.
+
+    Run here rather than beside the compose tests because the rule is about THIS
+    module: the preflight is the expensive thing, and the cheap query has to stop
+    above it. Anything new added between the argument loop and that exit is subject
+    to the same rule, and this is what notices.
+    """
+    script = SRC / "verify-e2e.sh"
+    if not script.is_file():  # pragma: no cover - a lesson extracted on its own
+        pytest.skip(f"{script} is not beside this lesson")
+
+    assert shutil.which("ollama", path=BARE_PATH) is None, (
+        "this test proves the metadata path needs no Ollama, so it has to run "
+        f"without one on PATH — found it on {BARE_PATH}"
+    )
+    done = subprocess.run(
+        ["bash", str(script), "--print-commit"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        # A dead port as well as a missing binary: the preflight talks HTTP, so
+        # removing the CLI alone would still leave it something to reach.
+        env={"PATH": BARE_PATH, "OLLAMA_HOST": "http://127.0.0.1:1", "HOME": str(SRC)},
+    )
+    assert done.returncode == 0, f"exited {done.returncode}: {done.stderr}"
+    lines = done.stdout.splitlines()
+    assert len(lines) == 1, f"stdout has to be the commit and nothing else, got {lines}"
+    assert re.fullmatch(r"[0-9a-f]{40}|dev", lines[0]), lines[0]
 
 
 def _all_checks_for(installed: dict[str, str]) -> list[Check]:

@@ -32,7 +32,7 @@ import argparse
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from assistant import evals
+from assistant import auth, evals  # `auth` for metered_ask's default subject
 from assistant.core import Assistant
 from assistant.evals import GoldenRow
 
@@ -107,12 +107,26 @@ class Measured:
     cost_usd: float
     tokens_in: int
     tokens_out: int
+    #: Requests, and specifically the number the token totals above are divided by —
+    #: `cost_section` prints "across {runs} runs". So it comes from the span that
+    #: wraps a whole ask (`observe.PIPELINE_SPAN`), which is exactly one per request,
+    #: and NOT from the latency sample feeding `p99_ms`: this page draws that from
+    #: `agent.run`, and an ask blocked by the guardrail never reaches the agent loop.
+    #: Counting the sample gave 7 for 8 requests. Same conflation as the release
+    #: lane's 63-vs-5, one order of magnitude quieter.
     runs: int
     #: `counted`, `estimated`, or `mixed`. Beside the tokens rather than in the
     #: prose, so the JSON the gate reads carries it too — a cost threshold set
     #: against counted tokens means something different when the next run
     #: estimates them.
     tokens_source: str = "estimated"
+    #: What KIND of evidence these numbers are, not how good they are: `offline-proxy`
+    #: for this page, `smoke` for the release lane. Top-level rather than tucked into
+    #: `versions`, because `versions` answers "which system" and this answers "how far
+    #: can this be quoted" — a question nothing on the release page used to answer. A
+    #: reader who sees a real judge, a real vector store and a full red-team dataset
+    #: has no way to notice the eval suite behind them is five rows wide.
+    evidence_class: str = "offline-proxy"
     versions: dict[str, str] = field(default_factory=dict)
 
 
@@ -128,6 +142,61 @@ def versions_for(assistant: Assistant) -> dict[str, str]:
     raise NotImplementedError
 
 
+#: How many exchanges the meter was actually held under. Counted rather than
+#: inferred, because the alternative shipped: the release page's cost line totalled
+#: 5 eval calls while the page beside it said `runs: 63`, and nothing in either
+#: number said they were counting different things.
+EXCHANGES = "exchanges"
+
+
+def metered_ask(
+    assistant: Assistant,
+    meter: dict,
+    question: str,
+    subject: str = auth.ANONYMOUS,
+) -> dict:
+    """TODO 2a: one exchange, billed. The response dict, plus a line on the meter.
+
+    Total what the answer consumed into `meter["in"]` / `meter["out"]`, count the
+    source (`meter[used.source] += 1`) so the page can say which kind of number it is
+    printing, and count the exchange itself under `EXCHANGES`.
+
+    Take the exchange `core.py` already metered — `usage.take_last()` — rather than
+    measuring it again here: re-measuring rebuilds a slightly different prompt, and
+    it would overwrite a count the provider reported with an estimate. Fall back to
+    `usage.measure` over the prompt `composers.grounded_prompt` would build when
+    there is nothing to take, which is what an abstention leaves behind.
+
+    **Why this is a function and not four lines inside `run_evals`.** It was inlined
+    there, so the meter only ever saw the golden set — five calls. The release lane
+    then ran 58 red-team rows straight through `assistant.ask`, counted every
+    `assistant.pipeline` span for `runs`, and published `runs: 63` beside a token
+    total from 5 of them. Both numbers were correct about something. Divided by each
+    other, which is what a reader does with them, they understated cost per request
+    twelvefold. Every caller that measures has to come through here.
+    """
+    raise NotImplementedError
+
+
+def require_every_run_metered(meter: dict, runs: int, span: str) -> None:
+    """TODO 2b: refuse a cost line covering fewer requests than the page counts.
+
+    Compare `meter[EXCHANGES]` against `runs` and raise `SystemExit` naming both
+    numbers, the share of the work the totals actually describe, and `metered_ask` as
+    the way in. A message that only says "mismatch" gets a number edited until it
+    agrees.
+
+    The two counts come from different places on purpose — `runs` off the spans the
+    service emitted, the totals off the meter the harness held — and that is what
+    makes the comparison worth making. Derive one from the other and it agrees by
+    construction and detects nothing.
+
+    Raise rather than warn. Both numbers in the audited report were plausible and
+    honestly labelled; only their ratio was wrong, and a reader had no way to see it.
+    """
+    raise NotImplementedError
+
+
 def run_evals(
     assistant: Assistant,
     meter: dict | None = None,
@@ -135,18 +204,8 @@ def run_evals(
 ) -> evals.SuiteResult:
     """TODO 2: score the live service against GOLDEN, counting what it consumed.
 
-    Adapt `assistant.ask` into the `(answer, contexts)` shape `run_suite` wants
-    and score with `judge`, defaulting to the KeywordJudge. While you are in
-    there, total what each answer consumed into `meter["in"]` / `meter["out"]`.
-
-    Take the exchange `core.py` already metered — `usage.take_last()` — rather
-    than measuring it again here: re-measuring rebuilds a slightly different
-    prompt, and it would overwrite a count the provider reported with an
-    estimate. Fall back to `usage.measure` over the prompt
-    `composers.grounded_prompt` would build when there is nothing to take, which
-    is what an abstention leaves behind. Count the sources as you go —
-    `meter[used.source] += 1` — so the page can say which kind of number it is
-    printing.
+    Adapt `metered_ask` into the `(answer, contexts)` shape `run_suite` wants and
+    score with `judge`, defaulting to the KeywordJudge.
 
     The judge is a parameter for the same reason it is one in phase 3: the
     release lane (`release.py`) scores these rows with RAGAS instead. One
@@ -181,11 +240,15 @@ def eval_section(
     raise NotImplementedError
 
 
-def run_probes(assistant: Assistant) -> list[tuple[str, bool]]:
+def run_probes(assistant: Assistant, meter: dict | None = None) -> list[tuple[str, bool]]:
     """TODO 4: fire every REDTEAM_PROBES row at the service.
 
-    Ingest the poison first when a probe carries one, `ask` the question, let
-    `check` read the response, and return (name, contained) per probe.
+    Ingest the poison first when a probe carries one, ask the question, let `check`
+    read the response, and return (name, contained) per probe.
+
+    Through `metered_ask`, not `assistant.ask`. An attack costs tokens: these three
+    used to be free on the page, so `runs` counted eight requests and the cost line
+    covered five — the same arithmetic the release lane got wrong at a larger scale.
     """
     raise NotImplementedError
 
@@ -227,6 +290,12 @@ def latency_section(
     where every second of a real answer goes. The release page once quoted a
     tenth of a millisecond under the words "real model time", and both halves
     came out of this function.
+
+    Count them as *spans*, not as "runs", and the word matters on a page that also
+    prints a cost line. `agent.run` fires once per request that reaches the agent
+    loop, and a guardrail-blocked request never does — so this count can legitimately
+    sit one below the request count beside it, and two numbers both called "runs"
+    invite a reader to conclude one of them is wrong.
     """
     raise NotImplementedError
 
@@ -269,6 +338,12 @@ def cost_section(assistant: Assistant, measured: Measured) -> str:
     them. "Zero because we made no calls" is only credible next to the count —
     and neither is credible without `TOKEN_SOURCE_NOTE[measured.tokens_source]`
     beside it, because an estimate and an invoice print identically.
+
+    Say `measured.runs` *metered requests*. This sentence is where the two counts
+    meet: a reader divides one into the other, and the release page once invited them
+    to divide 63 requests into the tokens from 5. `require_every_run_metered` has
+    already refused the mismatched version by the time you get here, so the word
+    "metered" is a claim the code backs rather than a reassurance.
     """
     raise NotImplementedError
 
@@ -315,6 +390,13 @@ def measure(assistant: Assistant | None = None) -> tuple[str, Measured]:
       `redteam_bypasses` as the COUNT of probes that were not contained (CI does
       not read prose), P99 from the run spans, cost from your token meter, and
       the stamps from `versions_for`
+
+    Two span counts, not one, and they are different questions: the latency sample
+    for `p99_ms` comes from `AGENT_RUN_SPAN`, and `runs` — what the cost line divides
+    the tokens by — comes from `observe.PIPELINE_SPAN`. A guardrail-blocked probe
+    produces the second without the first, so taking both from the sample bills eight
+    requests as seven. Hold one meter across the evals and the probes, and call
+    `require_every_run_metered` against the pipeline count *before* you compute cost.
 
     Run the suite once. Two passes can disagree, and a portfolio that disagrees
     with the gate is how a breach reaches production with a green tick.

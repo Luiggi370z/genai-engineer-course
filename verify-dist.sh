@@ -281,7 +281,11 @@ trap 'rm -rf "$sandbox"' EXIT
 unzip -q "dist/$NAME.zip" -d "$sandbox"
 # Asking the shipped script rather than reimplementing its logic here: a copy of
 # the resolution would pass while the real one failed, which is how the original
-# defect survived review. `--print-commit` stops before Docker is touched.
+# defect survived review. `--print-commit` exits above the preflight, so this
+# needs neither Docker nor a pulled model — which it has to, because the capture
+# below is compared against a sha and one stray line of output fails it. That
+# ordering is held by a test rather than by this comment
+# (phase8-deploy/01-compose/after/tests/test_preflight.py).
 # Ceiling the search makes "no repository above" a fact rather than a hope about
 # wherever mktemp landed.
 resolved=$(GIT_CEILING_DIRECTORIES="$sandbox" GIT_SHA= \

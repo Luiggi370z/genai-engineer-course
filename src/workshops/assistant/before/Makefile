@@ -19,14 +19,29 @@ report:           ## run the service on trial: PORTFOLIO.md for humans, evals/re
 #   make release-evidence
 #
 # Full instructions, and what to do with the output: docs/RELEASE-CHECKLIST.md
+# A release measurement runs on its OWN corpus and its own database, and NEITHER is
+# set here — that absence is deliberate and TODO 8 in release.py is what fills it.
+#
+# Both used to be set, and both were fixed names: `assistant-release` and
+# `evidence/release.db`. A fixed name is not a fresh one; it is the SAME state on
+# every run, and `docker compose down -v` reaches the Qdrant volume but never a host
+# file. The audited copy of that database held 306 audit rows and 18 memories from
+# previous runs, so the percentiles were measured against a warm cache, tenancy
+# against other subjects' memories, and containment against approvals granted weeks
+# earlier — none of it visible in the output.
+#
+# Leave them unset and `release.py` derives a pair per run, asserts they start empty,
+# and removes them afterwards. Set either explicitly and you get what you named,
+# which is what `--reuse-state` is for; the report is stamped `reused` and the
+# publication gate refuses it.
 RELEASE_ENV := QDRANT_URL=$${QDRANT_URL:-http://localhost:6333} \
   OLLAMA_HOST=$${OLLAMA_HOST:-http://localhost:11434} \
   ASSISTANT_EMBED_MODEL=$${ASSISTANT_EMBED_MODEL:-nomic-embed-text} \
   ASSISTANT_RERANK_MODEL=$${ASSISTANT_RERANK_MODEL:-BAAI/bge-reranker-base} \
-  ASSISTANT_DB=$${ASSISTANT_DB:-evidence/release.db}
+  ASSISTANT_MIN_SCORE=$${ASSISTANT_MIN_SCORE:-0.58}
 
 .PHONY: release-evidence
-release-evidence: ## full fidelity: deployed stack, RAGAS judge, the whole red-team dataset
+release-evidence: ## smoke evidence on the real rig: deployed stack, RAGAS judge, whole red team
 	@mkdir -p evidence
 	$(RELEASE_ENV) PYTHONPATH=src \
 	  uv run --group integration --group release python -m assistant.release

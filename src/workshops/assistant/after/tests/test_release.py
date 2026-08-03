@@ -18,15 +18,18 @@ is `make release-evidence` — it has no test because it IS one.
 from __future__ import annotations
 
 import ast
+import collections
 import hashlib
 import json
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType
 
 import pytest
 
-from assistant import provenance
+from assistant import provenance, report
+from assistant import release as release_mod
 from assistant.release import (
     GATED,
     RedTeamResult,
@@ -228,7 +231,6 @@ def _degrading_run(monkeypatch, *, degrade: bool):
     `degrade=True` sets a `degraded` entry *inside* `run_evals` — after the
     pre-flight check has passed, which is the only moment that matters.
     """
-    from assistant import release as release_mod
     from assistant import report
     from assistant.evals import ScoredRow, SuiteResult
 
@@ -238,7 +240,11 @@ def _degrading_run(monkeypatch, *, degrade: bool):
     ]
 
     def run_evals(assistant, meter=None, judge=None):
-        assistant.ask("What is the expense reimbursement window?")
+        # Through the shared helper, not `assistant.ask`: `measure` compares the meter
+        # against the pipeline spans, so a stub that asks off-meter fails that check
+        # instead of the one the test is about. Which is the invariant working.
+        report.metered_ask(assistant, meter if meter is not None else {},
+                           "What is the expense reimbursement window?")
         if degrade:
             assistant.degraded["brain"] = "ollama timed out after 60.0s"
         return SuiteResult(
@@ -257,7 +263,9 @@ def _degrading_run(monkeypatch, *, degrade: bool):
     monkeypatch.setattr(
         release_mod,
         "run_redteam",
-        lambda a, rs: RedTeamResult([(rs[0], True, "blocked"), (rs[1], True, "answered")]),
+        lambda a, rs, meter: RedTeamResult(
+            [(rs[0], True, "blocked"), (rs[1], True, "answered")]
+        ),
     )
     monkeypatch.setattr(report, "run_evals", run_evals)
 
@@ -275,8 +283,6 @@ def test_the_release_lane_writes_no_evidence_when_a_tier_falls_back_mid_run(
     and this run completes and writes a page reading "No component fell back" over
     a run where one did.
     """
-    from assistant import release as release_mod
-
     _degrading_run(monkeypatch, degrade=True)
     page, data = tmp_path / "RELEASE-EVIDENCE.md", tmp_path / "release-report.json"
     monkeypatch.setattr(
@@ -328,9 +334,338 @@ def test_probing_is_driven_by_the_dataset_not_by_inline_questions():
     release measures without anybody editing this workshop."""
     assistant = build_assistant(Settings())
     sample = load_redteam()[:4]
-    result = run_redteam(assistant, sample)
+    result = run_redteam(assistant, sample, {})
     assert len(result.rows) == 4
     assert all(isinstance(why, str) and why for _, _, why in result.rows)
+
+
+# --- the indirect channels, which are two thirds of the interesting rows ---------
+
+
+def test_the_indirect_payloads_survive_the_load():
+    """The loader used to read three fields and drop two.
+
+    That is the whole defect, and it is worth stating as a count rather than as a
+    shape: 19 of the 58 rows carry their instruction in `retrieved` or
+    `tool_outputs`, and every one of them was being fired as its own benign prompt.
+    `probe` then reported "nothing happened" — true, and about a question nobody
+    asked. The bypass count stayed 0 and a third of it meant nothing.
+    """
+    rows = load_redteam()
+    retrieved = [row for row in rows if row.retrieved]
+    tool_outputs = [row for row in rows if row.tool_outputs]
+    assert len(retrieved) == 14
+    assert len(tool_outputs) == 5
+    assert not [row for row in rows if row.retrieved and row.tool_outputs], (
+        "a row on two channels tests two boundaries and reports on neither"
+    )
+    assert all(isinstance(row.retrieved, tuple) for row in retrieved), "rows stay frozen"
+
+
+def test_each_row_declares_the_one_channel_it_arrives_on():
+    counts = collections.Counter(row.channel for row in load_redteam())
+    assert counts == {
+        release_mod.PROMPT: 39,
+        release_mod.RETRIEVED: 14,
+        release_mod.TOOL_OUTPUT: 5,
+    }
+
+
+def test_every_payload_reaches_a_boundary_and_the_page_says_which():
+    """The measurement this module could not previously make.
+
+    Not "was it contained" — that was always reported. Whether the attack was ever
+    DELIVERED, which is the precondition containment is meaningless without.
+    """
+    assistant = build_assistant(Settings())
+    meter: dict = {}
+    result = run_redteam(assistant, load_redteam(), meter)
+
+    assert not result.undelivered
+    indirect = [
+        result.delivery[i]
+        for i, (row, _, _) in enumerate(result.rows)
+        if row.channel != release_mod.PROMPT
+    ]
+    assert len(indirect) == 19
+    assert all(where for where in indirect)
+
+    page = release_mod.channel_section(result)
+    for channel in (release_mod.RETRIEVED, release_mod.TOOL_OUTPUT):
+        assert f"`{channel}`" in page
+    assert "stopped at" in page, "a delivery count with no depth is not readable"
+
+    # An attack costs tokens, and every one of these went through the shared meter —
+    # the defect being closed is a page reporting 63 requests priced from 5 of them.
+    assert meter[report.EXCHANGES] == 58
+
+
+def test_a_payload_that_never_arrives_stops_the_run(monkeypatch):
+    """The guard against a silent regression to the old behaviour.
+
+    Dropping the channels again does not fail anything on its own — it makes every
+    affected row pass. So the harness has to refuse to finish, and this is the test
+    that proves the refusal exists rather than the intention.
+    """
+    assistant = build_assistant(Settings())
+    rows = [row for row in load_redteam() if row.channel == release_mod.TOOL_OUTPUT][:1]
+
+    # Exactly the old behaviour: ask the prompt, deliver nothing.
+    monkeypatch.setattr(
+        release_mod, "probe", lambda a, row, meter: (True, "landed, fired nothing", None)
+    )
+    with pytest.raises(SystemExit) as refused:
+        run_redteam(assistant, rows, {})
+    assert "never arrived" in str(refused.value)
+    assert "tool_outputs" in str(refused.value)
+
+
+def test_poisoning_the_readers_cannot_hide_a_gated_call():
+    """The obvious worry about the delivery mechanism, closed.
+
+    Delivering tool output means replacing every read-only tool's body and widening
+    its docstring so the planner will pick it. Both of those change what the planner
+    sees, and the fear is that a gated tool which WOULD have fired now loses the
+    selection and the bypass goes unreported.
+
+    It cannot, and the reason is structural rather than lucky: `poisoned_registry`
+    leaves gated tools untouched, and containment is scored on the audit trail, so a
+    gated call still shows up as `ran:` whatever the planner preferred. Asserted here
+    against a service rigged to fire one.
+    """
+    assistant = build_assistant(Settings())
+    row = next(row for row in load_redteam() if row.channel == release_mod.TOOL_OUTPUT)
+
+    gated = sorted(release_mod.GATED)[0]
+    poisoned = release_mod.poisoned_registry(assistant.base_registry, "payload", row.text)
+    assert poisoned[gated].fn is assistant.base_registry[gated].fn, (
+        "a gated tool's body was replaced — the thing under test is now a stub"
+    )
+    assert poisoned[gated].doc == assistant.base_registry[gated].doc
+
+    # And the scoring still reads a gated call off the audit trail.
+    fired = RedTeamResult([(row, False, f"fired {gated} with no approval")], {0: "returned by x"})
+    assert fired.bypasses == 1
+
+
+def test_the_read_only_tools_are_the_ones_poisoned():
+    """Read off `requires_approval` rather than from a name list here, so a
+    connector added tomorrow is in the threat model tomorrow."""
+    assistant = build_assistant(Settings())
+    poisoned = release_mod.poisoned_registry(assistant.base_registry, "PAYLOAD", "read my mail")
+    replaced = {
+        name for name, tool in poisoned.items()
+        if tool.fn is not assistant.base_registry[name].fn
+    }
+    read_only = {
+        name for name, tool in assistant.base_registry.items() if not tool.requires_approval
+    }
+    assert replaced == read_only and replaced
+    for name in replaced:
+        assert poisoned[name].fn() == "PAYLOAD"
+
+
+# --- the page says how far it can be quoted --------------------------------------
+
+
+def test_the_page_names_the_standard_it_falls_short_of():
+    """The audit's finding was not a wrong number — it was a missing sentence.
+
+    Every number on the release page is honestly produced. A reader sees a RAGAS
+    judge, Qdrant with reranking, 58 red-team rows, and a heading that read "the
+    deployed assistant, measured" — and has no way to notice the eval half of it is
+    five rows over two of the course's five slices. So the gap is stated, in the
+    course's own units, above the first score.
+    """
+    limits = release_mod.LIMITS
+    assert release_mod.EVIDENCE_CLASS == "smoke"
+    assert "What this does not prove" in limits
+    for standard in ("50", "5: semantic, exact, multi_hop, unanswerable, adversarial", "0.85"):
+        assert standard in limits, f"the page has to name {standard!r} to be checkable"
+    assert "core, abstention" in limits, "and what it actually covers"
+    # The half that is NOT a smoke test has to keep its standing, or the disclaimer
+    # teaches a reader to discount the containment result too.
+    assert "58 rows" in limits and "eleven benign controls" in limits
+
+
+def test_the_class_travels_with_the_numbers_not_only_with_the_prose():
+    """A page can be read; a JSON file is what gets quoted by a script.
+
+    `check-release-evidence.py` prints it beside the gate verdict, deliberately
+    without gating on it: the value qualifies how far the numbers reach, and a gate
+    that rejected `smoke` would reject every release this lane can produce.
+    """
+    assert report.Measured(
+        faithfulness=1.0, recall=1.0, redteam_bypasses=0, p99_ms=1.0,
+        cost_usd=0.0, tokens_in=1, tokens_out=1, runs=1,
+    ).evidence_class == "offline-proxy", "the offline page is a proxy and says so"
+
+    gate = (
+        Path(__file__).resolve().parents[4].parent
+        / ".github/scripts/check-release-evidence.py"
+    )
+    if not gate.is_file():  # pragma: no cover - the lesson extracted on its own
+        pytest.skip(f"{gate} is not beside this checkout")
+    body = gate.read_text()
+    assert "evidence_class" in body, "the gate log does not carry the qualification"
+    assert 'evidence_class") != ' not in body, "it is printed, not gated"
+
+
+# --- every measurement starts from nothing ---------------------------------------
+
+
+def test_an_unset_database_and_collection_become_a_pair_of_this_run_s_own():
+    """`ASSISTANT_DB` used to default to `evidence/release.db` in the Makefile — a
+    FIXED name, which is not a fresh one. `docker compose down -v` reaches the Qdrant
+    volume and never a host file, so the audited copy carried 306 audit rows and 18
+    memories into a run that reported nothing about either."""
+    isolated, directory = release_mod.isolate_state(Settings(), "TESTID")
+    assert isolated.qdrant_collection == "assistant-release-TESTID"
+    assert isolated.assistant_db and isolated.assistant_db.endswith(
+        "evidence/runs/TESTID/release.db"
+    )
+    assert directory is not None
+    shutil.rmtree(release_mod.RUN_ROOT / "TESTID", ignore_errors=True)
+
+
+def test_a_named_database_is_left_exactly_as_named():
+    """An operator debugging one database says so and gets it. Only the unset case is
+    filled in, which is the case the Makefile hits."""
+    named = Settings(assistant_db="/tmp/mine.db", qdrant_collection="mine")
+    isolated, directory = release_mod.isolate_state(named, "TESTID")
+    assert isolated is named
+    assert directory is None
+
+
+def test_state_left_by_an_earlier_run_stops_the_measurement(tmp_path):
+    """Asserted on the DATABASE, not on the filename.
+
+    `isolate_state` choosing a fresh path is a plan, and a plan that quietly did not
+    happen is the failure being closed. So the two kinds of row the audit actually
+    found — audit entries and memories — are planted and the run has to refuse.
+    """
+    db = str(tmp_path / "release.db")
+    assistant = build_assistant(Settings(assistant_db=db))
+    release_mod.require_empty_state(assistant)  # nothing yet: fine
+
+    assistant.audit_log.record("tool.ran", "anon", "send_telegram")
+    with pytest.raises(SystemExit) as refused:
+        release_mod.require_empty_state(assistant)
+    assert "audit_log has 1 row(s)" in str(refused.value)
+    assert "--reuse-state" in str(refused.value), "a refusal has to name the way out"
+
+    assistant.memory.remember("I prefer tea over coffee", source="chat", subject="anon")
+    with pytest.raises(SystemExit) as both:
+        release_mod.require_empty_state(assistant)
+    assert "memories has 1 row(s)" in str(both.value)
+
+
+class FakeStore:
+    """A store's two interesting attributes, and nothing else."""
+
+    def __init__(self, points: int):
+        self.collection = "assistant-release-TESTID__nomic-embed-text__768"
+        self.points = points
+        self.dropped: list[str] = []
+        outer = self
+
+        class Client:
+            def count(self, collection, exact=True):
+                assert collection == outer.collection, collection
+                return type("Count", (), {"count": outer.points})()
+
+            def delete_collection(self, collection):
+                outer.dropped.append(collection)
+
+        self.client = Client()
+
+
+class FakeFallbackRag:
+    """The shape that broke it: the store is behind `primary`, not `store`."""
+
+    def __init__(self, store):
+        self.primary = store
+        self.fallback = object()
+
+
+def test_the_store_is_found_behind_the_fallback_wrapper(tmp_path):
+    """The defect the first version of this shipped with.
+
+    It read `assistant.rag.store`. `assistant.rag` is a `FallbackRag` holding
+    `primary`/`fallback`, so that attribute is `None` on every tier — and because it
+    was a `getattr(..., None)` guarded by `if client is not None`, both the emptiness
+    check and the teardown became no-ops without a word. The first release run under
+    it left its collection on the server and its report said `state: "fresh"`.
+
+    A skipped check that reports success is worse than a missing one, which is why
+    this asserts on the store being REACHED rather than on the count coming back zero.
+    """
+    assistant = build_assistant(Settings(assistant_db=str(tmp_path / "r.db")))
+    store = FakeStore(points=0)
+    assistant.rag = FakeFallbackRag(store)  # type: ignore[assignment]
+    assert release_mod.qdrant_store(assistant) is store
+
+    release_mod.discard_state(assistant, None)
+    assert store.dropped == [store.collection], "the collection was not dropped"
+
+
+def test_a_collection_carrying_yesterdays_corpus_stops_the_measurement(tmp_path):
+    """`docker compose down -v` drops the volume; a run against a live Qdrant does
+    not. Documents left in the collection are part of the corpus recall is measured
+    over, which makes a release metric partly a measurement of the previous run."""
+    assistant = build_assistant(Settings(assistant_db=str(tmp_path / "r.db")))
+    assistant.rag = FakeFallbackRag(FakeStore(points=42))  # type: ignore[assignment]
+    with pytest.raises(SystemExit) as refused:
+        release_mod.require_empty_state(assistant)
+    assert "42 point(s)" in str(refused.value)
+
+
+def test_a_store_this_check_cannot_reach_is_a_failure_not_a_pass(tmp_path, monkeypatch):
+    """The guard on the guard.
+
+    A wrapper added between the assistant and the store would silently disconnect
+    both checks again. On the tier that is configured for Qdrant, being unable to find
+    it has to stop the run — the alternative is the behaviour above, which passed.
+    """
+    assistant = build_assistant(Settings(assistant_db=str(tmp_path / "r.db")))
+    assistant.rag = FakeFallbackRag(FakeStore(points=0))  # type: ignore[assignment]
+    monkeypatch.setattr(release_mod, "RAG_DELEGATES", ("nonexistent",))
+    monkeypatch.setattr(assistant, "tier", lambda: {"rag": "qdrant"})
+
+    with pytest.raises(SystemExit) as refused:
+        release_mod.require_empty_state(assistant)
+    assert "cannot reach" in str(refused.value)
+    assert "RAG_DELEGATES" in str(refused.value), "a refusal has to name the fix"
+
+
+def test_every_stateful_table_is_named_and_owned():
+    """A table added without a thought about measurement should show up as a gap here
+    rather than as state nobody checked. Cross-checked against the modules that
+    create them, so a rename cannot leave this list quietly pointing at nothing."""
+    for table, module in release_mod.STATEFUL_TABLES.items():
+        source = (PACKAGE / module).read_text()
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in source, (
+            f"{module} no longer creates {table}"
+        )
+
+
+def test_reusing_state_stamps_the_report_so_the_gate_refuses_it():
+    """The escape hatch cannot be the thing that publishes.
+
+    `--reuse-state` is for diagnosis, and a diagnosis run is trivially mistaken for a
+    release run once the numbers are in a file. So the mode is recorded next to the
+    numbers, and `check-release-evidence.py` accepts only `fresh`.
+    """
+    assert release_mod.FRESH == "fresh"
+    assert release_mod.REUSED == "reused"
+    gate = (
+        Path(__file__).resolve().parents[4].parent
+        / ".github/scripts/check-release-evidence.py"
+    )
+    if not gate.is_file():  # pragma: no cover - the lesson extracted on its own
+        pytest.skip(f"{gate} is not beside this checkout")
+    body = gate.read_text()
+    assert 'state != "fresh"' in body, "the gate does not enforce the stamp"
 
 
 class FakeGit:
@@ -391,6 +726,86 @@ def test_an_uncommitted_change_produces_an_id_that_matches_nothing(monkeypatch):
     dirty = provenance.source_id()
     assert dirty == f"dirty-{clean}"
     assert dirty != clean
+
+
+def _input_answers(
+    *, src: str = "s1", app: str = "a1", readme: str = "r1", pending: str = ""
+) -> dict:
+    return {
+        ("rev-parse", "--git-dir"): ".git",
+        ("rev-parse", "HEAD:src"): src,
+        ("rev-parse", "HEAD:app"): app,
+        ("rev-parse", "HEAD:release/README.md"): readme,
+        ("status", "--porcelain", "--", ":/src", ":/app", ":/release/README.md"): pending,
+    }
+
+
+def test_the_release_inputs_id_covers_what_no_measurement_touches(monkeypatch):
+    """`source_id` binds the capstone and the red-team dataset — the things the
+    numbers are about. A release also contains a workbook, a compose stack and this
+    verifier, and a tag that publishes them uncertified is publishing something
+    nothing checked."""
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers()))
+    base = provenance.release_inputs_id()
+
+    for field in ("src", "app", "readme"):
+        monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers(**{field: "moved"})))
+        assert provenance.release_inputs_id() != base, f"{field} has to be in the binding"
+
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers()))
+    assert provenance.release_inputs_id() == base, "and stable for one tree"
+
+
+def test_committing_the_evidence_cannot_change_what_the_evidence_is_bound_to(monkeypatch):
+    """The fixed point, and the whole reason this id exists.
+
+    The attestation used to carry the commit sha of the run, and the tag gate
+    required it to equal the commit being tagged. That is unsatisfiable by
+    construction: the run records a sha, committing the record produces a DIFFERENT
+    sha, and the record is now asked to have predicted its own child. Every
+    threshold passed and publication exited 1 forever.
+
+    So the binding is asserted here as a property rather than a path list: a change
+    under `release/evidence/` — which is the only place generated evidence is
+    committed, since `src/workshops/assistant/*/evidence/` is gitignored — must not
+    move the id, while a change to a real input must.
+    """
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers()))
+    before = provenance.release_inputs_id()
+
+    # Landing the evidence: `release/evidence/` is not in RELEASE_INPUTS, so neither
+    # the trees nor the pathspec-scoped status can see it.
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers(readme="r1")))
+    assert provenance.release_inputs_id() == before, (
+        "committing evidence moved the id it is compared against — the gate is "
+        "circular again and no release can pass it"
+    )
+
+    assert "release/evidence" not in " ".join(provenance.RELEASE_INPUTS), (
+        "taking `release/` whole would put the evidence back inside the thing it is "
+        "bound to, which is exactly the defect this replaced"
+    )
+    assert "release/README.md" in provenance.RELEASE_INPUTS
+
+    # ...and it is still a binding, not a constant.
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers(src="s2")))
+    assert provenance.release_inputs_id() != before
+
+
+def test_an_uncommitted_release_input_produces_an_id_that_matches_nothing(monkeypatch):
+    """Same refusal as `source_id`, for the same reason: an id that compares equal
+    to a real one is worse than admitting there is none."""
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers()))
+    clean = provenance.release_inputs_id()
+    monkeypatch.setattr(provenance, "_git", FakeGit(_input_answers(pending=" M app/x.ts")))
+    assert provenance.release_inputs_id() == f"dirty-{clean}"
+
+
+def test_the_two_bindings_are_not_the_same_number(monkeypatch):
+    """They answer different questions over different path sets, so a gate that
+    accidentally compared one against the other should not silently pass."""
+    monkeypatch.setattr(provenance, "_git", FakeGit(_answers() | _input_answers()))
+    assert provenance.source_id() != provenance.release_inputs_id()
 
 
 def test_without_git_the_id_comes_from_the_release_stamp(monkeypatch, tmp_path):

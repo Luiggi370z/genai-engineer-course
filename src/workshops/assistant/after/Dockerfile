@@ -21,7 +21,14 @@ FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS build
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --group integration --no-dev
+# `providers` alongside `integration`, because the image has to be able to run every
+# brain the configuration offers. `ASSISTANT_PROVIDER=openai|anthropic` is documented
+# and wired, and without this line both fail on an import inside a container that
+# looks healthy — the worst shape of missing dependency, because it surfaces per
+# request rather than at boot. `--no-dev` still keeps the toolchain out, and `release`
+# stays out too: the reranker's ONNX runtime and RAGAS's LangChain tree are the two
+# heaviest things in the repo and neither serves a request.
+RUN uv sync --frozen --group integration --group providers --no-dev
 
 FROM python:3.12-slim-bookworm
 WORKDIR /app

@@ -189,10 +189,19 @@ The **streaming** path is the sharper version of the same problem, and there it 
 structural rather than contention. `tier.stream` is safe-buffered — the gate screens
 the entire answer before releasing the first chunk — so a first-chunk deadline is
 really a whole-generation deadline, on a generation the batch path has already paid
-for once. Check 4 therefore holds the two paths to different standards: a batch
-fallback fails the run, a stream fallback is allowed but must appear on `/health`
-naming the stream. "Allowed to degrade, not allowed to be quiet about it" is the
-contract the service makes to its callers, applied to its own verifier.
+for once. Check 4 therefore holds the two paths to different standards, but only on
+one lane: a batch fallback fails any run, and a stream fallback is allowed on `--ci`
+alone, where it must still appear on `/health` naming the stream. "Allowed to degrade,
+not allowed to be quiet about it" is the contract the service makes to its callers,
+applied to its own verifier.
+
+The lane restriction was missing for a while and is worth the sentence. The
+concession's own comment described a hosted runner with four cores and a 1.7B, but no
+guard scoped it there — so a full-fidelity release run could report 15/15 with
+`/ask/stream` answered by the offline composer. A verifier that waives its own
+substitution check on the lane that carries the release claim is measuring a tier
+nobody ships, which is the failure the whole attestation exists to prevent. `--ci`
+measures wiring and may miss a budget; a lane that reports a result may not.
 
 The observability layer is deliberately vendor-free: no Langfuse or Phoenix SDK is
 imported anywhere. Both read OTLP, so the backend is an environment variable and there

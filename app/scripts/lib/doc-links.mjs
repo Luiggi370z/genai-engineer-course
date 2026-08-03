@@ -77,12 +77,20 @@ const BARE_PATH = /(?<![`$\w./-])((?:\.{1,2}\/|[\w.-]+\/)[\w./-]*?\.md)(?![\w-])
  *   - `$`, `{`, `}` — interpolated at run time, so the literal is not a path:
  *     `"$BASE/corpus/priority.md"` in `verify-e2e.sh`.
  *   - `*` — a glob standing for a set, as in `workshops/assistant/WORKSHOP-*.md`.
+ *   - `release/…` — a path in the *release bundle's* namespace, addressed from the
+ *     repository root. `provenance.RELEASE_INPUTS` names `release/README.md` because
+ *     `git rev-parse HEAD:<path>` takes repository paths, and the release inputs
+ *     digest has to cover the bundle README as well as `src/` and `app/`. The
+ *     document itself is the one that ships *beside* the zip, next to `course.html`,
+ *     so it is neither missing nor at that path for a student — and rewriting the
+ *     constant to please this check would break the thing it names.
  */
 function addressesSomethingElse(path) {
   return (
     /^(?:https?|mailto):/.test(path) ||
     path.startsWith("/") ||
     path.startsWith("~") ||
+    path.startsWith("release/") ||
     /[${}*]/.test(path)
   );
 }

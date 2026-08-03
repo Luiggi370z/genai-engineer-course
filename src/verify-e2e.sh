@@ -219,6 +219,54 @@ if [[ -n "$ATTEST" ]] && { ((FROM > 1)) || ((ONLY)); }; then
 fi
 if [[ -n "$ATTEST" && "$ATTEST" != /* ]]; then ATTEST="$INVOKED_FROM/$ATTEST"; fi
 
+# Baked into the image by `ARG GIT_SHA` so the running service can say which code
+# it is. Check 3 compares it to what /health reports — the one probe that catches
+# a half-finished rollout still served by a healthy old machine.
+#
+# Three sources in order, because this script runs in three situations and only
+# one of them has git. The released ZIP is `git archive`, which ships no `.git`,
+# and the previous one-liner — `${GIT_SHA:-$(git rev-parse HEAD)}` — turned that
+# into an EMPTY string: `export` swallowed the failure, compose defaulted the
+# build arg to `dev`, and check 3 then compared "dev" against "". The companion
+# README advertises the unqualified `./verify-e2e.sh` as the release claim, so
+# the student was the one who met it. A `dev` fallback both sides agree on is an
+# honest answer; an empty expectation is a broken check wearing a failure's face.
+#
+# (`$SELF`, not `$0`: the `cd` above has already happened, so a relative `$0` no
+# longer resolves. That was a second latent break in the same line.)
+SRC_DIR="$(dirname "$SELF")"
+resolve_git_sha() {
+  if [[ -n "${GIT_SHA:-}" ]]; then printf '%s' "$GIT_SHA"; return; fi
+  local sha
+  if sha="$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null)" && [[ -n "$sha" ]]; then
+    printf '%s' "$sha"; return
+  fi
+  # Written into the archive by package.sh: the release's own commit, for the
+  # copy of this script that has no repository around it.
+  if [[ -f "$SRC_DIR/RELEASE_COMMIT" ]]; then
+    sha="$(tr -d '[:space:]' <"$SRC_DIR/RELEASE_COMMIT")"
+    if [[ -n "$sha" ]]; then printf '%s' "$sha"; return; fi
+  fi
+  printf 'dev'
+}
+GIT_SHA="$(resolve_git_sha)"
+export GIT_SHA
+
+# Lets the release gate ask THIS script what it would expect, instead of a copy
+# of its logic answering. `verify-dist.sh` runs it against an extracted ZIP,
+# which is the one environment where the answer used to be wrong and the one
+# environment a checkout cannot simulate.
+#
+# It exits HERE, above the lane selection and the preflight, and that placement is
+# the whole contract: the caller captures stdout and compares it to a sha, so one
+# stray line of output is a failure. This used to sit below the preflight, where
+# `--print-commit` printed six `ok` lines before the answer and `verify-dist.sh`
+# compared the lot against a commit — and, worse, exited 1 on any machine with no
+# Ollama running, because a metadata question was demanding a warm 9B model.
+# Anything added between the argument loop and this line has to survive being run
+# for a question about a string.
+if ((PRINT_COMMIT)); then printf '%s\n' "$GIT_SHA"; exit 0; fi
+
 # One inference topology: the host's Ollama, reached through host.docker.internal.
 # The lanes differ only in which model answers, and the lane is announced rather
 # than inferred — a run that quietly used a different model than the reader
@@ -344,45 +392,6 @@ run persisted from state the last one left. Pick one:
 Or clear them yourself:
   (cd src/phase8-deploy/01-compose/after && docker compose down && docker volume rm $(oneline "$found"))"
 }
-
-# Baked into the image by `ARG GIT_SHA` so the running service can say which code
-# it is. Check 3 compares it to what /health reports — the one probe that catches
-# a half-finished rollout still served by a healthy old machine.
-#
-# Three sources in order, because this script runs in three situations and only
-# one of them has git. The released ZIP is `git archive`, which ships no `.git`,
-# and the previous one-liner — `${GIT_SHA:-$(git rev-parse HEAD)}` — turned that
-# into an EMPTY string: `export` swallowed the failure, compose defaulted the
-# build arg to `dev`, and check 3 then compared "dev" against "". The companion
-# README advertises the unqualified `./verify-e2e.sh` as the release claim, so
-# the student was the one who met it. A `dev` fallback both sides agree on is an
-# honest answer; an empty expectation is a broken check wearing a failure's face.
-#
-# (`$SELF`, not `$0`: the `cd` above has already happened, so a relative `$0` no
-# longer resolves. That was a second latent break in the same line.)
-SRC_DIR="$(dirname "$SELF")"
-resolve_git_sha() {
-  if [[ -n "${GIT_SHA:-}" ]]; then printf '%s' "$GIT_SHA"; return; fi
-  local sha
-  if sha="$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null)" && [[ -n "$sha" ]]; then
-    printf '%s' "$sha"; return
-  fi
-  # Written into the archive by package.sh: the release's own commit, for the
-  # copy of this script that has no repository around it.
-  if [[ -f "$SRC_DIR/RELEASE_COMMIT" ]]; then
-    sha="$(tr -d '[:space:]' <"$SRC_DIR/RELEASE_COMMIT")"
-    if [[ -n "$sha" ]]; then printf '%s' "$sha"; return; fi
-  fi
-  printf 'dev'
-}
-GIT_SHA="$(resolve_git_sha)"
-export GIT_SHA
-
-# Lets the release gate ask THIS script what it would expect, instead of a copy
-# of its logic answering. `verify-dist.sh` runs it against an extracted ZIP,
-# which is the one environment where the answer used to be wrong and the one
-# environment a checkout cannot simulate.
-if ((PRINT_COMMIT)); then printf '%s\n' "$GIT_SHA"; exit 0; fi
 
 # jget FILE KEY.PATH — read a value out of a JSON response without needing jq
 jget() {
@@ -663,15 +672,28 @@ EOF
   # chunk, so a "first chunk within 60s" budget is really "generate and screen it
   # all within 60s" — strictly harder than the batch path, which then pays for the
   # same generation a second time. A small model on a contended CI runner sits
-  # right on that line and sometimes crosses it. So the stream is allowed to fall
-  # back, but it is NOT allowed to fall back quietly: the degradation has to be on
-  # /health, naming the stream. A batch fallback still fails the run outright.
+  # right on that line and sometimes crosses it.
+  #
+  # So `--ci` is allowed to fall back on the stream, loudly — the degradation has to
+  # be on /health, naming the stream — and NO other lane is. The concession used to
+  # apply everywhere while its own comment described a hosted runner, which meant a
+  # full-fidelity release run could attest 15/15 with `/ask/stream` served by the
+  # offline composer. That is the exact substitution this suite exists to catch, and
+  # it was being waved through by the check written to catch it. The lane that
+  # carries a release claim gets no allowance in either direction.
   brain="$(brain_degradation)"
   if [[ -z "$brain" ]]; then
     echo "the model composed both answers, batch and streamed"
-  elif [[ "$brain" == *stream* ]]; then
+  elif ((CI_LANE)) && [[ "$brain" == *stream* ]]; then
     echo "note: the model missed the streaming budget and /health confessed: $brain"
-    echo "      expected on a shared runner; on a host GPU this should not happen"
+    echo "      allowed on --ci only: four cores, no GPU, and a 1.7B on the line"
+  elif [[ "$brain" == *stream* ]]; then
+    die "the streamed answer came from the FALLBACK composer, not the model: $brain
+
+This lane reports a release claim, so a fallback fails it. Only --ci is allowed to
+miss the streaming budget, because only --ci is measuring the wiring rather than the
+model. If the host is genuinely slower than the 60s safe-buffered budget, fix the
+host — do not attest around it."
   else
     die "the model stopped composing for a reason that is not the stream budget: $brain"
   fi
@@ -1200,6 +1222,16 @@ if [[ -n "$ATTEST" ]]; then
   attest_source=$(cd "$SRC_ROOT/workshops/assistant/after" \
     && PYTHONPATH=src uv run python -m assistant.release --print-source-id) \
     || die "could not read the source id — attestation needs the checkout, not just the stack"
+  # The second binding, and the one that made publication possible. `source` covers
+  # what the numbers measure; this covers everything the release is MADE of — the
+  # workbook, the compose stack, this script. It replaced a commit sha, which could
+  # not work: recording the commit and then committing the record renames the thing
+  # the record refers to, so the tag gate's equality test failed on every honest
+  # release. A tree id over paths that exclude `release/evidence/` cannot move when
+  # the evidence lands.
+  attest_inputs=$(cd "$SRC_ROOT/workshops/assistant/after" \
+    && PYTHONPATH=src uv run python -m assistant.release --print-release-inputs) \
+    || die "could not read the release inputs id — attestation needs the checkout"
   attest_model=$($COMPOSE exec -T assistant python -c \
     'from assistant.settings import Settings; print(Settings.from_env().ollama_model)') \
     || die "the stack could not say which chat model it was configured with"
@@ -1209,6 +1241,7 @@ if [[ -n "$ATTEST" ]]; then
   # pointer — a re-pull can change the bytes under it — so the digest is the part
   # a reader can check a year from now.
   ATTEST_SOURCE="$attest_source" ATTEST_MODEL="$attest_model" ATTEST_COMMIT="$GIT_SHA" \
+  ATTEST_INPUTS="$attest_inputs" \
   ATTEST_LANE="$MODEL_LANE" ATTEST_RAN="$RAN" ATTEST_TOTAL="$TOTAL" \
   ATTEST_FACTS="$PREFLIGHT_FACTS" \
     python3 - "$ATTEST" <<'EOF'
@@ -1223,6 +1256,11 @@ except (OSError, ValueError):
 
 record = {
     "source": os.environ["ATTEST_SOURCE"].strip(),
+    "inputs": os.environ["ATTEST_INPUTS"].strip(),
+    # Kept, and no longer compared to anything. It is the commit the run happened
+    # AT, which is a genuinely useful thing for a reader to know and a hopeless
+    # thing for a gate to require: by the time this file is committed, that is the
+    # parent commit. `inputs` above is the field the gate checks.
     "commit": os.environ["ATTEST_COMMIT"].strip(),
     "lane": os.environ["ATTEST_LANE"].strip(),
     "model": os.environ["ATTEST_MODEL"].strip(),

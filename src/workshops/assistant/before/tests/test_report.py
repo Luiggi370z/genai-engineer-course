@@ -14,11 +14,17 @@ from __future__ import annotations
 
 import pytest
 
+from assistant.observe import PIPELINE_SPAN
 from assistant.report import (
+    EXCHANGES,
     REDTEAM_PROBES,
     build_portfolio,
     measure,
+    metered_ask,
     redteam_section,
+    require_every_run_metered,
+    run_evals,
+    run_probes,
     versions_for,
 )
 from assistant.service import build_assistant
@@ -77,6 +83,71 @@ def test_the_cost_story_is_honest_about_the_offline_tier(page, measured):
     assert measured[1].tokens_in > 0 and measured[1].tokens_out > 0
     assert "$0.0000" in page
     assert "no per-token invoice" in page
+
+
+# --- the cost line covers the work the page reports -------------------------------
+
+
+def test_every_request_the_page_counts_is_a_request_the_meter_saw(measured):
+    """The round-6 defect, stated as the arithmetic that gave it away.
+
+    The release page reported `runs: 63` — every `assistant.pipeline` span — beside a
+    token total from the 5 golden rows, because the 58 red-team asks bypassed the
+    meter. Both numbers were true about something. Divided by each other, which is
+    what a reader does with them, they understated cost per request twelvefold.
+
+    Held here as well as on the release lane because the offline page had the same
+    shape at a smaller scale: three probes asking off-meter, and `runs` taken from
+    `agent.run`, which a guardrail-blocked request never reaches.
+    """
+    report = measured[1]
+    assert report.runs == len(REDTEAM_PROBES) + 5, "5 golden rows and every probe"
+    assert report.tokens_in > 0 and report.tokens_out > 0
+
+
+def test_a_request_that_skips_the_meter_stops_the_report():
+    """The guard, not the intention.
+
+    Re-inlining the accounting into `run_evals` does not fail anything on its own —
+    it produces a smaller, entirely plausible cost line. So the two counts are
+    compared and the run refuses, which is the only version of this that survives
+    somebody adding a caller.
+    """
+    assistant = build_assistant(Settings())
+    meter: dict = {}
+    run_evals(assistant, meter)
+    asked = len(assistant.rec.named(PIPELINE_SPAN))
+    require_every_run_metered(meter, asked, PIPELINE_SPAN)  # in step: fine
+
+    assistant.ask("what is the refund policy")  # the off-meter ask
+    with pytest.raises(SystemExit) as refused:
+        require_every_run_metered(meter, len(assistant.rec.named(PIPELINE_SPAN)), PIPELINE_SPAN)
+    assert "metered_ask" in str(refused.value), "a refusal has to name the way in"
+    assert f"{asked} exchange(s)" in str(refused.value)
+
+
+def test_the_probes_are_billed_like_any_other_request():
+    """An attack costs tokens. These three used to be free on the page."""
+    assistant = build_assistant(Settings())
+    meter: dict = {}
+    run_probes(assistant, meter)
+    assert meter[EXCHANGES] == len(REDTEAM_PROBES)
+    assert meter["in"] > 0
+
+
+def test_the_meter_takes_the_provider_s_own_counts_when_it_has_them():
+    """`metered_ask` prefers `usage.take_last` over re-measuring, and the difference
+    is a `counted` claim rather than an `estimated` one. Re-deriving the prompt here
+    would quietly overwrite a real number with a reconstruction of it."""
+    assistant = build_assistant(Settings())
+    meter: dict = {}
+    response = metered_ask(assistant, meter, "what is the refund policy")
+    assert response["answer"]
+    assert meter[EXCHANGES] == 1
+    assert meter["in"] > 0 and meter["out"] > 0
+    assert meter.get("counted", 0) + meter.get("estimated", 0) == 1, (
+        "every exchange has to declare which kind of number it contributed"
+    )
 
 
 def test_the_json_report_carries_the_four_gated_numbers(measured):

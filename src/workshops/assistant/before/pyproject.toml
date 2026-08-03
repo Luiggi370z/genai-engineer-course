@@ -34,6 +34,15 @@ integration = [
   "mcp>=2.0.0,<3",   # SDK v2 (spec 2026-07-28). v1 code will NOT run on this.
   "opentelemetry-exporter-otlp>=1.30,<2",
 ]
+# The hosted brains `ASSISTANT_PROVIDER=openai|anthropic` selects, and they are in
+# the IMAGE — which is the whole point of the group existing. A provider the docs
+# offer is a provider the shipped artifact has to be able to run; declaring the SDK
+# in a host-only group is how you get a container that boots and then raises
+# `ModuleNotFoundError` on the first request.
+providers = [
+  "openai>=1.60,<3",
+  "anthropic>=0.40,<1",
+]
 # `make release-evidence` only. Kept out of `integration` because these are the
 # two heaviest trees in the repo and neither belongs in the shipped image: the
 # reranker drags an ONNX runtime, and RAGAS wraps LangChain. The release lane
@@ -44,7 +53,9 @@ integration = [
 release = [
   "fastembed>=0.4,<1",
   "ragas>=0.4,<0.5",
-  "openai>=1.60,<3",
+  # Pulled in rather than restated: RAGAS needs `openai`, and a second pin for the
+  # same package is a second pin to forget when one moves.
+  {include-group = "providers"},
   "langchain-community>=0.3.27,<0.4",
 ]
 

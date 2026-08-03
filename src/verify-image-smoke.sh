@@ -17,11 +17,20 @@
 # artifact runs.** Packaging checks, hash manifests and source binding all answer
 # "is this the code we meant to ship". None of them answer "does it boot".
 #
-# Two checks, cheapest first, both against the built image and not the checkout:
+# Three checks, cheapest first, all against the built image and not the checkout:
 #   1. the application imports — the failure above, caught in under a second;
-#   2. the container starts and reports itself ready over HTTP.
+#   2. every provider the configuration OFFERS can actually be built and called;
+#   3. the container starts and reports itself ready over HTTP.
 #
-# Check 2 needs no Qdrant, no Ollama and no model: with nothing configured the
+# Check 2 is the same class of defect one layer out. `ASSISTANT_PROVIDER` documents
+# `ollama | openai | anthropic | offline`, and for a while the image contained the
+# SDKs for exactly one of them: `openai` was declared in the host-only `release`
+# group and `anthropic` was not declared anywhere. Both selections booted fine and
+# died on `ModuleNotFoundError` at the first request. A missing dependency that
+# surfaces per request rather than at boot is the expensive kind — it looks like a
+# bug in the code, and only the caller who picked that provider ever sees it.
+#
+# Check 3 needs no Qdrant, no Ollama and no model: with nothing configured the
 # assistant falls to its rule-based tier, which `warm()` reports ready immediately.
 # That is the point — this asks whether the process can serve, not whether the
 # model is good, and it costs a couple of seconds instead of twenty minutes.
@@ -50,6 +59,48 @@ docker run --rm "$IMAGE" python -c "
 import assistant.api, assistant.mcp_server, assistant.release, assistant.report
 " || die "the image cannot import its own application — see the traceback above"
 echo "  assistant.api, .mcp_server, .release, .report all import"
+
+echo "==> Selecting every advertised provider inside the image"
+# Offline on purpose, and still a real test of the thing that was broken. Both SDKs
+# read their base URL from the environment, so pointing them at a closed port means
+# the call gets as far as opening a socket — which requires the package to be
+# installed, importable and constructible — and then fails to connect. A connection
+# error is a PASS here; an ImportError is the defect.
+#
+# The keys are obvious fakes. They are never sent anywhere: nothing on 127.0.0.1:1
+# is listening, and the assertion below is about which exception came back.
+#
+# `-i`, and it is load-bearing: `docker run` without it gives `python -` an empty
+# stdin, which exits 0 having read nothing. The first version of this check passed
+# that way — a vacuous pass in the script written to catch a vacuous pass. Hence the
+# sentinel below too: the check has to prove it ran, not just that it did not fail.
+providers_out=$(docker run --rm -i \
+  -e OPENAI_API_KEY=smoke-not-a-key -e OPENAI_BASE_URL=http://127.0.0.1:1/v1 \
+  -e ANTHROPIC_API_KEY=smoke-not-a-key -e ANTHROPIC_BASE_URL=http://127.0.0.1:1 \
+  "$IMAGE" python - <<'EOF'
+from assistant import providers
+from assistant.settings import Settings
+
+for name, tag in ((providers.OPENAI, "gpt-4o-mini"), (providers.ANTHROPIC, "claude-sonnet-4-5")):
+    chat = providers.build_chat(Settings(provider=name, chat_model=tag))
+    assert chat is not None and chat.provider == name and chat.model == tag, chat
+    try:
+        chat.generate("ping")
+    except ImportError as absent:  # the defect this check exists for
+        raise SystemExit(f"{name} is advertised but its SDK is not in the image: {absent}")
+    except Exception:
+        pass  # anything else means the SDK loaded and tried to talk. That is the point.
+    print(f"  {name} builds, imports its SDK and reaches the network layer ({tag})")
+
+# The offline tier is a selection too, and it must NOT need either SDK.
+assert providers.build_chat(Settings(provider=providers.OFFLINE)) is None
+print("  offline selects the stitcher and imports nothing")
+print("PROVIDERS-OK")
+EOF
+) || { printf '%s\n' "$providers_out"; die "the image cannot run a provider it advertises"; }
+printf '%s\n' "${providers_out%PROVIDERS-OK}" | sed '/^$/d'
+[[ "$providers_out" == *PROVIDERS-OK* ]] \
+  || die "the provider check produced no verdict — it did not actually run"
 
 echo "==> Starting the container and waiting for /ready"
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true

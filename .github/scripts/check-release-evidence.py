@@ -1,24 +1,34 @@
 #!/usr/bin/env python3
 """Refuse to publish a release whose evidence is about something else.
 
-    python3 .github/scripts/check-release-evidence.py --source "$(...)" [--commit SHA]
+    python3 .github/scripts/check-release-evidence.py --source "$(...)" [--inputs ID]
 
 Three artifacts are committed by hand because the measurement needs a GPU and a
 hosted runner has none: `release-report.json` (the numbers), `RELEASE-EVIDENCE.md`
 (the page quoting them) and `e2e-attestation.json` (proof the deployed stack passed
 its end-to-end suite). Hand-carried evidence is only worth anything if something
-checks that it describes *this* source, so this does, in five ways:
+checks that it describes *this* source, so this does, in six ways:
 
   1. the report is bound to the source being published, and that binding is a real
      one — `dirty-` and `unbound` are refusals, not values, and they compare equal
-     to each other, so they are rejected before any comparison;
+     to each other, so they are rejected before any comparison — and it was measured
+     from empty state rather than on top of an earlier run's writes;
   2. `gate.py`'s four thresholds — quality, safety, latency, cost — reapplied over
      the committed numbers. Imported from the lesson rather than restated here: a
      second copy of a threshold is a threshold that will disagree with itself;
   3. the page is stapled to the JSON by digest, so a page quoting an older run
      cannot ride along with fresher numbers;
   4. the end-to-end suite ran to completion — every check, none skipped;
-  5. it ran on the lane the release claims, not the fast CI overlay.
+  5. it ran on the lane the release claims, not the fast CI overlay;
+  6. it ran over the same release INPUTS being published — the workbook and the
+     compose stack as well as the measured capstone.
+
+Both bindings are tree object ids over paths that exclude `release/evidence/`,
+which is what makes them checkable at all. The version of this script that
+compared commit shas was unsatisfiable: an attestation names the commit it ran at,
+committing it produces a new commit, and the gate then demanded the file predict
+its own child. Publication could never pass, and the numbers were never the
+problem.
 
 Stdlib only, and no `uv sync`: this runs on a bare runner before anything is built.
 """
@@ -85,10 +95,12 @@ def unbindable(value: str) -> bool:
     return value == "unbound" or value.startswith("dirty-")
 
 
-def problems(source: str, commit: str | None, evidence: Path = EVIDENCE) -> list[str]:
+def problems(source: str, inputs: str | None, evidence: Path = EVIDENCE) -> list[str]:
     found: list[str] = []
     if unbindable(source):
         return [f"this checkout has no bindable source id ({source})"]
+    if inputs is not None and unbindable(inputs):
+        return [f"this checkout has no bindable release-inputs id ({inputs})"]
 
     json_path = evidence / "release-report.json"
     page_path = evidence / "RELEASE-EVIDENCE.md"
@@ -109,6 +121,27 @@ def problems(source: str, commit: str | None, evidence: Path = EVIDENCE) -> list
         found.append(f"the evidence is not bound to committed code ({measured})")
     elif measured != source:
         found.append(f"the evidence measured {measured}, this release is {source}")
+
+    # 1b. and they were measured from empty state. `--reuse-state` exists for
+    # diagnosis and stamps the report so the diagnosis cannot become the release: a
+    # run over a database holding earlier audit rows, memories and approvals has a
+    # warm cache in its percentiles and other subjects in its recall.
+    state = str(data.get("versions", {}).get("state", "<none>"))
+    print(f"the state it was measured from: {state}")
+    if state != "fresh":
+        found.append(
+            f"the numbers were measured from {state!r} state, not 'fresh' — rerun "
+            "`make release-evidence` without --reuse-state"
+        )
+
+    # 1c. and what KIND of evidence they are. Printed, never gated: the value is a
+    # qualification on how far the numbers can be quoted, not a threshold, and a gate
+    # that rejected `smoke` would reject every release this lane can currently
+    # produce. It is here because the audit's finding was that a reader of the gate
+    # log saw a real judge, a real vector store and 58 red-team rows, and nothing
+    # anywhere told them the eval suite was five rows over two slices.
+    print(f"evidence class: {data.get('evidence_class', '<none>')} "
+          "(see 'What this does not prove' on the page)")
 
     # 2. the thresholds, reapplied
     gate = load_gate()
@@ -158,8 +191,33 @@ def problems(source: str, commit: str | None, evidence: Path = EVIDENCE) -> list
         digests = attestation["model_digests"]
         print(f"ollama {attestation['ollama_version']}, models: {digests}")
 
-    if commit and attestation.get("commit") not in (commit, None):
-        found.append(f"the e2e suite ran at commit {attestation['commit']}, the tag is {commit}")
+    # 6. and the run covers every input this release is made of, not just the
+    # measured ones. `source` above binds the capstone and the red-team dataset;
+    # this binds the workbook, the compose stack and the verifier too.
+    #
+    # This replaced a comparison of commit shas, which could not be satisfied by any
+    # honest release. The run recorded the commit it measured, committing that record
+    # produced a different commit, and the tag gate then asked the record to name a
+    # commit that did not exist when it was written. Every numeric gate passed and
+    # publication exited 1, permanently. Tree ids over paths that exclude
+    # `release/evidence/` make the same claim as a fixed point: committing the
+    # evidence cannot change what the evidence is bound to.
+    if inputs is not None:
+        attested_inputs = str(attestation.get("inputs") or "<none>")
+        print(f"the release inputs it ran over: {attested_inputs}")
+        # An attestation from before this field existed is missing it rather than
+        # disagreeing, and the two want different sentences: one says re-attest,
+        # the other says you measured the wrong tree.
+        if attested_inputs == "<none>" or unbindable(attested_inputs):
+            found.append(
+                f"the e2e attestation carries no release-inputs binding ({attested_inputs}) "
+                "— re-attest with a current verify-e2e.sh"
+            )
+        elif attested_inputs != inputs:
+            found.append(
+                f"the e2e suite ran over release inputs {attested_inputs}, "
+                f"this release is {inputs}"
+            )
 
     return found
 
@@ -167,7 +225,7 @@ def problems(source: str, commit: str | None, evidence: Path = EVIDENCE) -> list
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", required=True, help="what this checkout answers to")
-    parser.add_argument("--commit", help="the commit being tagged, when there is one")
+    parser.add_argument("--inputs", help="the release-inputs id this checkout answers to")
     parser.add_argument(
         "--evidence",
         type=Path,
@@ -182,7 +240,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     print(f"this source answers to: {args.source}")
-    found = problems(args.source, args.commit, args.evidence)
+    if args.inputs:
+        print(f"these release inputs answer to: {args.inputs}")
+    found = problems(args.source, args.inputs, args.evidence)
     if not found:
         print("release evidence agrees with the source being published")
         return 0

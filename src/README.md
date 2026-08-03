@@ -73,6 +73,13 @@ only if you want to run the hosted path. The capstone picks one explicitly with
 `OLLAMA_HOST` is set and the offline stitcher otherwise, and naming a hosted provider
 without its key fails the boot rather than quietly answering from the fallback.
 
+Both hosted SDKs ship **inside the capstone image**, in the `providers` dependency
+group, and `verify-image-smoke.sh` selects each one and calls it against a closed port
+to prove it. That check exists because they once did not: `openai` was declared only
+in the host-only `release` group and `anthropic` nowhere, so two of the four
+selections above booted cleanly and raised `ModuleNotFoundError` on the first
+request. A provider a README offers is a provider the artifact has to contain.
+
 ## The nine workshops
 
 Every phase ends in one. Workshops **2–8** build a single personal assistant that

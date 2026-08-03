@@ -34,10 +34,10 @@ import json
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from assistant import composers, evals
+from assistant import auth, composers, evals
 from assistant.core import Assistant, model_name
 from assistant.evals import GoldenRow, KeywordJudge, run_suite
-from assistant.observe import duration_ms, percentile, time_by_tool
+from assistant.observe import PIPELINE_SPAN, duration_ms, percentile, time_by_tool
 from assistant.provenance import corpus_version, dataset_version, prompt_version
 from assistant.service import build_assistant
 from assistant.settings import Settings
@@ -114,12 +114,26 @@ class Measured:
     cost_usd: float
     tokens_in: int
     tokens_out: int
+    #: Requests, and specifically the number the token totals above are divided by —
+    #: `cost_section` prints "across {runs} runs". So it comes from the span that
+    #: wraps a whole ask (`observe.PIPELINE_SPAN`), which is exactly one per request,
+    #: and NOT from the latency sample feeding `p99_ms`: the offline page draws that
+    #: from `agent.run`, and an ask blocked by the guardrail never reaches the agent
+    #: loop. Counting the sample gave 7 for 8 requests. Same conflation as the
+    #: release lane's 63-vs-5, one order of magnitude quieter.
     runs: int
     #: `counted`, `estimated`, or `mixed`. Beside the tokens rather than in the
     #: prose, so the JSON the gate reads carries it too — a cost threshold set
     #: against counted tokens means something different when the next run
     #: estimates them.
     tokens_source: str = "estimated"
+    #: What KIND of evidence these numbers are, not how good they are: `offline-proxy`
+    #: for this page, `smoke` for the release lane. Top-level rather than tucked into
+    #: `versions`, because `versions` answers "which system" and this answers "how far
+    #: can this be quoted" — the question the round-6 audit found nothing on the page
+    #: answering. A reader who sees a real judge, a real vector store and a full
+    #: red-team dataset has no way to notice the eval suite is five rows wide.
+    evidence_class: str = "offline-proxy"
     versions: dict[str, str] = field(default_factory=dict)
 
 
@@ -142,6 +156,52 @@ def versions_for(assistant: Assistant) -> dict[str, str]:
     }
 
 
+#: How many exchanges the meter was actually held under. Counted rather than
+#: inferred, because the alternative is what the round-6 audit found: the cost line
+#: totalled 5 eval calls while the page beside it said `runs: 63`, and nothing in
+#: either number said they were counting different things.
+EXCHANGES = "exchanges"
+
+
+def metered_ask(
+    assistant: Assistant,
+    meter: dict,
+    question: str,
+    subject: str = auth.ANONYMOUS,
+) -> dict:
+    """One exchange, billed. The response dict, unchanged, plus a line on the meter.
+
+    **The reason this is a function and not four lines inside `run_evals`.** It used
+    to be inlined there, so the meter only ever saw the golden set — five calls. The
+    release lane then ran 58 red-team rows through `assistant.ask` directly, counted
+    every `assistant.pipeline` span for `runs`, and published `runs: 63` beside a
+    token total from 5 of them. Both numbers were correct about something; together
+    they were a lie about cost per request, off by a factor of twelve.
+
+    Any caller that asks without going through here reopens exactly that gap, which
+    is why the count travels on the same dict as the totals: `release.measure`
+    compares `meter[EXCHANGES]` against the span count and refuses to assemble a
+    report where the two disagree. A drift that used to be invisible is now a
+    failure with an arithmetic in it.
+    """
+    response = assistant.ask(question, subject)
+    text, contexts = response.get("answer", ""), response.get("contexts", [])
+    # What core.py already metered for this exchange — including the provider's own
+    # token counts when it reported them. Re-measuring here would rebuild a slightly
+    # different prompt and quietly overwrite a counted number with an estimated one.
+    # An abstention never composes, so there is nothing to take and the estimate
+    # stands in.
+    used = take_last() or measure_usage(
+        composers.grounded_prompt(question, contexts, [], response.get("memories")),
+        text,
+    )
+    meter["in"] = meter.get("in", 0) + used.tokens_in
+    meter["out"] = meter.get("out", 0) + used.tokens_out
+    meter[used.source] = meter.get(used.source, 0) + 1
+    meter[EXCHANGES] = meter.get(EXCHANGES, 0) + 1
+    return response
+
+
 def run_evals(
     assistant: Assistant,
     meter: dict | None = None,
@@ -160,21 +220,8 @@ def run_evals(
     meter = meter if meter is not None else {}
 
     def answer(question: str) -> tuple[str, list[str]]:
-        response = assistant.ask(question)
-        text, contexts = response["answer"], response.get("contexts", [])
-        # What core.py already metered for this exchange — including the
-        # provider's own token counts when it reported them. Re-measuring here
-        # would rebuild a slightly different prompt and quietly overwrite a
-        # counted number with an estimated one. An abstention never composes, so
-        # there is nothing to take and the estimate stands in.
-        used = take_last() or measure_usage(
-            composers.grounded_prompt(question, contexts, [], response.get("memories")),
-            text,
-        )
-        meter["in"] = meter.get("in", 0) + used.tokens_in
-        meter["out"] = meter.get("out", 0) + used.tokens_out
-        meter[used.source] = meter.get(used.source, 0) + 1
-        return text, contexts
+        response = metered_ask(assistant, meter, question)
+        return response["answer"], response.get("contexts", [])
 
     return run_suite(GOLDEN, answer, judge or KeywordJudge())
 
@@ -200,15 +247,47 @@ def eval_section(
     return f"## {heading}\n\n```\n{table}\n```\n\n{note}\n"
 
 
-def run_probes(assistant: Assistant) -> list[tuple[str, bool]]:
-    """Fire every probe at the live service; (name, contained) per probe."""
+def run_probes(assistant: Assistant, meter: dict | None = None) -> list[tuple[str, bool]]:
+    """Fire every probe at the live service; (name, contained) per probe.
+
+    Metered like any other exchange. These three used to call `ask` directly, so the
+    page's `runs` counted eight spans while its cost line covered five — the same
+    arithmetic the release lane got wrong at a larger scale. An attack costs tokens.
+    """
+    meter = meter if meter is not None else {}
     results = []
     for probe in REDTEAM_PROBES:
         if "poison" in probe:
             assistant.rag.add([probe["poison"]])
-        response = assistant.ask(probe["question"])
+        response = metered_ask(assistant, meter, str(probe["question"]))
         results.append((str(probe["name"]), bool(probe["check"](response))))
     return results
+
+
+def require_every_run_metered(meter: dict, runs: int, span: str) -> None:
+    """Refuse to publish a cost line that covers fewer requests than the page counts.
+
+    The two numbers come from different places on purpose — `runs` off the OTel spans
+    the service emitted, the totals off the meter the harness held — and that is what
+    makes the comparison worth making. Deriving one from the other would agree by
+    construction and detect nothing.
+
+    Raised rather than warned. The round-6 audit found `runs: 63` beside tokens from
+    5 calls, and the report gave a reader no way to notice: both numbers were
+    plausible, both were labelled honestly, and the cost per request implied by
+    putting them together was wrong by an order of magnitude. A number nobody can
+    check has to be a number that cannot ship.
+    """
+    counted = meter.get(EXCHANGES, 0)
+    if counted == runs:
+        return
+    raise SystemExit(
+        f"the meter covers {counted} exchange(s) but the service recorded {runs} "
+        f"{span} span(s). The token and cost totals would describe "
+        f"{counted / runs:.0%} of the work this page reports.\n"
+        "Every ask a measurement makes has to go through report.metered_ask — see "
+        "its docstring for what putting the two numbers side by side implies."
+    )
 
 
 def redteam_section(assistant: Assistant) -> tuple[str, bool]:
@@ -257,14 +336,20 @@ def latency_section(
     — but on the deployed tier that span excludes composition, which is where
     every second of a real answer goes. The release page quoted `agent.run` at a
     tenth of a millisecond under the sentence "these include real model time".
-    Both halves were produced by this function; only the sentence was wrong."""
-    runs = [duration_ms(s) for s in assistant.rec.named(span)]
-    p50, p95, p99 = (percentile(runs, p) for p in (50, 95, 99))
+    Both halves were produced by this function; only the sentence was wrong.
+
+    "spans", not "runs", and the word matters on a page that also prints a cost line.
+    `agent.run` fires once per request that reaches the agent loop, and a
+    guardrail-blocked request never does — so this count can legitimately sit one
+    below the request count beside it, and two numbers both called "runs" invite a
+    reader to conclude one of them is wrong."""
+    sample = [duration_ms(s) for s in assistant.rec.named(span)]
+    p50, p95, p99 = (percentile(sample, p) for p in (50, 95, 99))
     per_tool = time_by_tool(assistant.rec.spans())
     tool_rows = "\n".join(f"| tool.{name} | {ms:.1f} |" for name, ms in sorted(per_tool.items()))
     return (
         "## Latency (from the spans)\n\n"
-        f"`{span}` over {len(runs)} runs: "
+        f"`{span}` over {len(sample)} spans: "
         f"P50 {p50:.1f} ms · P95 {p95:.1f} ms · P99 {p99:.1f} ms\n\n"
         + ("| where the time went | total ms |\n|---|---|\n" + tool_rows + "\n\n"
            if per_tool else "")
@@ -303,7 +388,14 @@ def token_source(meter: dict) -> str:
 
 
 def cost_section(assistant: Assistant, measured: Measured) -> str:
-    """The cost story, honestly told for the tier that ran."""
+    """The cost story, honestly told for the tier that ran.
+
+    "requests", and every one of them metered — `require_every_run_metered` has
+    already refused a page where `measured.runs` and the token totals cover different
+    amounts of work. That check exists because this sentence is where the two numbers
+    meet: a reader divides one by the other, and the release page once invited them to
+    divide 63 requests into the tokens from 5.
+    """
     tier = assistant.tier()
     note = TOKEN_SOURCE_NOTE[measured.tokens_source]
     return (
@@ -311,7 +403,8 @@ def cost_section(assistant: Assistant, measured: Measured) -> str:
         f"Composer tier: `{tier['brain']}`, priced against the "
         f"`{assistant.settings.price_tier}` list: "
         f"**${measured.cost_usd:.4f}** for {measured.tokens_in:,} tokens in and "
-        f"{measured.tokens_out:,} out across {measured.runs} runs, {note}. Self-hosted "
+        f"{measured.tokens_out:,} out across {measured.runs} metered requests, "
+        f"{note}. Self-hosted "
         "generation has no per-token invoice, so the honest number here is zero — "
         "but the tokens are metered either way, which is the difference between a "
         "cost gate and a comforting sentence. Point the composer at a paid API, "
@@ -372,19 +465,25 @@ def measure(assistant: Assistant | None = None) -> tuple[str, Measured]:
 
     meter: dict[str, int] = {}
     suite = run_evals(assistant, meter)
-    probes = run_probes(assistant)
+    probes = run_probes(assistant, meter)
 
-    runs = [duration_ms(s) for s in assistant.rec.named("agent.run")]
+    # Two different questions, and they used to share one answer. `latencies` is the
+    # agent loop, which is what this page's percentiles are about; `asked` is
+    # requests, which is what the cost line divides by. A guardrail-blocked probe
+    # produces the second without the first.
+    latencies = [duration_ms(s) for s in assistant.rec.named("agent.run")]
+    asked = len(assistant.rec.named(PIPELINE_SPAN))
+    require_every_run_metered(meter, asked, PIPELINE_SPAN)
     tokens_in, tokens_out = meter.get("in", 0), meter.get("out", 0)
     measured = Measured(
         faithfulness=suite.overall["faithfulness"],
         recall=suite.overall["context_recall"],
         redteam_bypasses=sum(1 for _, contained in probes if not contained),
-        p99_ms=round(percentile(runs, 99), 3),
+        p99_ms=round(percentile(latencies, 99), 3),
         cost_usd=cost_usd(assistant, tokens_in, tokens_out),
         tokens_in=tokens_in,
         tokens_out=tokens_out,
-        runs=len(runs),
+        runs=asked,
         tokens_source=token_source(meter),
         versions=versions_for(assistant),
     )

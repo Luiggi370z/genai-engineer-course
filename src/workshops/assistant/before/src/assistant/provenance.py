@@ -38,6 +38,18 @@ MEASURED_SOURCE = (
     "phase6-design-defend/01-red-team/after/evals/redteam.jsonl",
 )
 
+#: Everything a RELEASE is made of, as paths from the repository ROOT — a wider
+#: circle than MEASURED_SOURCE, which covers only what the numbers measure.
+#:
+#: `release/evidence/` is deliberately absent, and that absence is the whole design.
+#: It is the only place generated evidence is committed, so `HEAD:src` and `HEAD:app`
+#: cannot move when evidence lands — which is what makes the binding below a fixed
+#: point instead of the unsatisfiable commit-sha comparison it replaced.
+#:
+#: `release/README.md` is named individually rather than taking `release/` whole:
+#: taking the directory would put the evidence back inside the thing it is bound to.
+RELEASE_INPUTS = ("src", "app", "release/README.md")
+
 
 def build_version() -> str:
     """TODO 1: which commit is serving this request.
@@ -124,6 +136,26 @@ def source_id() -> str:
 
     `_git` and `source_root` below are written for you; the judgement being tested
     is what to hash.
+    """
+    raise NotImplementedError
+
+
+def release_inputs_id() -> str:
+    """TODO 7: a stable name for every input a release is built from.
+
+    Same four answers and the same construction as `source_id`, over RELEASE_INPUTS
+    instead of MEASURED_SOURCE — note the paths are root-relative here, so the
+    revision is `HEAD:<path>` with no `src/` prefix.
+
+    Why a SECOND id rather than a wider first one: the two answer different
+    questions. `source_id` says which code produced the numbers; this says which
+    code is being published, and the release contains things no measurement touched
+    (the workbook under `app/`, the compose stack, the verifier). Widening
+    MEASURED_SOURCE to cover them would make the evidence claim it measured them.
+
+    The attestation this feeds used to carry a commit sha, and the tag gate required
+    it to equal the commit being tagged. Work out why that can never pass before you
+    write this — the answer is the reason the function exists.
     """
     raise NotImplementedError
 
