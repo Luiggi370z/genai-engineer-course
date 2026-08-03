@@ -1,0 +1,33 @@
+# The RELEASE overlay: publish the two backing services so a measurement running
+# on the host can reach them.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.release.yml up -d
+#
+# then run the capstone's release measurement from the host, as
+# workshops/assistant/after/docs/RELEASE-CHECKLIST.md describes.
+#
+# That measurement is not a client of the API. It builds an assistant in its own
+# process — with the release judge and the whole red-team dataset, which are not
+# in the image — and points it at the same Qdrant and the same Ollama the
+# deployed stack uses. That only works if those two are reachable from the host,
+# and the base stack deliberately publishes exactly one port, the assistant's.
+#
+# So the base file keeps that property (it is check 1's claim: one published
+# port, nothing else exposed) and the widening lives here, where it is opt-in and
+# where the reason is written down. Both bindings are pinned to 127.0.0.1: this
+# opens a vector store and a model runner to processes on this machine for the
+# length of a release run, not to the network.
+#
+# Ollama is published too, because the release measurement composes with the same
+# model the stack answers with. On a Mac use `docker-compose.hostmodel.yml`
+# instead and leave OLLAMA_HOST at the host's own daemon — inference inside the
+# VM has no GPU, and a release run at 0.52 tokens/second is a release run nobody
+# finishes.
+services:
+  qdrant:
+    ports:
+      - "127.0.0.1:6333:6333"
+
+  ollama:
+    ports:
+      - "127.0.0.1:11434:11434"

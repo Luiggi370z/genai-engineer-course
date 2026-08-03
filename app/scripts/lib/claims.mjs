@@ -145,6 +145,73 @@ export function priceFindings({ file, source, prices }) {
 }
 
 /**
+ * A library the course teaches is pinned to one version range everywhere, and
+ * nothing imports the surface that range replaced.
+ *
+ * The case this exists for: lesson 2.1 pinned `ragas>=0.2,<1` and wrote against
+ * `evaluate()` + `EvaluationDataset`, lesson 3.2 pinned `ragas>=0.4,<0.5` and
+ * wrote against `ragas.metrics.collections`. Both ran. RAGAS kept the old import
+ * path alive behind a DeprecationWarning, so nothing failed — the course simply
+ * taught two APIs for one library and gave the reader no way to tell which half
+ * was current. A pin that only one lesson respects is not a pin.
+ *
+ * `retired` is authored per package: it lists import paths the pinned range has
+ * moved on from. Substring matching is deliberate — these are import statements
+ * in lesson source, not arbitrary prose, and a near-miss here is still a reader
+ * copying the wrong API.
+ */
+export function pinFindings({ manifests, sources = [], packages }) {
+  const out = [];
+  for (const pkg of packages) {
+    const seen = new Map(); // specifier -> [file, ...]
+    for (const { file, source } of manifests) {
+      // A dependency entry is a quoted string: "ragas>=0.4,<0.5". Anything after
+      // the name up to the closing quote is the specifier, empty if unpinned.
+      const quoted = source.match(/"[^"]+"/g) ?? [];
+      const entry = quoted
+        .map((raw) => raw.slice(1, -1))
+        .find(
+          (dep) =>
+            dep.startsWith(pkg.name) &&
+            // `ragas` must not match `ragas-experimental`: the next character has
+            // to start a version specifier or extra, not more of a name.
+            (dep === pkg.name || /^[^A-Za-z0-9._-]/.test(dep.slice(pkg.name.length))),
+        )
+        ?.slice(pkg.name.length);
+      if (entry === undefined) continue;
+      seen.set(entry.trim(), [...(seen.get(entry.trim()) ?? []), file]);
+    }
+    if (seen.size > 1) {
+      const shown = [...seen.entries()]
+        .map(([spec, files]) => `  ${pkg.name}${spec || " (unpinned)"} — ${files.join(", ")}`)
+        .join("\n");
+      out.push({
+        rule: "pin-drift",
+        subject: pkg.name,
+        message:
+          `pinned ${seen.size} different ways; these lessons teach the same library ` +
+          `and must agree:\n${shown}`,
+      });
+    }
+
+    for (const path of pkg.retired ?? []) {
+      for (const { file, source } of sources) {
+        if (!source.includes(path)) continue;
+        const line = source.slice(0, source.indexOf(path)).split("\n").length;
+        out.push({
+          rule: "pin-drift",
+          subject: `${file}:${line}`,
+          message:
+            `imports \`${path}\`, which ${pkg.name} ${pkg.pin} has moved on from` +
+            (pkg.replacement ? ` — use \`${pkg.replacement}\`` : ""),
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * No file names a model tag that competes with the canonical one for its role.
  *
  * `rivals` is authored rather than inferred: only a human knows that
@@ -152,21 +219,98 @@ export function priceFindings({ file, source, prices }) {
  * while `gemma4:e2b` is a different question entirely. The check catches the
  * case that actually happened — a second judge quietly in use in one lesson,
  * making its scores incomparable with everyone else's.
+ *
+ * A rival can carry an `exempt` list of files. That is how a deliberate second
+ * tag stays deliberate: the scheduled E2E lane runs a 1.7B because a hosted
+ * runner cannot finish a 9B generation, and the registry says exactly which
+ * three files may say so. Name it anywhere else and it is drift again.
  */
 export function modelFindings({ files, roles }) {
   const out = [];
   for (const { file, source } of files) {
     for (const role of roles) {
       for (const rival of role.rivals ?? []) {
-        if (!source.includes(rival)) continue;
-        const line = source.slice(0, source.indexOf(rival)).split("\n").length;
+        const tag = typeof rival === "string" ? rival : rival.tag;
+        if (!source.includes(tag)) continue;
+        if ((rival.exempt ?? []).includes(file)) continue;
+        const line = source.slice(0, source.indexOf(tag)).split("\n").length;
         out.push({
           rule: "model-drift",
           subject: `${file}:${line}`,
-          message: `uses ${rival} as the ${role.role} model; the course-wide ${role.role} is ${role.tag}`,
+          message:
+            `uses ${tag} as the ${role.role} model; the course-wide ${role.role} is ${role.tag}` +
+            (rival.exempt ? ` (registered for ${rival.exempt.join(", ")} only)` : ""),
         });
       }
     }
   }
   return out;
+}
+
+/**
+ * Every count of the red-team dataset is the count the dataset has.
+ *
+ * The number was written into prose in nine places and into the dataset in one,
+ * and by round 3 they disagreed twice over: a report still described a 45-case
+ * suite that had grown to 58, and three READMEs read "58 rows ... plus 11
+ * benign controls" when the 58 already included the controls. Both are the same
+ * defect — a number nobody can check without opening a `.jsonl` file.
+ *
+ * So the dataset is the claim and the prose is a copy. `dataset` carries the
+ * totals read off the file; anything restating them has to agree.
+ */
+export function datasetFindings({ files, dataset }) {
+  const expected = {
+    rows: dataset.rows,
+    attacks: dataset.attacks,
+    controls: dataset.controls,
+    families: dataset.families,
+  };
+  // Each pattern names the quantity it is reading, so the failure can say which
+  // number is wrong rather than that some number is.
+  const patterns = [
+    [/(\d+)\s+rows\b/i, "rows", /red.?team|redteam|phase 6 (?:versioned )?dataset/i],
+    // The exact shape of the stale claim the round-3 audit found: "45-case".
+    [/(\d+)-case\b/i, "rows", /red.?team|redteam|dataset|suite/i],
+    [/suite of (?:\*\*)?(\d+) rows/i, "rows", null],
+    [/(\d+)\s+benign controls?\b/i, "controls", null],
+    [/(\d+)\s+attacks?\s+(?:across|rows)/i, "attacks", null],
+    [/(\d+)\s+attack families\b/i, "families", null],
+  ];
+  const out = [];
+  for (const { file, source } of files) {
+    source.split("\n").forEach((text, index) => {
+      for (const [pattern, quantity, context] of patterns) {
+        if (context && !context.test(text)) continue;
+        const found = text.match(pattern);
+        if (!found) continue;
+        const claimed = Number(found[1]);
+        if (claimed === expected[quantity]) continue;
+        out.push({
+          rule: "dataset-drift",
+          subject: `${file}:${index + 1}`,
+          message:
+            `claims ${claimed} ${quantity}; the dataset has ${expected[quantity]} ` +
+            `(${dataset.rows} rows = ${dataset.attacks} attacks across ` +
+            `${dataset.families} families + ${dataset.controls} benign controls)`,
+        });
+      }
+    });
+  }
+  return out;
+}
+
+/** The totals, read off the dataset itself. `category: "benign"` is a control. */
+export function readDataset(jsonl) {
+  const rows = jsonl
+    .split("\n")
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
+  const controls = rows.filter((row) => row.category === "benign");
+  return {
+    rows: rows.length,
+    controls: controls.length,
+    attacks: rows.length - controls.length,
+    families: new Set(rows.filter((r) => r.category !== "benign").map((r) => r.category)).size,
+  };
 }

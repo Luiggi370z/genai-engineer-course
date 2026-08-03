@@ -6,9 +6,11 @@ a document update it or duplicate it, can you delete something, does a citation
 still resolve to the text it named, and does the poisoned page get dropped
 without taking the provenance of the clean ones with it.
 """
+import re
+
 from fastapi.testclient import TestClient
 
-from assistant.adapters import InMemoryRag, hash_embed
+from assistant.adapters import InMemoryRag, collection_name, hash_embed
 from assistant.api import create_app
 from assistant.rag import Chunk, chunk_document, source_for
 from assistant.service import build_assistant
@@ -217,3 +219,41 @@ def test_chunks_are_what_the_store_returns_and_text_is_still_reachable():
     hit = rag.search("refunds", k=1)[0]
     assert isinstance(hit, Chunk)
     assert hit.text == REFUNDS
+
+
+# --- the collection is named after what wrote it --------------------------------
+
+
+def test_the_collection_name_carries_the_embedder_and_its_width():
+    """The silent corruption this prevents. Qdrant validates the DIMENSION of an
+    incoming vector and nothing else, so swapping one 768-dimensional embedder
+    for another writes cleanly into the old collection, searches cleanly, and
+    returns noise — a failure with no error in it anywhere.
+
+    Naming the collection after the embedder turns that into a new, empty
+    collection: visibly wrong on the first query instead of invisibly wrong
+    forever."""
+    assert collection_name("assistant", "nomic-embed-text", 768) == (
+        "assistant__nomic-embed-text__768"
+    )
+    # the same base with a different model is a different store, which is the point
+    assert collection_name("assistant", "mxbai-embed-large", 768) != (
+        collection_name("assistant", "nomic-embed-text", 768)
+    )
+    # and so is the same model at a different width
+    assert collection_name("assistant", "nomic-embed-text", 512) != (
+        collection_name("assistant", "nomic-embed-text", 768)
+    )
+
+
+def test_a_model_name_qdrant_would_reject_is_sanitised_not_passed_through():
+    """Registry-style names carry slashes and colons; collection names do not."""
+    name = collection_name("assistant", "BAAI/bge-small-en-v1.5:latest", 384)
+    assert re.fullmatch(r"[A-Za-z0-9_.-]+", name), name
+    assert "384" in name and "bge-small" in name
+
+
+def test_the_hash_embedder_is_recorded_as_such_rather_than_left_blank():
+    """An unnamed default is how the deployed stack ran on a non-semantic
+    embedder without anybody noticing."""
+    assert collection_name("assistant", "hash", 64) == "assistant__hash__64"

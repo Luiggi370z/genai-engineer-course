@@ -1,9 +1,10 @@
 import ArrowLeft02Icon from "@hugeicons/core-free-icons/ArrowLeft02Icon";
 import ArrowRight02Icon from "@hugeicons/core-free-icons/ArrowRight02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { phases } from "../../data/phases";
 import type { Phase } from "../../data/types";
+import { accentOf } from "../../lib/accent";
 import { InlineText } from "../../lib/markdown";
 import type { Progress } from "../../lib/progress";
 import { readingMinutes } from "../../lib/reading-time";
@@ -15,6 +16,7 @@ import { LadderRail } from "./LadderRail";
 import { PhaseToc, type TocEntry } from "./PhaseToc";
 import { QuestionCard } from "./QuestionCard";
 import { SectionBar } from "./SectionBar";
+import { useActiveSection } from "./useActiveSection";
 import { WorkshopCard } from "./WorkshopCard";
 
 interface PhaseViewProps {
@@ -22,6 +24,8 @@ interface PhaseViewProps {
   progress: Progress;
   onToggle: (id: string) => void;
   onNav: (view: string) => void;
+  /** Reports the section being read, so the app can remember the place. */
+  onSection: (sectionId: string) => void;
   nextPhase?: Phase | undefined;
 }
 
@@ -54,10 +58,22 @@ function tocEntries(phase: Phase): TocEntry[] {
   return entries;
 }
 
-export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: PhaseViewProps) {
-  const accent = phase.color;
+export function PhaseView({
+  phase,
+  progress,
+  onToggle,
+  onNav,
+  onSection,
+  nextPhase,
+}: PhaseViewProps) {
+  const accent = accentOf(phase.id);
   const minutes = readingMinutes(phase);
   const entries = useMemo(() => tocEntries(phase), [phase]);
+  const active = useActiveSection(entries);
+
+  useEffect(() => {
+    if (active) onSection(active);
+  }, [active, onSection]);
 
   return (
     <div className="flex gap-10">
@@ -86,7 +102,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
           >
             <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <span
-                className="font-mono text-[10px] uppercase tracking-[0.16em]"
+                className="font-mono text-[11px] uppercase tracking-[0.16em]"
                 style={{ color: accent }}
               >
                 The 60-second version
@@ -96,7 +112,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
               runs a fortnight would read as the time the phase takes, which is the
               exact misconception the course spends nine phases attacking.
             */}
-              <span className="font-mono text-[10px] text-graphite">
+              <span className="font-mono text-[11px] text-graphite">
                 ~{minutes} min to read — the work itself runs {phase.weeks}
               </span>
             </div>
@@ -125,7 +141,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
             after the header rather than above it: a navigator is only useful once you
             know what you are navigating, and the first thing on a phase should be its
             title. */}
-        <SectionBar entries={entries} accent={accent} />
+        <SectionBar entries={entries} accent={accent} active={active} />
 
         <SectionHeading
           id="objectives"
@@ -197,7 +213,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
                 <h3 className="text-[15.5px] font-bold tracking-tight text-ink">{concept.title}</h3>
                 {concept.tag && (
                   <span
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide"
+                    className="rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide"
                     style={{
                       background: `color-mix(in oklab, ${accent} 12%, transparent)`,
                       color: accent,
@@ -222,7 +238,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
             }}
           >
             <div
-              className="mb-1.5 font-mono text-[10.5px] uppercase tracking-[0.16em]"
+              className="mb-1.5 font-mono text-[11px] uppercase tracking-[0.16em]"
               style={{ color: accent }}
             >
               {phase.example.title}
@@ -346,7 +362,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
               >
                 {resource.label}
               </a>
-              <span className="hidden truncate font-mono text-[10px] text-graphite sm:inline">
+              <span className="hidden truncate font-mono text-[11px] text-graphite sm:inline">
                 {resource.url.replace(/^https?:\/\//, "").split("/")[0]}
               </span>
             </li>
@@ -359,12 +375,14 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
               type="button"
               onClick={() => onNav(nextPhase.id)}
               className="group flex items-center gap-3 rounded-md border bg-card px-5 py-3 transition-shadow hover:shadow-md"
-              style={{ borderColor: `color-mix(in oklab, ${nextPhase.color} 40%, transparent)` }}
+              style={{
+                borderColor: `color-mix(in oklab, ${accentOf(nextPhase.id)} 40%, transparent)`,
+              }}
             >
               <div className="text-left">
                 <div
-                  className="font-mono text-[10px] uppercase tracking-[0.14em]"
-                  style={{ color: nextPhase.color }}
+                  className="font-mono text-[11px] uppercase tracking-[0.14em]"
+                  style={{ color: accentOf(nextPhase.id) }}
                 >
                   Next · Phase {String(nextPhase.num).padStart(2, "0")}
                 </div>
@@ -372,7 +390,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
               </div>
               <span
                 className="transition-transform group-hover:translate-x-0.5"
-                style={{ color: nextPhase.color }}
+                style={{ color: accentOf(nextPhase.id) }}
               >
                 <HugeiconsIcon icon={ArrowRight02Icon} size={20} strokeWidth={2} />
               </span>
@@ -394,7 +412,7 @@ export function PhaseView({ phase, progress, onToggle, onNav, nextPhase }: Phase
           landmark, and two unnamed ones read identically to a screen reader
           listing regions. The `nav` inside carries the label that matters. */}
       <div className="sticky top-2 hidden h-fit w-[190px] shrink-0 self-start pt-2 xl:block">
-        <PhaseToc entries={entries} accent={accent} />
+        <PhaseToc entries={entries} accent={accent} active={active} />
       </div>
     </div>
   );

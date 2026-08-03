@@ -18,7 +18,15 @@ from __future__ import annotations
 
 import pytest
 
-from src.frameworks import FACTS, TOPIC, Run, crewai_run, langgraph_run, pydantic_ai_run
+from src.frameworks import (
+    FACTS,
+    TOPIC,
+    Recorder,
+    Run,
+    crewai_run,
+    langgraph_run,
+    pydantic_ai_run,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -51,8 +59,8 @@ def test_only_langgraph_leaves_state_a_second_call_can_resume():
     """The durability row of the matrix, measured rather than quoted.
 
     This is the one assertion that is allowed to differ between frameworks,
-    because it is the finding: same task, same shape, and one of them can be
-    picked back up after the process dies."""
+    because it is the finding: same task, same shape, and one of them leaves
+    state behind that a different object can read."""
     assert langgraph_run().resumable is True
     assert pydantic_ai_run().resumable is False
 
@@ -60,11 +68,41 @@ def test_only_langgraph_leaves_state_a_second_call_can_resume():
 def test_the_langgraph_thread_is_addressable_by_id():
     """Resuming means resuming *this* conversation. Two threads, two states —
     without a line of persistence code of your own."""
-    from langgraph.checkpoint.memory import MemorySaver  # noqa: F401  (proves the import)
+    from langgraph.checkpoint.memory import MemorySaver
 
-    first = langgraph_run(thread="ticket-1")
-    second = langgraph_run(topic="quantization", thread="ticket-2")
+    shared = MemorySaver()
+    first = langgraph_run(thread="ticket-1", checkpointer=shared)
+    second = langgraph_run(topic="quantization", thread="ticket-2", checkpointer=shared)
     assert first.answer != second.answer
+
+
+def test_the_durability_claim_is_measured_across_processes_not_within_one(tmp_path):
+    """What the matrix row is actually worth.
+
+    `resumable` used to be taken from the same app object that had just run —
+    a fresh `MemorySaver` per call, asked whether it remembered the call it had
+    just made. It always said yes, so the column measured nothing, and "LangGraph
+    is durable" rested on a tautology.
+
+    A SQLite checkpointer and a second process's worth of separation is the
+    version of the claim worth printing: run here, read it back over there."""
+    import sqlite3
+
+    from langgraph.checkpoint.sqlite import SqliteSaver
+
+    from src.frameworks import _langgraph_app
+
+    db = tmp_path / "bakeoff.db"
+    config = {"configurable": {"thread_id": "across"}}
+
+    first = sqlite3.connect(db, check_same_thread=False)
+    assert langgraph_run(thread="across", checkpointer=SqliteSaver(first)).resumable
+    first.close()  # the "crash"
+
+    second = sqlite3.connect(db, check_same_thread=False)
+    state = _langgraph_app(SqliteSaver(second), Recorder()).get_state(config)
+    assert state.values.get("answer"), "the run did not outlive the process that made it"
+    second.close()
 
 
 def test_pydantic_ai_output_is_a_validated_model_not_a_string():
@@ -77,17 +115,22 @@ def test_pydantic_ai_output_is_a_validated_model_not_a_string():
 def _require_crewai() -> None:
     """Skip with the real reason instead of a traceback from three layers down.
 
-    CrewAI's dependency tree pins it to Python 3.12; on a newer interpreter it
-    dies inside Chroma's Pydantic v1 shim with `unable to infer type for
-    attribute "chroma_server_nofile"`, which looks like a CrewAI bug and is a
-    Python version bound. Naming it here saves the hour everyone otherwise
-    spends on it — and the fact that one of the three frameworks constrains
-    your interpreter is a real finding for the matrix.
+    Two different absences, and only one of them is fine. The interpreter is no
+    longer one of them: this lesson pins `requires-python = ">=3.12,<3.13"`
+    because CrewAI's tree does not build on anything newer, and `tests/conftest.py`
+    refuses to collect on the wrong version rather than letting Chroma's Pydantic
+    v1 shim report it as `unable to infer type for attribute
+    "chroma_server_nofile"`. So reaching here on the wrong Python is impossible.
+
+    What remains is the honest skip: the heavy `integration` group is not
+    installed, because the fast tier does not pay for it. `make test-integration`
+    installs it. That one of the three frameworks constrains your interpreter at
+    all is a real finding, and it belongs in the matrix rather than in a skip.
     """
     try:
         import crewai  # noqa: F401
     except Exception as exc:
-        pytest.skip(f"crewai will not import here (needs Python 3.12): {exc}")
+        pytest.skip(f"crewai is not installed here — run `make test-integration`: {exc}")
 
 
 def _ollama_is_up() -> bool:

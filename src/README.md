@@ -47,6 +47,9 @@ You wire libraries together; you do **not** implement algorithms:
 
 Requirements: **Python 3.11+**, [uv](https://docs.astral.sh/uv/), and (for most lessons)
 [Ollama](https://ollama.com) running locally so everything works with **zero API keys**.
+`phase4-agents/04-framework-bakeoff` is the single exception: it pins **3.12** in its own
+`pyproject.toml` (CrewAI's tree does not build on newer) and uv fetches that interpreter
+for that lesson alone.
 Pull the models the course uses once:
 
 ```bash
@@ -157,14 +160,21 @@ over the wire, two authenticated callers whose memories never cross, spans recor
 and (via the observability overlay) the same spans arriving at an otel-collector
 outside the process. `verify-lessons.sh` stays offline and never runs it.
 
-A full pass is about eighteen minutes, nearly all of it the local model, so
+Where it runs: not on push. Push CI builds the capstone image and validates the
+compose overlays without booting anything; the scheduled `e2e` workflow runs the
+whole suite with `--ci` against a small chat model, which proves the wiring and
+not the answers; the unqualified local run is the release gate. Every lane says
+which one it is in its own output.
+
+A full pass on that lane is about twelve minutes, nearly all of it the local model
+actually composing, so
 `verify-e2e.sh` also takes `--list`, `--from N`, `--only N` and `--no-build` for the
 fix-and-re-prove loop. The checks share one corpus, outbox and set of approvals on purpose, so a
 resumed run only means something against volumes a full run has already filled; the
 unqualified `./verify-e2e.sh` is the claim.
 
 `--host-model` runs the same fifteen checks against the **host's** Ollama instead of
-the one in the stack, and finishes in forty-five seconds instead of eighteen minutes.
+the one in the stack, and finishes in forty-five seconds.
 That gap is not a trick: Docker Desktop gives containers no GPU, so the containerised
 model runs on CPU inside a VM at 0.52 tokens per second against the host's 81. Worth
 reading [Phase 8's

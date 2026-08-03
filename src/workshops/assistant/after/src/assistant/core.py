@@ -107,13 +107,39 @@ class Assistant:
     # attacker will not use.
     screen: Screen = guardrails.screen
 
-    def tier(self) -> dict[str, str]:
+    def tier(self) -> dict[str, str | int]:
         s = self.settings
         return {
             "rag": "qdrant" if s.qdrant_url else "in-memory",
+            # Which embedder is actually behind the vector store. "hash" is
+            # deterministic, offline and NOT semantic — it matches on shared
+            # vocabulary, so a question about "reimbursements" finds nothing
+            # about "refunds". A stack running on it looks identical from every
+            # other probe, which is exactly why this one exists.
+            "embed": (
+                s.embed_model if (s.embed_model and s.ollama_host) else "hash (not semantic)"
+            ),
+            # dense-only or dense+sparse fused. The second is what phase 2
+            # teaches; the deployed stack shipped the first for a while.
+            "retrieval": "hybrid-rrf" if s.qdrant_url else "bm25",
+            # The reranker that is RUNNING, not the one that was asked for —
+            # same rule as the embed row above, and it fails the same two ways.
+            # A model named without a vector store is never built (reranking a
+            # BM25 top-3 is not the stage), and a name fastembed cannot load
+            # reports a degradation. Both used to read here as configured, which
+            # tells an operator a precision stage is on a request path it is not.
+            "rerank": (
+                s.rerank_model
+                if (s.rerank_model and s.qdrant_url and not self.degraded.get("rerank"))
+                else "off"
+            ),
             "memory": "sqlite" if s.assistant_db else "in-process",
             "brain": "ollama" if s.ollama_host else "rule-based",
             "tools": "mcp+builtin" if s.mcp_server else "builtin",
+            # How many discovered tools the operator has ungated. A number an
+            # auditor can read from outside: "0" means every tool that arrived
+            # by discovery still pauses for a human.
+            "mcp_ungated": len(s.mcp_readonly_allowlist),
             "otlp": "on" if s.otlp_endpoint else "in-memory-only",
             "auth": _auth_tier(s),
             # an operator needs to see from outside whether the screen in front
@@ -126,6 +152,39 @@ class Assistant:
             # outbound gate is screening before release or after it
             "stream": s.stream_mode,
         }
+
+    def warm(self) -> tuple[bool, str]:
+        """Can the model tier answer inside the budget *right now*?
+
+        A pulled model is a file on disk. The first request after boot pays the
+        load — for a 9B on CPU that is minutes, against a 60-second composer
+        budget — so it times out, the offline composer answers, and the caller
+        gets a degraded response from a stack that reported itself healthy.
+        That is not a slow start, it is a wrong readiness signal: the container
+        said ready while the first valid request was expected to miss.
+
+        Nothing to prove without a model tier, so the rule-based tier is
+        trivially ready. With one, the only honest answer comes from actually
+        completing something.
+
+        The probe's evidence has to ANSWER the probe's question. Composition
+        abstains deterministically when nothing retrieved bears on what was
+        asked — no model call, no load, no timeout — so a mismatched pair here
+        returns a cheerful string from an unreachable host and reports a cold
+        stack as ready. The two lines below share the words "service" and
+        "ready" for that reason, and not as an accident of phrasing.
+        """
+        if not self.settings.ollama_host:
+            return True, "rule-based tier needs no warmup"
+        try:
+            answer = self.compose(
+                "is the service ready", ["the service is ready to answer"], [], []
+            )
+        except Exception as exc:  # noqa: BLE001 — any failure means "not yet"
+            return False, f"model tier not answering: {exc}"
+        if self.degraded.get("brain"):
+            return False, f"model tier degraded: {self.degraded['brain']}"
+        return bool(answer), "model answered inside the composer budget"
 
     def recall(self, question: str, subject: str) -> list[str]:
         """What this assistant already knows about THIS caller, most relevant
@@ -162,6 +221,7 @@ class Assistant:
             observe.TOKENS_IN: used.tokens_in,
             observe.TOKENS_OUT: used.tokens_out,
             observe.TOKENS_TOTAL: used.total,
+            observe.TOKENS_SOURCE: used.source,
             observe.COST: used.cost(tier),
         }
 
@@ -412,10 +472,11 @@ class Assistant:
             if "blocked" in gathered:
                 return {"answer": "I can't help with that request.",
                         "blocked": gathered["blocked"], "request_id": request_id,
-                        "contexts": [], "citations": [], "memories": [], "audit": []}
+                        "contexts": [], "citations": [], "memories": [],
+                        "grounding": "none", "audit": []}
             contexts = gathered["contexts"]
-            citations = citations_for(gathered["chunks"])
             memories = gathered["memories"]
+            citations = citations_for(gathered["chunks"])
             if "pending" in gathered:
                 pending = gathered["pending"]
                 return {
@@ -425,9 +486,19 @@ class Assistant:
                     "pending": {"tool": pending.tool, "args": pending.args,
                                 "args_hash": args_fingerprint(pending.args)},
                     "contexts": contexts, "citations": citations,
-                    "request_id": request_id,
+                    "request_id": request_id, "grounding": "none",
                     "memories": memories, "audit": gathered["audit"],
                 }
+            grounding = composers.grounding_of(
+                contexts, gathered["state"], memories, gathered["goal"]
+            )
+            # Citations belong to the evidence the answer stands on. A
+            # memory-grounded answer stands on what the caller said, so it ships
+            # none — the alternative is "you told me you are in Lima [c1]",
+            # pointing at a refund policy, which is a fabricated source rather
+            # than a generous one (ADR-0008).
+            if grounding == "memory":
+                citations = []
             answer = self._composed(gathered, span)
             with stage(self.rec.tracer, observe.OUTPUT_SPAN) as gate_span:
                 released = guardrails.output_ok(answer)
@@ -436,6 +507,11 @@ class Assistant:
                 answer = "[redacted: output failed the safety gate]"
             return {"answer": answer, "contexts": contexts, "citations": citations,
                     "request_id": request_id,
+                    # Which class of evidence this answer stands on. A caller can
+                    # verify a "documents" answer against its citations; a
+                    # "memory" one has none by design, and saying so is the
+                    # difference between personalisation and a silent downgrade.
+                    "grounding": grounding,
                     "memories": memories, "audit": gathered["audit"]}
 
     def ask_stream(self, question: str, subject: str = auth.ANONYMOUS) -> Iterator[str]:
@@ -446,6 +522,10 @@ class Assistant:
         The gating lives in output_gate.py, which holds a window back so nothing
         reaches the client before it has been screened — a streamed answer and a
         batch answer are subject to the same gate, not to a gate and an apology.
+
+        A stream that dies mid-answer still ends in `done`, because it is over,
+        but carries `truncated: true` and the degradation that caused it. The
+        text is real and already delivered; what it is not is the answer.
         """
         tracer = self.rec.tracer
         request_id = observe.request_id() or observe.new_request_id()
@@ -458,7 +538,7 @@ class Assistant:
                 yield sse("done", {
                     "answer": "I can't help with that request.",
                     "blocked": gathered["blocked"], "request_id": request_id,
-                    "citations": [], "audit": [],
+                    "citations": [], "grounding": "none", "audit": [],
                 })
                 return
             citations = citations_for(gathered["chunks"])
@@ -469,9 +549,18 @@ class Assistant:
                     "pending": {"tool": pending.tool, "args": pending.args,
                                 "args_hash": args_fingerprint(pending.args)},
                     "citations": citations, "request_id": request_id,
-                    "audit": gathered["audit"],
+                    "grounding": "none", "audit": gathered["audit"],
                 })
                 return
+            grounding = composers.grounding_of(
+                gathered["contexts"], gathered["state"],
+                gathered["memories"], gathered["goal"],
+            )
+            # Same rule as the batch path, and it has to be the same rule: a
+            # client that gets citations when it streams and none when it does
+            # not has learned that the difference is the transport.
+            if grounding == "memory":
+                citations = []
             stream = self.stream_compose or word_stream(self.compose)
             produced = stream(gathered["goal"], gathered["contexts"],
                               gathered["state"], gathered["memories"])
@@ -480,7 +569,7 @@ class Assistant:
             # client. Buffering here to make the metering tidier would trade the
             # feature for the instrumentation, which is the wrong way round.
             began, text = time.time_ns(), []
-            blocked = False
+            blocked = truncated = False
             for kind, chunk in gated_chunks(produced, self.settings.stream_mode):
                 # Checked per frame, which is the only place a long stream can be
                 # stopped at all. A client that closed the tab thirty seconds ago
@@ -488,7 +577,21 @@ class Assistant:
                 # the failure that compounds, because the tokens nobody reads are
                 # the tokens that slow down the callers who stayed.
                 if deadline.expired():
-                    root.set_attribute(observe.ABANDONED, deadline.expired() or "")
+                    # Ending the loop is right; ending it in silence was not.
+                    # The client has already rendered half an answer, and a
+                    # stream that simply stops is indistinguishable from a
+                    # dropped connection — so the text stays on screen looking
+                    # finished. Same terminal contract as a mid-stream stall: a
+                    # `done` frame that says it is not the whole answer.
+                    why = deadline.expired() or "the request budget ran out"
+                    root.set_attribute(observe.ABANDONED, why)
+                    truncated = True
+                    yield sse("done", {
+                        "answer": "".join(text), "truncated": True,
+                        "abandoned": why, "degraded": dict(self.degraded),
+                        "citations": citations, "request_id": request_id,
+                        "grounding": grounding, "audit": gathered["audit"],
+                    })
                     break
                 if kind == "chunk":
                     text.append(chunk)
@@ -499,10 +602,23 @@ class Assistant:
                         "answer": chunk, "redacted": True, "request_id": request_id,
                         "citations": citations, "audit": gathered["audit"],
                     })
+                elif kind == "truncated":
+                    # Still a `done` frame — the stream really is over — but one
+                    # that says so. A client rendering this as a finished answer
+                    # is now doing it against an explicit flag, not by omission.
+                    truncated = True
+                    text.append(chunk)
+                    yield sse("done", {
+                        "answer": chunk, "truncated": True,
+                        "degraded": dict(self.degraded), "citations": citations,
+                        "request_id": request_id, "grounding": grounding,
+                        "audit": gathered["audit"],
+                    })
                 else:
                     text.append(chunk)
                     yield sse("done", {"answer": chunk, "citations": citations,
                                        "request_id": request_id,
+                                       "grounding": grounding,
                                        "audit": gathered["audit"]})
             # Closed after the last frame, backdated to when generation started,
             # so this span measures the generation and not the accounting.
@@ -516,5 +632,7 @@ class Assistant:
                          **self._usage_attributes(used, tier))
             observe.mark(tracer, observe.OUTPUT_SPAN, root,
                          **{observe.SCREEN_BLOCKED: blocked})
+            if truncated:
+                root.set_attribute(observe.TRUNCATED, True)
             root.set_attribute(observe.TOKENS_TOTAL, used.total)
             root.set_attribute(observe.COST, used.cost(tier))

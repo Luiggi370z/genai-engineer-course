@@ -2,7 +2,7 @@
 
 **Goal.** Pick the right auth mode per deployment (none/bearer/OAuth 2.1+PKCE) and validate tokens correctly, twice: a policy tier in `src/auth.py` (which checks a resource server runs, and why) and a cryptography tier in `src/jwt_auth.py`, where PyJWT verifies actually-signed tokens (signature, expiry, audience, scope) behind a `BearerGate` guarding a lesson-5.2-style tool handler.
 **Prerequisite.** 7.2 REST → MCP (the gate wraps the kind of tool handler you built there).
-**Effort.** ~45 min · moderate
+**Effort.** ~45 min to green on the fast tests · no integration tier · ~75 min realistic first pass.
 
 ## Do this
 

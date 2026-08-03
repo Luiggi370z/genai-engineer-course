@@ -21,8 +21,11 @@ import { dirname, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import {
+  datasetFindings,
   modelFindings,
+  pinFindings,
   priceFindings,
+  readDataset,
   STALE_DAYS,
   sourceFindings,
   tableFindings,
@@ -48,8 +51,46 @@ const {
  */
 const RIVALS = {
   judge: ["qwen3.6:27b"],
+  // The cheap Llama Guard everyone reaches for when the 8B feels heavy. It is a
+  // different detector with a different false-negative profile, so a lesson
+  // quietly screening with it produces containment numbers nobody can compare.
   guard: ["llama-guard3:1b"],
+  // The tag the capstone shipped until a release run tried to load it: fastembed
+  // has no `bge-reranker-v2-m3`, so naming it took the assistant down at
+  // construction while every lesson used `bge-reranker-base` and passed. Two
+  // reranker names in one repo is the drift; one of them not existing is what it
+  // cost.
+  rerank: ["BAAI/bge-reranker-v2-m3"],
 };
+
+// Every registered CI-tier tag is a rival of its role's course tag, allowed only
+// in the files the registry names. A lane that cannot run the course model is a
+// legitimate exception; the same tag leaking into a lesson is not.
+//
+// Appended rather than spread over the object above: spreading meant registering
+// a CI-tier guard would silently delete the authored guard rival, and the gate
+// would go quiet about the exact substitution it exists to catch.
+for (const model of MODELS.filter((model) => model.tier === "ci")) {
+  RIVALS[model.role] = [
+    ...(RIVALS[model.role] ?? []),
+    { tag: model.tag, exempt: model.onlyIn ?? [] },
+  ];
+}
+
+/**
+ * Libraries more than one lesson teaches, and the import paths their pinned
+ * range replaced. Authored for the same reason as `RIVALS`: only a human knows
+ * that `ragas.metrics.Faithfulness` and `ragas.metrics.collections.Faithfulness`
+ * are two names for one job, and that the first still imports.
+ */
+const WATCHED_PACKAGES = [
+  {
+    name: "ragas",
+    pin: ">=0.4,<0.5",
+    replacement: "ragas.metrics.collections",
+    retired: ["from ragas import EvaluationDataset", "from ragas.dataset_schema import"],
+  },
+];
 
 const findings = [];
 const push = (rows) => findings.push(...rows);
@@ -77,19 +118,21 @@ for (const { file, source } of pythonFiles) {
 }
 
 // --- 4. one model per role, course-wide -------------------------------------
-const roles = MODELS.filter((model) => RIVALS[model.role]).map((model) => ({
-  ...model,
-  rivals: RIVALS[model.role],
-}));
+const roles = MODELS.filter(
+  (model) => (model.tier ?? "course") === "course" && RIVALS[model.role],
+).map((model) => ({ ...model, rivals: RIVALS[model.role] }));
 push(modelFindings({ files: pythonFiles, roles }));
 
 // Markdown and course data restate the tags too, and a README telling you to pull
 // the wrong judge is the same defect as code loading it.
 const REGISTRY = "app/src/data/reference.ts";
+// Compose files and workflows are scanned for the same reason: the tag that got
+// a lane running a different model was never going to appear in a .py file.
 const proseFiles = [];
-for await (const path of glob("{README.md,release/**/*.md,src/**/*.md,app/src/data/**/*.ts}", {
-  cwd: repo,
-})) {
+for await (const path of glob(
+  "{README.md,release/**/*.md,src/**/*.md,app/src/data/**/*.ts,src/**/*.yml,.github/workflows/*.yml,src/verify-*.sh}",
+  { cwd: repo },
+)) {
   // The registry names every rival tag by definition — that is what makes it the
   // registry. Scanning it would report the list against itself.
   if (path === REGISTRY) continue;
@@ -97,10 +140,23 @@ for await (const path of glob("{README.md,release/**/*.md,src/**/*.md,app/src/da
 }
 push(modelFindings({ files: proseFiles, roles }));
 
+// --- 5. every count of the red-team dataset is the dataset's own count ------
+const REDTEAM = "src/phase6-design-defend/01-red-team/after/evals/redteam.jsonl";
+const dataset = readDataset(readFileSync(resolve(repo, REDTEAM), "utf8"));
+push(datasetFindings({ files: [...proseFiles, ...pythonFiles], dataset }));
+
+// --- 6. one pin per library the course teaches twice ------------------------
+const manifests = [];
+for await (const path of glob("src/**/pyproject.toml", { cwd: repo })) {
+  manifests.push({ file: path, source: readFileSync(resolve(repo, path), "utf8") });
+}
+push(pinFindings({ manifests, sources: pythonFiles, packages: WATCHED_PACKAGES }));
+
 // --- report -----------------------------------------------------------------
 console.log(
   `Claims scan · ${sourced.length} sourced claim(s) · ${HARDWARE.length} hardware tiers · ` +
-    `${Object.keys(TOKEN_PRICES).length} priced models · ${pythonFiles.length} python files`,
+    `${Object.keys(TOKEN_PRICES).length} priced models · ${pythonFiles.length} python files · ` +
+    `${manifests.length} manifests`,
 );
 if (stale.length) {
   console.log(
@@ -124,4 +180,6 @@ if (findings.length) {
     console.error(`  - [${f.rule}] ${relative(".", f.subject)}: ${f.message}`);
   process.exit(1);
 }
-console.log("\nClaims OK — one hardware table, one price list, one model per role.");
+console.log(
+  "\nClaims OK — one hardware table, one price list, one model per role, one pin per library.",
+);

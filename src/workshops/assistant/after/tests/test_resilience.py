@@ -2,6 +2,7 @@
 sleep/clock means no test here ever actually waits."""
 
 import time
+from contextvars import ContextVar
 
 import pytest
 
@@ -70,6 +71,43 @@ def test_backoff_is_capped_and_jittered():
     fn()
     # ceilings 1.0, 2.0->1.5(cap), 4.0->1.5(cap); jitter halves each
     assert slept == [0.5, 0.75, 0.75]
+
+
+def test_what_the_call_records_about_itself_survives_the_worker_thread():
+    """The timeout runs the call on a worker thread, and a thread starts with an
+    empty context — so anything the call wrote to a ContextVar was thrown away
+    when that thread ended.
+
+    It was not a hypothetical. Ollama returns exact token counts, the adapter
+    reports them into a ContextVar, and the meter read that var back on the
+    request thread: `None`, every time, on the one tier where the counts are
+    real. The release page then said the tokens were estimated by word split,
+    which was true, honest, and caused entirely by this."""
+    seen: ContextVar[str] = ContextVar("seen", default="nothing")
+
+    def records() -> str:
+        seen.set("what the call learned")
+        return "done"
+
+    assert resilient(records, Policy(attempts=1, timeout=5))() == "done"
+    assert seen.get() == "what the call learned"
+
+
+def test_an_abandoned_call_does_not_get_to_write_into_the_caller():
+    """The other half, and the reason the copy-back happens after the result
+    rather than in a `finally`: a call that overran is still running on that
+    thread. Adopting whatever it has written so far would import half-finished
+    state from work the caller has already given up on."""
+    late: ContextVar[str] = ContextVar("late", default="nothing")
+
+    def slow_writer() -> None:
+        time.sleep(0.3)
+        late.set("too late to matter")
+
+    with pytest.raises(TimeoutError):
+        resilient(slow_writer, Policy(attempts=1, timeout=0.05))()
+    time.sleep(0.4)  # the abandoned call has now finished, on its own thread
+    assert late.get() == "nothing"
 
 
 def test_a_call_that_overruns_its_timeout_raises():

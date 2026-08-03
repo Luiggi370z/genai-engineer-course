@@ -7,7 +7,7 @@ version-stamped report, and wire them into the `make eval` / `make redteam` /
 `make latency` / `make cost` targets the repo-root workflow calls on every PR.
 **Prerequisite.** Phase 3 evals and Phase 6 red-team — they produce the numbers
 this gate reads.
-**Effort.** ~35 min · gentle.
+**Effort.** ~35 min to green on the fast tests · no integration tier · ~60 min realistic first pass.
 
 ## Do this
 

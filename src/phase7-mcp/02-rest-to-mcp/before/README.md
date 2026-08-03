@@ -2,7 +2,7 @@
 
 **Goal.** Wrap a REST-style weather service as an MCP server — 3 tools, 1 resource, 1 prompt — with the v2 SDK's `MCPServer`. You never write JSON Schema: type hints generate it and docstrings become the model-facing descriptions, so you write both *for the model*.
 **Prerequisite.** 7.1 Consume a server (you'll test this server with the client moves you just learned).
-**Effort.** ~30 min · gentle
+**Effort.** ~30 min to green on the fast tests · no integration tier · ~50 min realistic first pass.
 
 ## Do this
 

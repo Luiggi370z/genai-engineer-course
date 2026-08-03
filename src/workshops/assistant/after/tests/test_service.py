@@ -1,11 +1,12 @@
 """The capstone, on trial in the fast tier: the real FastAPI app driven by a
 TestClient with every adapter in its offline default. No network, no model."""
 
+import pytest
 from fastapi.testclient import TestClient
 
 from assistant.api import create_app
 from assistant.composers import ABSTAIN
-from assistant.service import build_assistant
+from assistant.service import build_assistant, build_reranker
 from assistant.settings import Settings
 
 
@@ -22,9 +23,57 @@ def test_health_reports_the_offline_tier():
         "rag": "in-memory", "memory": "in-process", "brain": "rule-based",
         "tools": "builtin", "otlp": "in-memory-only",
         "auth": "off", "connectors": "stubs", "stream": "safe-buffered",
-        "guard": "regex-only",
+        "guard": "regex-only", "embed": "hash (not semantic)",
+        "retrieval": "bm25", "rerank": "off", "mcp_ungated": 0,
     }
     assert body["spans_recorded"] == 0  # nothing has run yet
+
+
+def test_the_embedder_tier_names_the_model_only_when_it_can_actually_run():
+    """The gap this closes: the deployed compose file pulled `nomic-embed-text`
+    and never set ASSISTANT_EMBED_MODEL, so the store ran on the hash vector and
+    nothing said so. An operator reading `/health` now sees which one it is.
+
+    A model named without a host is worse than no model, because it reads as
+    configured — so that case reports the hash too, and `degraded` says why."""
+    named = build_assistant(
+        Settings(embed_model="nomic-embed-text", ollama_host="http://ollama:11434")
+    )
+    assert named.tier()["embed"] == "nomic-embed-text"
+
+    hostless = build_assistant(Settings(embed_model="nomic-embed-text"))
+    assert hostless.tier()["embed"] == "hash (not semantic)"
+
+
+def test_a_reranker_that_cannot_load_degrades_instead_of_downing_the_service():
+    """One optional accelerator, one environment variable, one typo.
+
+    The release run that found this asked for a cross-encoder fastembed has
+    never shipped — a plausible-looking sibling of the real tag, which is why
+    nobody spotted it by reading. The constructor raised, `build_assistant`
+    raised with it, and the whole assistant failed to build over a stage that is
+    opt-in by design. It now reports and carries on, which is what the docstring
+    promised before the code did it. (The tag itself is not written here: the
+    claims gate keeps dead model names out of the repo, and it is right to.)
+
+    Skipped where fastembed is absent: that path is the ImportError branch, and
+    it already had a test."""
+    pytest.importorskip("fastembed")
+    degraded: dict[str, str] = {}
+    assert build_reranker(
+        Settings(rerank_model="BAAI/no-such-reranker"), degraded.__setitem__
+    ) is None
+    assert "did not load" in degraded["rerank"]
+
+
+def test_a_reranker_named_without_a_vector_store_is_not_a_reranker():
+    """The other way that row lied. Reranking exists to reorder a deep candidate
+    list; there is no such list behind BM25's top three, so the stage is never
+    built — but `/health` reported the model name anyway, and an operator
+    debugging precision would have gone looking for a cross-encoder that was
+    never on the path."""
+    named = build_assistant(Settings(rerank_model="BAAI/bge-reranker-base"))
+    assert named.tier()["rerank"] == "off"
 
 
 def test_health_says_which_commit_is_serving(monkeypatch):

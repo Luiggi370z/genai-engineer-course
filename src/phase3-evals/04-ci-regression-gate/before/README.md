@@ -2,7 +2,7 @@
 
 **Goal.** Turn an eval results file into an exit code: a gate that fails on absolute-bar breaches, regressions beyond the calibrated tolerance, collapsed or vanished slices, and instrument drift — plus trajectory metrics that score what an agent did, not just what it said. This is the mechanical part that makes the previous three lessons real.
 **Prerequisite.** 3.2 (the results-file shape) and 3.3 (`TOLERANCE = 0.03` comes from its calibration report).
-**Effort.** ~75 min · involved
+**Effort.** ~75 min to green on the fast tests · no integration tier · ~2 h realistic first pass.
 
 ## Do this
 

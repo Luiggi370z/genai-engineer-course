@@ -1,5 +1,7 @@
 # Workshop · Ship a real RAG service  (ends Phase 2)
 
+**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.
+
 Build the assistant's retrieval core: hybrid search (keyword + vector, fused),
 returning grounded chunks with an abstain path.
 

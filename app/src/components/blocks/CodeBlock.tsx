@@ -1,4 +1,5 @@
 import { Fragment, type ReactNode } from "react";
+import { ScrollRegion } from "../ui/ScrollRegion";
 
 const PYTHON_KEYWORDS =
   /\b(def|class|return|if|else|elif|for|while|import|from|in|not|and|or|None|True|False|with|as|try|except|raise|async|await|lambda|assert|pass)\b/g;
@@ -82,13 +83,21 @@ export function CodeBlock({ code, title, accent }: CodeBlockProps) {
           <span className="font-mono text-[11px] tracking-wide text-white/60">{title}</span>
         </div>
       )}
-      <pre className="overflow-x-auto bg-terminal-bg px-4 py-3.5 font-mono text-[12.5px] leading-[1.65] text-terminal-fg">
-        {code.split("\n").map((line, i) => (
-          <div key={i} className="whitespace-pre">
-            {highlightLine(line)}
-          </div>
-        ))}
-      </pre>
+      {/* The snippet scrolls sideways rather than wrapping, because a wrapped
+          line of Python is a lie about the indentation. That makes the box a
+          scroll container, so it has to be reachable. */}
+      <ScrollRegion
+        label={title ? `Code sample: ${title}` : "Code sample"}
+        className="overflow-x-auto bg-terminal-bg"
+      >
+        <pre className="px-4 py-3.5 font-mono text-[12.5px] leading-[1.65] text-terminal-fg">
+          {code.split("\n").map((line, i) => (
+            <div key={i} className="whitespace-pre">
+              {highlightLine(line)}
+            </div>
+          ))}
+        </pre>
+      </ScrollRegion>
     </div>
   );
 }

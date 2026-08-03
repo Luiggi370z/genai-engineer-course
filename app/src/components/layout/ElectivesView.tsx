@@ -49,14 +49,14 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
                 {String(i + 1).padStart(2, "0")}
               </span>
               <h3 className="text-[15.5px] font-bold tracking-tight text-ink">{elective.title}</h3>
-              <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-graphite">
+              <span className="rounded bg-ink/[0.06] px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-graphite">
                 {elective.tag}
               </span>
             </div>
 
             <dl className="mt-3 space-y-2 rounded-md border border-line bg-ink/[0.02] px-4 py-3">
               <div>
-                <dt className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-graphite">
+                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
                   Adoption trigger
                 </dt>
                 <dd className="mt-0.5 text-[13px] leading-relaxed text-ink/85">
@@ -64,7 +64,7 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
                 </dd>
               </div>
               <div>
-                <dt className="font-mono text-[9.5px] uppercase tracking-[0.16em] text-graphite">
+                <dt className="font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
                   Honest cost
                 </dt>
                 <dd className="mt-0.5 text-[13px] leading-relaxed text-ink/85">
@@ -76,7 +76,7 @@ export function ElectivesView({ onNav }: ElectivesViewProps) {
             <BlockList blocks={elective.blocks} accent={ACCENT} />
 
             <div className="mt-4 border-t border-line/60 pt-3">
-              <div className="mb-2 font-mono text-[9.5px] uppercase tracking-[0.16em] text-graphite">
+              <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.16em] text-graphite">
                 Where to start
               </div>
               <ul className="space-y-1.5">

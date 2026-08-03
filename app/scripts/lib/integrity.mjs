@@ -12,6 +12,7 @@
  * fires. A gate nobody has seen fail is not a gate.
  */
 
+import { EFFORT_PREFIX, formatEffort, formatWorkshopEffort } from "../../src/lib/effort.ts";
 import { KNOWN_KINDS } from "./density.mjs";
 
 /**
@@ -32,9 +33,18 @@ const PREFIX_EXEMPT = new Set(["workshop", "deliverable", "qbank"]);
  * @param {any[]} [input.prerequisites]
  * @param {any[]} [input.electives]
  * @param {(repo: string) => boolean} [input.repoExists]
+ * @param {(path: string) => string | null} [input.effortLineOf]  the `**Effort.**`
+ *   line in that src-relative file, `""` when the file exists without one, and
+ *   null when there is no such file
  * @returns {{ errors: {rule: string, subject: string, message: string}[], counts: object }}
  */
-export function audit({ phases, prerequisites = [], electives = [], repoExists = () => true }) {
+export function audit({
+  phases,
+  prerequisites = [],
+  electives = [],
+  repoExists = () => true,
+  effortLineOf = () => null,
+}) {
   const errors = [];
   const fail = (rule, subject, message) => errors.push({ rule, subject, message });
 
@@ -78,6 +88,29 @@ export function audit({ phases, prerequisites = [], electives = [], repoExists =
       }
     }
 
+    for (const exercise of phase.exercises ?? []) {
+      checkEffort({
+        subject: exercise.id,
+        effort: exercise.effort,
+        source: exercise.repo && `${exercise.repo}/before/README.md`,
+        render: formatEffort,
+        effortLineOf,
+        fail,
+      });
+    }
+
+    if (phase.workshop) {
+      checkWorkshopDoc(phase.workshop, effortLineOf, fail);
+      checkEffort({
+        subject: phase.workshop.id,
+        effort: phase.workshop.effort,
+        source: phase.workshop.doc && `${phase.workshop.repo}/${phase.workshop.doc}`,
+        render: formatWorkshopEffort,
+        effortLineOf,
+        fail,
+      });
+    }
+
     checkDefenses(phase, fail);
     if (phase.workshop) checkTiers(phase.workshop, fail);
   }
@@ -107,8 +140,72 @@ export function audit({ phases, prerequisites = [], electives = [], repoExists =
         electives.reduce((n, e) => n + (e.resources ?? []).length, 0),
       electives: electives.length,
       defenses: phases.reduce((n, p) => n + (p.checkpoint ?? []).length, 0),
+      efforts: phases.reduce(
+        (n, p) => n + (p.exercises ?? []).filter((e) => e.effort).length + (p.workshop ? 1 : 0),
+        0,
+      ),
     },
   };
+}
+
+/**
+ * The estimate in the workbook and the estimate in the lesson are the same
+ * estimate.
+ *
+ * They were not: effort lived only in `before/README.md`, invisible to anyone
+ * reading the workbook, and three of the numbers had drifted far enough from
+ * what the lesson asks for that the round-3 audit called them out. Putting the
+ * number in the data fixes the visibility half; this rule fixes the drift half,
+ * by re-rendering the data and demanding the prose say exactly that.
+ *
+ * A lesson is anything whose repo has a `before/README.md`, and a workshop's
+ * source is its brief — that is what `effortLineOf` returns a line for. The two
+ * exercises handing out a worksheet and a résumé template have no such file and
+ * are not asked for an estimate.
+ */
+function checkEffort({ subject, effort, source, render, effortLineOf, fail }) {
+  const declared = source ? effortLineOf(source) : null;
+  if (declared === null) {
+    if (effort) {
+      fail(
+        "effort-matches-lesson",
+        subject,
+        `declares an effort estimate but has no lesson README or workshop brief to agree with`,
+      );
+    }
+    return;
+  }
+  if (!effort) {
+    fail(
+      "effort-matches-lesson",
+      subject,
+      `points at src/${source} but declares no effort, so the workbook shows none`,
+    );
+    return;
+  }
+  const expected = `${EFFORT_PREFIX} ${render(effort)}.`;
+  if (declared.trim() !== expected) {
+    fail(
+      "effort-matches-lesson",
+      subject,
+      `says\n      ${expected}\n    but src/${source} says\n      ${declared.trim()}`,
+    );
+  }
+}
+
+/** A brief nobody can open is a pointer, not a brief. */
+function checkWorkshopDoc(workshop, effortLineOf, fail) {
+  if (!workshop.doc) {
+    fail("workshop-doc", workshop.id, "names no brief, so the workbook cannot send anyone to one");
+    return;
+  }
+  if (effortLineOf(`${workshop.repo}/${workshop.doc}`) === null) {
+    fail(
+      "workshop-doc",
+      workshop.id,
+      `points at src/${workshop.repo}/${workshop.doc}, which does not exist`,
+    );
+  }
 }
 
 export const DEFENSE_ELEMENTS = ["alternatives", "constraints", "evidence", "failure-modes"];

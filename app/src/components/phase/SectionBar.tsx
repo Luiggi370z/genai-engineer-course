@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { TocEntry } from "./PhaseToc";
-import { goToSection, useActiveSection } from "./useActiveSection";
+import { goToSection } from "./useActiveSection";
 
 /**
  * The narrow-screen half of the table of contents: one sticky row of chips that
@@ -17,8 +17,15 @@ import { goToSection, useActiveSection } from "./useActiveSection";
  * on either side. That last part is the whole point — a navigator that shows only
  * the current section is a label, not a navigator.
  */
-export function SectionBar({ entries, accent }: { entries: TocEntry[]; accent: string }) {
-  const active = useActiveSection(entries);
+export function SectionBar({
+  entries,
+  accent,
+  active,
+}: {
+  entries: TocEntry[];
+  accent: string;
+  active: string | null;
+}) {
   const listRef = useRef<HTMLDivElement>(null);
 
   // Keep the lit chip on screen as the page scrolls under it. `nearest` rather than

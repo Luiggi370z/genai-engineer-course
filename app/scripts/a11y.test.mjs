@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
-import { accessibleName, focusables, keyboardFindings, navLabelFindings } from "./lib/a11y.mjs";
+import {
+  accentContrastFindings,
+  accessibleName,
+  focusables,
+  keyboardFindings,
+  navLabelFindings,
+  scrollRegionFindings,
+} from "./lib/a11y.mjs";
+import { loadCourseData } from "./lib/load-data.mjs";
 
 /**
  * The rules, each shown failing on the mistake it exists to catch and passing on
@@ -128,7 +136,7 @@ test("the nav label floor fails on the size the audit actually found", () => {
   });
   assert.equal(findings.length, 1);
   assert.match(findings[0].subject, /Sidebar\.tsx:1$/);
-  assert.match(findings[0].message, /below the 11px floor/);
+  assert.match(findings[0].message, /below the 11px legibility floor/);
 });
 
 test("the floor passes at 11px and does not care about body copy elsewhere", () => {
@@ -143,4 +151,90 @@ test("every arbitrary size on a line is checked, not just the first", () => {
     "Toc.tsx": `<a className="text-[9.5px] sm:text-[10px]">Objectives</a>`,
   });
   assert.equal(findings.length, 2);
+});
+
+// --- accent contrast --------------------------------------------------------
+
+const SURFACES = {
+  light: { card: "#ffffff", paper: "#f6f7f4" },
+  dark: { card: "#1c211f", paper: "#111413" },
+};
+
+test("the four accents the audit found unreadable would fail this rule", () => {
+  // The pre-fix values, one accent per phase, drawn on both themes.
+  const before = [
+    { id: "p1", accent: { light: "#0E9F6E", dark: "#0E9F6E" } },
+    { id: "p4", accent: { light: "#EA580C", dark: "#EA580C" } },
+    { id: "p5", accent: { light: "#0891B2", dark: "#0891B2" } },
+    { id: "p6", accent: { light: "#E11D48", dark: "#E11D48" } },
+  ];
+  const failed = new Set(
+    accentContrastFindings(before, SURFACES).map((f) => f.subject.split("/")[0]),
+  );
+  assert.deepEqual([...failed].sort(), ["p1", "p4", "p5", "p6"]);
+});
+
+test("an accent is checked against the tint it is written on top of", () => {
+  // Clears 4.5:1 on plain white and fails once the chip paints itself 12% under
+  // the label. Catching only the first case is how the chips shipped unreadable.
+  const phase = [{ id: "p9", accent: { light: "#0A7652", dark: "#7197EA" } }];
+  const plain = { light: { card: "#ffffff" }, dark: { card: "#1c211f" } };
+  assert.deepEqual(accentContrastFindings(phase, plain), []);
+  const withPaper = { light: { paper: "#f6f7f4" }, dark: { card: "#1c211f" } };
+  const findings = accentContrastFindings(phase, withPaper);
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /tinted 12%/);
+});
+
+test("a phase with no accent for a theme is a finding, not a crash", () => {
+  const findings = accentContrastFindings([{ id: "p2", accent: { light: "#1556E4" } }], SURFACES);
+  assert.equal(findings.length, 1);
+  assert.equal(findings[0].subject, "p2/dark");
+});
+
+test("the shipped palette clears AA on both themes", async () => {
+  const { phases } = await loadCourseData();
+  assert.deepEqual(accentContrastFindings(phases, SURFACES), []);
+});
+
+// --- scroll regions ---------------------------------------------------------
+
+test("a scrolling box with nothing focusable in it is unreachable", () => {
+  const findings = scrollRegionFindings(page(`<div class="my-4 overflow-x-auto"><table/></div>`));
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /cannot be reached from a keyboard/);
+});
+
+test("a scrolling box that holds a link needs no tab stop of its own", () => {
+  assert.deepEqual(
+    scrollRegionFindings(page(`<div class="overflow-x-auto"><a href="#s1">Objectives</a></div>`)),
+    [],
+  );
+});
+
+test("a tab stop with no name announces as 'group', which is not a name", () => {
+  const findings = scrollRegionFindings(
+    page(`<div class="overflow-x-auto" tabindex="0" role="region"><table/></div>`),
+  );
+  assert.equal(findings.length, 1);
+  assert.match(findings[0].message, /no accessible name/);
+});
+
+test("a named, focusable scroll region passes", () => {
+  assert.deepEqual(
+    scrollRegionFindings(
+      page(
+        `<div class="overflow-x-auto" tabindex="0" role="region" aria-label="Table: model">` +
+          `<table/></div>`,
+      ),
+    ),
+    [],
+  );
+});
+
+test("the page's own scroller is exempt — the space bar already scrolls it", () => {
+  assert.deepEqual(
+    scrollRegionFindings(page(`<main id="main-scroll" class="overflow-y-auto" tabindex="-1"/>`)),
+    [],
+  );
 });

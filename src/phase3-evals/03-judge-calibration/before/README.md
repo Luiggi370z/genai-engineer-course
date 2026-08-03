@@ -2,7 +2,7 @@
 
 **Goal.** Measure how much your judge deserves to be trusted: compare its verdicts against 40 rows you hand-labeled, report kappa instead of raw agreement, sweep the decision threshold, and derive the regression tolerance that lesson 3.4's CI gate will use.
 **Prerequisite.** 3.2 — the judge scores in `evals/labeled.jsonl` are the kind of output that harness produces.
-**Effort.** ~45 min · moderate
+**Effort.** ~45 min to green on the fast tests · no integration tier · ~75 min realistic first pass.
 
 ## Do this
 

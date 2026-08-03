@@ -1,5 +1,7 @@
 # Workshop · The model bench  (ends Phase 1)
 
+**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.
+
 Your team is about to ship an extraction feature and someone asks the only question
 that matters: **which model should we use?** The answers in the room are a vendor
 blog post, a leaderboard nobody can reproduce, and one engineer's vibe. None of

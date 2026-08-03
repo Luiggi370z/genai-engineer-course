@@ -1,3 +1,5 @@
+import { formatPct } from "../../lib/progress";
+
 interface ProgressRingProps {
   /** 0–1. */
   pct: number;
@@ -14,7 +16,7 @@ export function ProgressRing({ pct, color, size = 30 }: ProgressRingProps) {
       height={size}
       className="shrink-0 -rotate-90"
       role="img"
-      aria-label={`${Math.round(pct * 100)}% complete`}
+      aria-label={`${formatPct(pct)} complete`}
     >
       <circle
         cx={size / 2}

@@ -7,7 +7,7 @@ import type { PhaseContent } from "../types";
 export const mindset: PhaseContent = {
   id: "p7",
   weeks: "Week 18 · ongoing",
-  color: "#B45309",
+  accent: { light: "#A04A08", dark: "#E07E32" },
   title: "The GenAI Mindset",
   tagline:
     "The field moves weekly and interviews test more than knowledge. This phase is about how to keep learning, how to practice, and how to turn everything you built into offers.",
@@ -190,6 +190,7 @@ export const mindset: PhaseContent = {
       id: "p7-e1",
       title: "Daily reps",
       repo: "phase9-mindset/drill-deck",
+      effort: { fast: 25, integration: null, realistic: 40 },
       rung: "faded",
       proves: "understand",
       task: "Five questions from the bank, out loud, no notes, self-graded. Every day. The bank doubles as your drill deck.",
@@ -214,6 +215,7 @@ export const mindset: PhaseContent = {
       id: "p7-e3",
       title: "Instrument the funnel",
       repo: "phase9-mindset/funnel-tracker",
+      effort: { fast: 20, integration: null, realistic: 35 },
       rung: "faded",
       proves: "integrate",
       task: "Set up the 4-stage tracker. After 20 applications, name your leaking stage and apply exactly one fix.",
@@ -245,6 +247,8 @@ export const mindset: PhaseContent = {
     subtitle:
       "The only workshop with no code, because the artifact is a habit: a scored design mock, a metrics sheet that traces every claim to a file, and a funnel with a fix attached.",
     repo: "workshops/interview-loop",
+    doc: "WORKSHOP-INTERVIEW-LOOP.md",
+    effort: { fast: 120, integration: null, realistic: 240 },
     proves: "understand",
     assesses: ["p7-o1", "p7-o2", "p7-o3", "p7-o4"],
     needs: ["p4-o1", "p4-o2", "p6-o5"],

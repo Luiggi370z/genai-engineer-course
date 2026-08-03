@@ -35,9 +35,17 @@ services:
       # One budget for the whole request. Off in the demo profile because a
       # first-token wait on a cold local model is legitimately slow; on here,
       # because with only four concurrent slots an unbounded request is a
-      # quarter of the service held hostage. 120s is generous for this stack and
-      # still finite, which is the property that matters.
-      REQUEST_DEADLINE_SECONDS: "120"
+      # quarter of the service held hostage.
+      #
+      # It has to CONTAIN the composition budget, not undercut it. This said 120
+      # while the composer was given 900, and the request budget silently won —
+      # `deadline.capped` takes the tighter of the two — so the stack was
+      # configured for a slow model and still cut every answer off at two
+      # minutes. The stream showed it first: chunks, then the budget, then a
+      # `done` frame reporting a truncated answer nobody could act on. Sixteen
+      # minutes is the fifteen the composer may take plus room for retrieval and
+      # tools around it; the host-model overlay puts both back to GPU numbers.
+      REQUEST_DEADLINE_SECONDS: "960"
     # `!override` replaces the base list instead of appending to it. Without it,
     # Compose merges sequences: the service ends up publishing 0.0.0.0:8000 AND
     # 127.0.0.1:8000, the second bind loses the port to the first, and the secure

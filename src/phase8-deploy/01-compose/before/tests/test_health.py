@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.health import (
+    cold_model_healthchecks,
     compose_ok,
     health,
     load_services,
@@ -50,6 +51,26 @@ def test_dependencies_wait_for_health_not_start():
     assert weak_dependencies(load_services(COMPOSE)) == []
 
 
+def test_the_model_service_is_healthy_only_once_the_model_is_warm():
+    """A downloaded model is not a usable one. This stack went healthy on
+    `ollama list`, which passes the moment the file lands — and then the first
+    question timed out loading it and was answered by the offline fallback, on a
+    stack whose every probe was green."""
+    assert cold_model_healthchecks(load_services(COMPOSE)) == []
+
+
+def test_a_download_only_healthcheck_is_caught(tmp_path):
+    cold = tmp_path / "docker-compose.yml"
+    cold.write_text(
+        "services:\n"
+        "  ollama:\n"
+        "    image: ollama/ollama:0.32.5\n"
+        "    healthcheck:\n"
+        "      test: ['CMD-SHELL', 'ollama list | grep -q qwen3.5']\n"
+    )
+    assert cold_model_healthchecks(load_services(cold)) == ["ollama"]
+
+
 def test_only_the_assistant_reaches_the_host():
     assert set(published_ports(load_services(COMPOSE))) == {"assistant"}
 
@@ -94,7 +115,9 @@ def test_the_secure_overlay_reads_its_secret_from_the_environment():
 
 
 def test_an_overlay_that_narrows_a_list_without_override_is_caught(tmp_path):
-    """Compose concatenates sequences across files, so an overlay that "tightens"
+    """The bug this closes cost a full end-to-end run before it was understood.
+
+    Compose concatenates sequences across files, so an overlay that "tightens"
     `ports` to loopback publishes BOTH mappings. The wildcard bind takes the port
     first, the loopback bind loses it, and the hardened profile is the only one
     that will not start — reported as "address already in use" on a port nothing

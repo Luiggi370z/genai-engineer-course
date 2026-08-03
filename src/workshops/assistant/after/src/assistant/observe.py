@@ -93,6 +93,10 @@ PROMPT_VERSION = "llm.prompt_template.version"
 TOKENS_IN = "llm.token_count.prompt"
 TOKENS_OUT = "llm.token_count.completion"
 TOKENS_TOTAL = "llm.token_count.total"
+# `counted` (the provider returned them) or `estimated` (a word count stood in).
+# On the span rather than in a footnote, because the cost attribute beside it
+# looks identical either way and only one of the two is a bill.
+TOKENS_SOURCE = "llm.token_count.source"
 PRICE_TIER = "llm.price_tier"
 
 # Retrieval and memory: counts, not content. A span carrying the retrieved text
@@ -105,6 +109,11 @@ RETRIEVAL_SOURCES = "retrieval.sources"  # which documents answered, by name
 #: attribute rather than an ERROR status: abandoned work is not a fault, and
 #: counting it as one hides the faults that are.
 ABANDONED = "request.abandoned"
+#: set when a stream stopped mid-answer. Distinct from ABANDONED: nobody chose
+#: to stop this one, and distinct from a plain error, because the caller did
+#: receive text. Without it a truncation is indistinguishable in the trace from
+#: a short answer, and "the model gets terse under load" is the wrong diagnosis.
+TRUNCATED = "response.truncated"
 CORPUS_VERSION = "rag.corpus.version"
 TENANT = "rag.tenant"
 MEMORY_RECALLED = "memory.recalled.count"

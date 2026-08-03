@@ -8,7 +8,7 @@ then fix its wiring until the whole suite is green. Then do it again for the
 your laptop.
 **Prerequisite.** The capstone service (workshops/assistant) — both app containers
 build from its image; this lesson packages it, no new agent logic.
-**Effort.** ~45 min · moderate.
+**Effort.** ~45 min to green on the fast tests · no integration tier · ~75 min realistic first pass.
 
 ## Do this
 

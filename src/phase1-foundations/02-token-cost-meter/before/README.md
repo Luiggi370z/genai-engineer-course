@@ -4,7 +4,7 @@
 and prices a call *after* from the returned `usage` object — so cost is a number
 you measure, not a vibe.
 **Prerequisite.** 1.1 Universal client (you have a `complete()` that returns usage).
-**Effort.** ~30 min · gentle.
+**Effort.** ~30 min to green on the fast tests · no integration tier · ~50 min realistic first pass.
 
 ## Do this
 

@@ -14,6 +14,7 @@ drags them in.
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable, Iterator
 from typing import Any
 
@@ -112,13 +113,64 @@ def ollama_embed(host: str, model: str, timeout: float = 30.0) -> Callable[[str]
     return embed
 
 
+#: Named vectors, because the collection carries two arms per point rather than
+#: one. Renaming either is a collection migration, which is why they are here and
+#: not inline.
+DENSE = "dense"
+SPARSE = "keywords"
+
+
+def sparse_terms(text: str):
+    """Term frequencies as a Qdrant sparse vector — the keyword arm of hybrid.
+
+    Deliberately NOT a BM25 implementation. The collection declares
+    `Modifier.IDF`, so Qdrant holds the corpus statistics and does the weighting
+    server-side; the client's whole job is to say which terms appeared and how
+    often. That split is the point: IDF computed here would be IDF over whatever
+    this process happens to have seen, which is not the corpus.
+
+    Tokens are hashed into the index space rather than kept in a vocabulary,
+    which is what lets a term appear for the first time without a reindex.
+    """
+    from qdrant_client.models import SparseVector
+
+    counts: dict[int, float] = {}
+    for token in re.findall(r"[a-z0-9]+", text.lower()):
+        index = int(hashlib.sha1(token.encode()).hexdigest()[:8], 16)
+        counts[index] = counts.get(index, 0.0) + 1.0
+    return SparseVector(indices=list(counts), values=list(counts.values()))
+
+
+def collection_name(base: str, signature: str, dim: int) -> str:
+    """`assistant__nomic-embed-text__768` — the store's identity, not just a name.
+
+    Vectors written by one embedder are meaningless to another, and Qdrant only
+    rejects the mismatch when the DIMENSION differs. Swap `nomic-embed-text` for
+    another 768-dimensional model and every write succeeds, every search returns
+    something, and the results are noise — the worst kind of failure, because it
+    has no error in it. Putting the embedder and the width in the name makes a
+    model change a new collection instead of a silent corruption of the old one.
+    """
+    tag = re.sub(r"[^a-zA-Z0-9_-]+", "-", signature).strip("-") or "unknown"
+    return f"{base}__{tag}__{dim}"
+
+
 class QdrantStore:
     """RagStore's interface, backed by a real Qdrant collection.
 
     Points are keyed by `Chunk.id`, and the payload carries the provenance a
     citation needs: source, version, ordinal and character offsets. An
     auto-incrementing id would make every re-ingest a duplicate; a random one
-    would make deletion impossible without a scan."""
+    would make deletion impossible without a scan.
+
+    Retrieval is HYBRID, the way phase 2 teaches it: a dense arm for meaning, a
+    sparse arm for the exact words, fused server-side with Reciprocal Rank
+    Fusion. The deployed capstone ran dense-only for a while and the gap showed
+    up as a specific class of miss — an error code, an order number, a policy
+    name that the embedder had never seen and therefore placed nowhere useful.
+    Dense retrieval is bad at strings that carry no meaning, which is most of
+    what people paste into a support box.
+    """
 
     def __init__(
         self,
@@ -126,23 +178,40 @@ class QdrantStore:
         collection: str = "assistant",
         embed: Callable[[str], list[float]] = hash_embed,
         dim: int | None = None,
+        signature: str = "hash",
+        min_score: float = 0.0,
+        rerank: Callable[[str, list[Chunk]], list[Chunk]] | None = None,
     ) -> None:
         from qdrant_client import QdrantClient  # lazy: only when the real tier is on
-        from qdrant_client.models import Distance, VectorParams
+        from qdrant_client.models import (
+            Distance,
+            Modifier,
+            SparseVectorParams,
+            VectorParams,
+        )
 
         self.client = QdrantClient(url=url)
-        self.collection = collection
         self.embed = embed
+        self.min_score = min_score
+        self.rerank = rerank
         # TODO 6: measure the dimension instead of declaring it. The vector size
         # belongs to whichever embedder was injected, and a hand-maintained
         # constant becomes a 400 from Qdrant on the first write after somebody
         # sets ASSISTANT_EMBED_MODEL — in production, at deploy time. One call
         # to `embed` with any string answers the question honestly.
         self.dim = dim or 64
-        if not self.client.collection_exists(collection):
+        self.collection = collection_name(collection, signature, self.dim)
+        if not self.client.collection_exists(self.collection):
             self.client.create_collection(
-                collection,
-                vectors_config=VectorParams(size=self.dim, distance=Distance.COSINE),
+                self.collection,
+                vectors_config={
+                    DENSE: VectorParams(size=self.dim, distance=Distance.COSINE)
+                },
+                # IDF lives on the server so the weighting is computed over the
+                # whole collection rather than over one process's view of it.
+                sparse_vectors_config={
+                    SPARSE: SparseVectorParams(modifier=Modifier.IDF)
+                },
             )
 
     def _payload(self, chunk: Chunk, tenant: str) -> dict:
@@ -159,13 +228,21 @@ class QdrantStore:
         SHORTER revision of a source leaves orphan tail chunks behind: ordinals
         4 and 5 of yesterday's page, still indexed, still retrievable, still
         citing a version that no longer exists. Clear them (`_delete_where`)
-        before you upsert the new ones."""
+        before you upsert the new ones.
+
+        Both arms per point: `vector={DENSE: self.embed(c.text), SPARSE:
+        sparse_terms(c.text)}`. A point written with only the dense vector is
+        invisible to the keyword half of every search that follows."""
         raise NotImplementedError
 
     def _filter(self, tenant: str, source: str | None = None):
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        from qdrant_client.models import Condition, FieldCondition, Filter, MatchValue
 
-        must = [FieldCondition(key="tenant", match=MatchValue(value=tenant))]
+        # Annotated as the union the client accepts rather than as the one class
+        # built here: `list` is invariant, so a list[FieldCondition] is not a
+        # list[Condition] to a type checker, and the error only appears on a
+        # machine where the qdrant extra is installed.
+        must: list[Condition] = [FieldCondition(key="tenant", match=MatchValue(value=tenant))]
         if source is not None:
             must.append(FieldCondition(key="source", match=MatchValue(value=source)))
         return Filter(must=must)
@@ -179,7 +256,9 @@ class QdrantStore:
             if (point.payload or {}).get("ordinal") not in exclude
         ]
         if stale:
-            self.client.delete(self.collection, points_selector=stale)
+            from qdrant_client.models import PointIdsList
+
+            self.client.delete(self.collection, points_selector=PointIdsList(points=stale))
 
     def delete(self, source: str, tenant: str = DEFAULT_TENANT) -> int:
         found = self.client.scroll(
@@ -206,15 +285,74 @@ class QdrantStore:
         )
 
     def search(self, query: str, k: int = 3, tenant: str = DEFAULT_TENANT) -> list[Chunk]:
-        # the tenant filter runs SERVER-SIDE: a cross-user document is excluded
-        # by Qdrant itself, not by post-hoc trimming in the application
+        """Dense + sparse, fused by Qdrant, thresholded, optionally reranked.
+
+        The tenant filter runs SERVER-SIDE — on both arms, because a filter
+        applied to one of two prefetches is not a filter. A cross-tenant
+        document is excluded by Qdrant itself, never by trimming afterwards.
+        """
+        from qdrant_client.models import Fusion, FusionQuery, Prefetch
+
+        tenant_filter = self._filter(tenant)
+        # Over-fetch before fusing: RRF ranks by position, so a document that
+        # only one arm found still needs to have been found. `k` candidates per
+        # arm would make the fusion a formality.
+        candidates = max(k * 4, 20)
         hits = self.client.query_points(
             self.collection,
+            prefetch=[
+                Prefetch(
+                    query=self.embed(query), using=DENSE,
+                    limit=candidates, filter=tenant_filter,
+                ),
+                Prefetch(
+                    query=sparse_terms(query), using=SPARSE,
+                    limit=candidates, filter=tenant_filter,
+                ),
+            ],
+            query=FusionQuery(fusion=Fusion.RRF),
+            limit=max(k, self._rerank_pool(k)),
+            query_filter=tenant_filter,
+        ).points
+        # RRF scores are reciprocal ranks, not similarities: the top hit of a
+        # search that found nothing relevant still scores like a top hit. The
+        # threshold therefore reads the DENSE arm's own score, which is a cosine
+        # similarity and does mean something. Off by default (0.0) because the
+        # right cut is corpus-specific and a wrong one abstains on good answers.
+        kept = [self._chunk(h.payload) for h in hits if h.payload]
+        if self.min_score > 0.0:
+            kept = self._above_threshold(query, kept, tenant)
+        if self.rerank and kept:
+            kept = self.rerank(query, kept)
+        return kept[:k]
+
+    def _rerank_pool(self, k: int) -> int:
+        """How many candidates the reranker gets to choose from. Reranking the
+        same `k` the caller asked for can only reorder them, which is not what a
+        cross-encoder is for — it exists to promote something the retriever
+        ranked eighth."""
+        return k * 5 if self.rerank else k
+
+    def _above_threshold(
+        self, query: str, chunks: list[Chunk], tenant: str
+    ) -> list[Chunk]:
+        """Drop chunks whose dense similarity to the query is below `min_score`.
+
+        Vector search never abstains: ask an unrelated question and it returns
+        the three least-unrelated documents in the corpus, with no signal that
+        it found nothing. The composer then grounds an answer in them. This is
+        the gate that turns "the nearest thing I have" back into "I don't know".
+        """
+        scored = self.client.query_points(
+            self.collection,
             query=self.embed(query),
-            limit=k,
+            using=DENSE,
+            limit=len(chunks) * 2,
+            score_threshold=self.min_score,
             query_filter=self._filter(tenant),
         ).points
-        return [self._chunk(h.payload) for h in hits if h.payload]
+        relevant = {point.id for point in scored}
+        return [c for c in chunks if c.id in relevant]
 
 
 # --- generation: the Ollama tier -----------------------------------------------
@@ -264,7 +402,31 @@ def ollama_generate(
     response = Client(host=host, timeout=timeout).generate(
         model=model, prompt=prompt, **BOUNDED
     )
+    _report_usage(response)
     return response["response"].strip()
+
+
+def _report_usage(part: Any) -> None:
+    """Hand the provider's own token counts to the meter.
+
+    Ollama returns `prompt_eval_count` and `eval_count` on the final object of
+    every completion, and this code used to throw them away and let a word count
+    stand in — an approximation that reads exactly like a measurement once it is
+    printed with a dollar sign next to it. Both or neither: a response missing
+    one of them is not half-counted, it is uncounted, and `usage.measure` falls
+    back to the estimate and labels it.
+    """
+    from assistant import usage
+
+    tokens_in = _int_or_none(part, "prompt_eval_count")
+    tokens_out = _int_or_none(part, "eval_count")
+    if tokens_in is not None and tokens_out is not None:
+        usage.report(tokens_in, tokens_out)
+
+
+def _int_or_none(part: Any, key: str) -> int | None:
+    value = part.get(key) if hasattr(part, "get") else getattr(part, key, None)
+    return int(value) if isinstance(value, int) else None
 
 
 def ollama_stream(prompt: str, *, host: str, model: str) -> Iterator[str]:
@@ -277,6 +439,10 @@ def ollama_stream(prompt: str, *, host: str, model: str) -> Iterator[str]:
     from ollama import Client  # lazy
 
     for part in Client(host=host).generate(model=model, prompt=prompt, stream=True, **BOUNDED):
+        # The counts ride on the final object, after the last text chunk. Reading
+        # every part rather than only the one flagged `done` costs nothing and
+        # survives a provider that moves them.
+        _report_usage(part)
         chunk = part["response"]
         if chunk:
             yield chunk
@@ -290,6 +456,32 @@ def _schema_of(spec: Any) -> dict:
     the wire format and older clients spell it `inputSchema`. Accepting both
     costs one line and stops the planner losing its arguments to a rename."""
     return getattr(spec, "input_schema", None) or getattr(spec, "inputSchema", None) or {}
+
+
+def _hints_of(spec: Any) -> dict:
+    """The server's own claims about what a tool does: `readOnlyHint`,
+    `destructiveHint`.
+
+    Dropped on the floor until now, which left the client with no information at
+    all — and `requires_approval` defaulting to False meant "no information"
+    resolved to "safe". Carrying them through is not the same as believing them;
+    `mcp_client` treats a hint as something that can only ever ADD caution. The
+    word in the spec is "hint" and the spec means it: an annotation is an
+    assertion by the same party that would benefit from lying.
+    """
+    annotations = getattr(spec, "annotations", None)
+    if annotations is None:
+        return {}
+
+    def hint(camel: str) -> Any:
+        if isinstance(annotations, dict):
+            return annotations.get(camel)
+        # the SDK models these snake_cased; the wire spells them camel
+        snake = "".join("_" + c.lower() if c.isupper() else c for c in camel)
+        return getattr(annotations, snake, getattr(annotations, camel, None))
+
+    hints = {"read_only": hint("readOnlyHint"), "destructive": hint("destructiveHint")}
+    return {k: v for k, v in hints.items() if v is not None}
 
 
 def mcp_tools(target: Any) -> tuple[list[dict], Callable[[str, dict], Any]]:
@@ -346,6 +538,8 @@ def mcp_tools(target: Any) -> tuple[list[dict], Callable[[str, dict], Any]]:
                     "name": t.name,
                     "description": t.description or "",
                     "required_args": tuple(_schema_of(t).get("required", ())),
+                    # informs the gating decision in mcp_client; never makes it
+                    **_hints_of(t),
                 }
                 for t in listed.tools
             ]

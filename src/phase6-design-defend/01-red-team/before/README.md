@@ -1,8 +1,8 @@
 # 6.1 Red-team
 
-**Goal.** Harden a naive agent with layered guardrails (decode+squash+scan, spotlight, an L3 output gate) and prove it with a shipped red-team suite of 58 rows across direct, indirect, encoded, mutated, multilingual, exfiltration, approval-bypass, tool-output and PII attack families, plus 11 benign controls. The bar is containment — no landed injection fires a gated tool — but a detector you cannot see fire is a detector you cannot trust, so you will also count what got dropped.
+**Goal.** Harden a naive agent with layered guardrails (decode+squash+scan, spotlight, an L3 output gate) and prove it with a shipped red-team suite of 58 rows: 47 attacks across direct, indirect, encoded, mutated, multilingual, exfiltration, approval-bypass, tool-output and PII families, and 11 benign controls. The bar is containment — no landed injection fires a gated tool — but a detector you cannot see fire is a detector you cannot trust, so you will also count what got dropped.
 **Prerequisite.** 4.3 Human-in-the-loop (tool gating and approval).
-**Effort.** ~60 min · moderate
+**Effort.** ~60 min to green on the fast tests · no integration tier · ~95 min realistic first pass.
 
 ## Do this
 

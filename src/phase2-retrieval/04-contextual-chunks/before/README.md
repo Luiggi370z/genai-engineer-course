@@ -5,7 +5,7 @@ LangChain splitter, then prepend one cheap model-written sentence to each chunk
 before embedding. Anthropic measured ~49% fewer retrieval failures from that one
 sentence — and on a local model it costs $0.
 **Prerequisite.** 2.2 Hybrid + rerank (this improves what your retriever indexes).
-**Effort.** ~25 min · gentle.
+**Effort.** ~25 min to green on the fast tests · +20 min for the integration tier · ~45 min realistic first pass.
 
 ## Do this
 

@@ -5,7 +5,8 @@ import Sun03Icon from "@hugeicons/core-free-icons/Sun03Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useRef } from "react";
 import { phases } from "../../data/phases";
-import type { Theme } from "../../lib/progress";
+import { accentOf } from "../../lib/accent";
+import { formatPct, type Theme } from "../../lib/progress";
 import { ProgressRing } from "../ui/ProgressRing";
 
 interface SidebarProps {
@@ -59,9 +60,7 @@ export function Sidebar({
               style={{ width: `${overallPct * 100}%` }}
             />
           </div>
-          <span className="font-mono text-[11px] text-graphite">
-            {Math.round(overallPct * 100)}%
-          </span>
+          <span className="font-mono text-[11px] text-graphite">{formatPct(overallPct)}</span>
         </div>
       </button>
 
@@ -95,20 +94,22 @@ export function Sidebar({
                   }`}
                   style={
                     active
-                      ? { background: `color-mix(in oklab, ${phase.color} 12%, transparent)` }
+                      ? {
+                          background: `color-mix(in oklab, ${accentOf(phase.id)} 12%, transparent)`,
+                        }
                       : undefined
                   }
                 >
                   <span className="absolute left-[-7px] top-[13px]">
-                    <ProgressRing pct={pct} color={phase.color} size={14} />
+                    <ProgressRing pct={pct} color={accentOf(phase.id)} size={14} />
                   </span>
                   <span
                     className="absolute left-[-3.5px] top-[16.5px] h-[7px] w-[7px] rounded-full"
-                    style={{ background: pct >= 1 || active ? phase.color : "transparent" }}
+                    style={{ background: pct >= 1 || active ? accentOf(phase.id) : "transparent" }}
                   />
                   <div
                     className="font-mono text-[11px] uppercase tracking-[0.12em]"
-                    style={{ color: phase.color }}
+                    style={{ color: accentOf(phase.id) }}
                   >
                     Phase {String(phase.num).padStart(2, "0")}
                   </div>

@@ -33,6 +33,15 @@ services:
       # have pulled. Defaults to the course model so the two lanes agree when it
       # is present.
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:9b}
+      # Back to the library default. The base file raises the composition budget
+      # to fifteen minutes because a CPU-only container needs it; on the host's
+      # GPU a composition that has not finished in a minute is not slow, it is
+      # wrong, and a generous budget would hide that behind a long wait.
+      COMPOSE_TIMEOUT_SECONDS: "60"
+      # And the request budget that has to contain it. Only read when the secure
+      # overlay is also on; harmless here otherwise, and keeping the pair
+      # together is what stops one of them from being tuned alone.
+      REQUEST_DEADLINE_SECONDS: "120"
     # Docker Desktop resolves `host.docker.internal` on its own; on Linux it does
     # not exist until you map it to the gateway. One line, and the overlay works
     # the same on a laptop and on a workstation.

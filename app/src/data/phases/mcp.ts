@@ -7,7 +7,7 @@ import type { PhaseContent } from "../types";
 export const mcp: PhaseContent = {
   id: "p5",
   weeks: "Weeks 14–15",
-  color: "#0891B2",
+  accent: { light: "#066B83", dark: "#1EA5C6" },
   title: "MCP: The Universal Tool Port",
   tagline:
     "One protocol so any agent can use any tool. Consume existing servers, build your own over a REST API, get the auth right — then plug it into the assistant you built.",
@@ -270,6 +270,7 @@ if __name__ == "__main__":
       id: "p5-e1",
       title: "Be a client first",
       repo: "phase7-mcp/01-consume-a-server",
+      effort: { fast: 30, integration: null, realistic: 50 },
       rung: "faded",
       proves: "integrate",
       task: "Before building anything, open a v2 `Client` against a prebuilt reference server, run the handshake, list its tools and resources, and call one. The lesson hands the `Client` the server *object*, so the protocol calls are real with no network and no subprocess; the same code takes a URL or a stdio transport instead.",
@@ -285,6 +286,7 @@ if __name__ == "__main__":
       id: "p5-e2",
       title: "Wrap a REST API as an MCP server",
       repo: "phase7-mcp/02-rest-to-mcp",
+      effort: { fast: 30, integration: null, realistic: 50 },
       rung: "faded",
       proves: "implement",
       task: "Take a small public REST API (weather, or the provided toy service) and expose it as an MCP server with 3 tools, one resource, and one prompt. Verify everything in the MCP Inspector — no agent yet.",
@@ -299,6 +301,7 @@ if __name__ == "__main__":
       id: "p5-e3",
       title: "Three doors: stdio, Bearer, OAuth",
       repo: "phase7-mcp/03-auth-modes",
+      effort: { fast: 45, integration: null, realistic: 75 },
       rung: "faded",
       proves: "integrate",
       task: "Deploy your server three ways: as a local stdio server (env-var secrets), as a remote HTTP server behind a static Bearer token, and as a remote server with OAuth 2.1 + PKCE. Write down which you’d use for a personal tool, a team tool, and a public SaaS integration.",
@@ -332,6 +335,8 @@ if __name__ == "__main__":
     subtitle:
       "Build an MCP server for a service you care about — then let your Phase-4 assistant consume it as a tool.",
     repo: "workshops/assistant",
+    doc: "WORKSHOP-MCP.md",
+    effort: { fast: 120, integration: 60, realistic: 240 },
     proves: "integrate",
     assesses: ["p5-o2", "p5-o3", "p5-o4"],
     needs: ["p3-o2"],

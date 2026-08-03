@@ -1,4 +1,5 @@
 import { InlineText } from "../../lib/markdown";
+import { ScrollRegion } from "../ui/ScrollRegion";
 
 interface DataTableProps {
   headers: string[];
@@ -8,14 +9,20 @@ interface DataTableProps {
 
 export function DataTable({ headers, rows, accent }: DataTableProps) {
   return (
-    <div className="my-4 overflow-x-auto rounded-md border border-line">
+    // Named after its first column, which is what a table in this workbook is
+    // keyed by — "Table: model" tells a screen-reader user which of the four
+    // tables on the page they just tabbed into.
+    <ScrollRegion
+      label={`Table: ${headers[0] || "data"}`}
+      className="my-4 overflow-x-auto rounded-md border border-line"
+    >
       <table className="w-full border-collapse text-left">
         <thead>
           <tr style={{ background: `color-mix(in oklab, ${accent} 8%, transparent)` }}>
             {headers.map((header) => (
               <th
                 key={header}
-                className="whitespace-nowrap px-3 py-2 font-mono text-[10.5px] uppercase tracking-[0.1em]"
+                className="whitespace-nowrap px-3 py-2 font-mono text-[11px] uppercase tracking-[0.1em]"
                 style={{ color: accent }}
               >
                 {header}
@@ -40,6 +47,6 @@ export function DataTable({ headers, rows, accent }: DataTableProps) {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }

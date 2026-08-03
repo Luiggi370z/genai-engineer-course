@@ -4,7 +4,7 @@
 LangMem — and run a single contract suite over all three, so "we could swap vendors"
 is a claim you can prove rather than a hope.
 **Prerequisite.** 5.1 Four kinds of memory (the protocol mirrors that store's API).
-**Effort.** ~60 min · moderate.
+**Effort.** ~60 min to green on the fast tests · +25 min for the integration tier · ~100 min realistic first pass.
 
 ## Do this
 

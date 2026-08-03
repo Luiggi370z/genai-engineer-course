@@ -104,19 +104,36 @@ sequenceDiagram
 ```
 
 The same pipeline serves `/ask/stream` as SSE, and the output gate is the same
-gate: `output_gate.py` holds a 256-character window back so a chunk reaching the
-client has already been screened, rather than apologizing for one that was not
-(ADR-0006). A replayed `/approve` is deduplicated by `Idempotency-Key`, and a
+gate: `output_gate.py` holds a window back so a chunk reaching the client has
+already been screened, rather than apologizing for one that was not. The window
+is derived from the output patterns themselves — each declares the longest span
+it can match, and the gate takes the maximum — because the earlier fixed 256
+characters were a guess that an unbounded email pattern outgrew (ADR-0006). A
+stream that dies mid-answer ends with `truncated: true` rather than being
+presented as complete. A replayed `/approve` is deduplicated by `Idempotency-Key`, and a
 grant is claimed atomically by the run that spends it, so "approved once" means
 "this caller, this call, fires once" (ADR-0003).
 
 Two of the arrows above carry more weight than their size suggests. The planner
 reads the **registry**, not a list of tool names, so a tool discovered from the
-MCP server at boot is selectable without a code change — and it reads the
+MCP server at boot is selectable without a code change — behind an approval,
+because a tool that arrived without review is not a tool to run on a planner's
+say-so. The server's `readOnlyHint` travels with it and can only make the gate
+stricter; the single thing that opens one is
+`ASSISTANT_MCP_READONLY_ALLOWLIST`, which is local and operator-owned. It reads the
 **goal**, not the retrieved documents, so a poisoned corpus has no path to a
 tool call at all (ADR-0007). Memory recall is scoped to the caller's own store
 rather than filtered after the fact, which is why one person's remembered
 preference cannot surface in another's answer (ADR-0008).
+
+Recalled memory is a **third class of evidence**, not decoration on the other
+two. When it is the only evidence and it bears on the question — same
+content-word filter documents get — it answers, attributed ("you told me
+earlier") and uncited, because a memory is not a document. The composers used to
+abstain there while the recalled fact sat in the response payload beside the
+refusal. `grounding` on the response names the class the answer stands on
+(`documents`, `tools`, `memory`, `none`), so a reader can tell "the handbook
+says" from "you said" without inspecting the citations to infer it.
 
 Every arrow in that diagram is also a span. One root per request
 (`assistant.request` over HTTP, `assistant.pipeline` when core is driven
@@ -138,7 +155,22 @@ possible at all, since you cannot delete by prose. Chunk ids are derived from
 updates the corpus instead of duplicating it, and an edit replaces a paragraph
 instead of shelving the old one beside the new one. The embedder is injected and
 its dimension measured, so `ASSISTANT_EMBED_MODEL` swaps the offline hash vector
-for real semantic recall without a config change anywhere else (ADR-0012).
+for real semantic recall without a config change anywhere else (ADR-0012) — and
+the collection is named after the embedder and its width, because Qdrant checks
+dimensions and not meaning, so two 768-wide models write into each other's index
+without an error anywhere.
+
+The Qdrant search itself runs both arms of phase 2: a dense prefetch and a sparse
+one, fused by Qdrant's own RRF rather than in Python, because an order number
+carries no meaning for an embedder to place and a synonym carries no token for a
+keyword index to match. `ASSISTANT_MIN_SCORE` puts a floor under the dense
+similarity, which is what lets the composer abstain — vector search returns its
+three least-unrelated documents for a question about something absent from the
+corpus, and without a floor those become evidence. `ASSISTANT_RERANK_MODEL` adds
+a cross-encoder over the fused candidates, off by default and degrading to plain
+retrieval when the optional dependency is missing. `/health` names all three
+(`tier.embed`, `tier.retrieval`, `tier.rerank`), because a stack running on the
+hash vector is indistinguishable from a working one by every other probe.
 
 Everything in that sequence runs inside **one budget**. A request carries a
 deadline and a "the caller left" flag together (`deadline.py`), both installed at

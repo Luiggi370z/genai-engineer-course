@@ -72,6 +72,30 @@ reviewer reads first — and `evals/report.json`, the version-stamped record the
 merge gate reads. `make gate` runs that gate locally; CI runs it against the
 image built from the current commit.
 
+## `make release-evidence` — the same trial, on the system that ships
+
+`make report` is a proxy and says so in its own header: in-memory retrieval, a
+lexical judge, three containment probes, one second. That is the right trade for
+something that runs on every push, and the wrong number to publish.
+
+`make release-evidence` runs the same harness against the deployed stack —
+Qdrant with the semantic embedder, hybrid retrieval, reranking **on**, a RAGAS
+0.4 judge on a pinned model, and all 58 rows of the versioned Phase 6 red-team
+dataset including its eleven benign controls. It needs the compose stack up, and
+it **refuses to run** if any component has fallen back: a release number produced
+against the offline path is not a weaker measurement, it is a different one under
+the same heading.
+
+The controls are the half worth arguing about. Containment is trivially
+satisfiable — refuse everything and no attack ever reaches a tool — so the report
+prints two numbers side by side and never one: attacks that reached a gated tool,
+and benign requests that were wrongly refused. A guardrail change that improves
+the first by wrecking the second is visible in one glance instead of shipping as
+a win.
+
+`docs/RELEASE-CHECKLIST.md` makes a stamped run of this a precondition for
+publishing, and carries the table of which lane may claim what.
+
 ## `make evidence` — the log for the whole course
 
 `make report` measures this service. `make evidence` measures **the course**,

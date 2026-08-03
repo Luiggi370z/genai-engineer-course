@@ -76,6 +76,31 @@ which looks exactly like nothing having happened.
 - **Learn**: if the same component degrades repeatedly, check its memory limit
   in `docker-compose.yml` — OOM-killed containers look like flaky networks.
 
+## 2b. `/ready` stays 503, or the first answers are degraded after a deploy
+
+- **Detect**: `/health` is 200 and `status: "ok"`, but `/ready` returns 503, or
+  `ready: false` sits in the health payload. The nastier version has no signal at
+  all: everything is green and the first few answers are visibly worse.
+- **Contain**: do not route to the container. That is what the 503 is for — a
+  load balancer or `depends_on: service_healthy` will hold traffic on its own.
+- **Diagnose**: `curl -s $URL/ready | jq -r .detail` says why. `model tier not
+  answering` means Ollama is unreachable; `model tier degraded` means it
+  answered by falling back, which is the cold-model case. Confirm with
+  `docker compose exec ollama ollama ps` — a model listed by `ollama list` but
+  absent from `ollama ps` is on disk and not in memory, and loading a 9B on CPU
+  takes minutes against a 60-second composer budget.
+- **Recover**: wait, if it is a first boot — the compose bootstrap warms the
+  model and touches `/tmp/warm` before the ollama healthcheck passes, so this
+  resolves itself. If it does not, `docker compose logs ollama` will show the
+  pull or the warmup failing. Check `OLLAMA_KEEP_ALIVE` is still set; without it
+  the model unloads after five idle minutes and every gap becomes a cold start.
+- **Learn**: this is the failure that taught the difference between liveness and
+  readiness here. Before `/ready` existed, a downloaded-but-cold model reported
+  healthy, the first real question timed out, the offline composer answered it,
+  and every probe stayed green while the answer quality dropped. A readiness
+  signal that does not complete a real request is a liveness signal wearing the
+  wrong label.
+
 ## 3. PII appeared where it should not
 
 - **Detect**: a `[redacted: output failed the safety gate]` answer (the gate

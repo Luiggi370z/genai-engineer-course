@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The GenAI Engineer Workbook \u2014 interactive course app. Builds to a single self-contained course.html.",
+  "description": "The GenAI Engineer Workbook — interactive course app. Builds to a single self-contained course.html.",
   "packageManager": "pnpm@11.0.8",
   "scripts": {
     "dev": "vite",
@@ -19,7 +19,9 @@
     "check-integrity": "node scripts/check-integrity.mjs",
     "check-density": "node scripts/check-density.mjs",
     "check-a11y": "node scripts/check-a11y.mjs",
+    "check-a11y:browser": "node scripts/check-a11y-browser.mjs",
     "verify": "pnpm build && pnpm test && pnpm check-a11y",
+    "verify-full": "pnpm verify && pnpm check-a11y:browser",
     "check-claims": "node scripts/check-claims.mjs"
   },
   "dependencies": {
@@ -29,6 +31,7 @@
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
     "@biomejs/biome": "^2.5.6",
     "@tailwindcss/vite": "^4.3.3",
     "@types/react": "^19.2.18",
@@ -37,6 +40,7 @@
     "axe-core": "^4.12.1",
     "esbuild": "^0.28.1",
     "jsdom": "^30.0.1",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^8.2.0",

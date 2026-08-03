@@ -2,7 +2,7 @@
 
 **Goal.** Build one client that reaches five providers — OpenAI, Anthropic, Google, Ollama and MLX — behind a single call, with `complete`, `stream`, `call_tool` and `extract` each normalized to one shape, so swapping models is config, not code.
 **Prerequisite.** none — this is the first build of the course.
-**Effort.** ~60 min · moderate.
+**Effort.** ~60 min to green on the fast tests · +20 min for the integration tier · ~100 min realistic first pass.
 
 ## Do this
 

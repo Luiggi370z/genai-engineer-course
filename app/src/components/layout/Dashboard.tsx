@@ -1,8 +1,11 @@
+import BookmarkAdd02Icon from "@hugeicons/core-free-icons/BookmarkAdd02Icon";
+import { HugeiconsIcon } from "@hugeicons/react";
 import { dashboard } from "../../data/dashboard";
 import { milestones, myths, outOfScope, prerequisites } from "../../data/intro";
 import { phases } from "../../data/phases";
+import { accentOf } from "../../lib/accent";
 import { InlineText } from "../../lib/markdown";
-import type { Progress } from "../../lib/progress";
+import { formatPct, type Place, type Progress } from "../../lib/progress";
 import { CheckItem } from "../ui/CheckItem";
 import { ProgressRing } from "../ui/ProgressRing";
 import { ManifestPanel } from "./ManifestPanel";
@@ -13,13 +16,68 @@ interface DashboardProps {
   onNav: (view: string) => void;
   phasePct: (phaseId: string) => number;
   overallPct: number;
+  /** Ticked and total checkable items, printed beside the ring. */
+  overall: { done: number; total: number };
+  /** Where the reader was last time, or null on a first visit. */
+  place: Place | null;
+  onResume: () => void;
+}
+
+/** The section labels, keyed by the ids `PhaseView` gives its headings. */
+const SECTION_LABELS: Record<string, string> = {
+  objectives: "Learning objectives",
+  recall: "Warm-up",
+  concepts: "Core concepts",
+  example: "Worked example",
+  exercises: "Exercises",
+  workshop: "Workshop",
+  checkpoint: "Checkpoint",
+  qbank: "Question bank",
+  resources: "Resources",
+};
+
+/**
+ * The way back in.
+ *
+ * The workbook is eighteen weeks long and opens on the dashboard every time,
+ * which for a returning reader means scrolling a nine-card grid to remember
+ * which phase they were in and then scrolling that phase to find where they
+ * stopped. The card names both, and one click restores them.
+ */
+function ResumeCard({ place, onResume }: { place: Place; onResume: () => void }) {
+  const phase = phases.find((p) => p.id === place.view);
+  if (!phase) return null;
+  const section = place.sectionId ? SECTION_LABELS[place.sectionId] : undefined;
+  const accent = accentOf(phase.id);
+  return (
+    <button
+      type="button"
+      onClick={onResume}
+      className="mt-6 flex w-full items-center gap-3 rounded-lg border bg-card px-4 py-3 text-left transition-shadow hover:shadow-md"
+      style={{ borderColor: `color-mix(in oklab, ${accent} 35%, transparent)` }}
+    >
+      <HugeiconsIcon icon={BookmarkAdd02Icon} size={16} style={{ color: accent }} />
+      <div className="min-w-0">
+        <div
+          className="font-mono text-[11px] uppercase tracking-[0.16em]"
+          style={{ color: accent }}
+        >
+          Pick up where you left off
+        </div>
+        <div className="mt-0.5 truncate text-[14px] font-semibold text-ink">
+          Phase {String(phase.num).padStart(2, "0")} · {phase.title}
+          {section ? <span className="font-normal text-graphite"> · {section}</span> : null}
+        </div>
+      </div>
+    </button>
+  );
 }
 
 function SectionLabel({ kicker, title, tone }: { kicker: string; title: string; tone?: string }) {
   return (
     <>
       <div
-        className="mb-1 font-mono text-[10.5px] uppercase tracking-[0.16em]"
+        className="mb-1 font-mono text-[11px] uppercase tracking-[0.16em]"
         style={{ color: tone ?? "var(--color-graphite)" }}
       >
         {kicker}
@@ -29,7 +87,16 @@ function SectionLabel({ kicker, title, tone }: { kicker: string; title: string; 
   );
 }
 
-export function Dashboard({ progress, onToggle, onNav, phasePct, overallPct }: DashboardProps) {
+export function Dashboard({
+  progress,
+  onToggle,
+  onNav,
+  phasePct,
+  overallPct,
+  overall,
+  place,
+  onResume,
+}: DashboardProps) {
   const workshopCount = phases.filter((p) => p.workshop).length;
 
   return (
@@ -48,14 +115,20 @@ export function Dashboard({ progress, onToggle, onNav, phasePct, overallPct }: D
         <div className="mt-5 flex items-center gap-3">
           <ProgressRing pct={overallPct} color="var(--color-ink)" size={40} />
           <div>
-            <div className="text-[20px] font-bold leading-none text-ink">
-              {Math.round(overallPct * 100)}%
+            <div className="flex items-baseline gap-2">
+              <span className="text-[20px] font-bold leading-none text-ink">
+                {formatPct(overallPct)}
+              </span>
+              <span className="font-mono text-[11px] text-graphite">
+                {overall.done} of {overall.total}
+              </span>
             </div>
-            <div className="mt-0.5 font-mono text-[10.5px] tracking-wide text-graphite">
+            <div className="mt-0.5 font-mono text-[11px] tracking-wide text-graphite">
               {dashboard.progressCaption}
             </div>
           </div>
         </div>
+        {place ? <ResumeCard place={place} onResume={onResume} /> : null}
       </header>
 
       <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -66,19 +139,19 @@ export function Dashboard({ progress, onToggle, onNav, phasePct, overallPct }: D
             onClick={() => onNav(phase.id)}
             className="rounded-lg border bg-card px-4 py-3.5 text-left transition-shadow hover:shadow-md"
             style={{
-              borderColor: `color-mix(in oklab, ${phase.color} 27%, transparent)`,
+              borderColor: `color-mix(in oklab, ${accentOf(phase.id)} 27%, transparent)`,
               borderTopWidth: 3,
-              borderTopColor: phase.color,
+              borderTopColor: accentOf(phase.id),
             }}
           >
             <div className="flex items-center justify-between gap-2">
               <span
-                className="font-mono text-[10.5px] uppercase tracking-[0.16em]"
-                style={{ color: phase.color }}
+                className="font-mono text-[11px] uppercase tracking-[0.16em]"
+                style={{ color: accentOf(phase.id) }}
               >
                 Phase {String(phase.num).padStart(2, "0")} · {phase.weeks}
               </span>
-              <ProgressRing pct={phasePct(phase.id)} color={phase.color} size={26} />
+              <ProgressRing pct={phasePct(phase.id)} color={accentOf(phase.id)} size={26} />
             </div>
             <div className="mt-1.5 text-[15px] font-bold tracking-tight text-ink">
               {phase.title}

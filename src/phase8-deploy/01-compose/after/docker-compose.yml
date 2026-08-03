@@ -6,8 +6,11 @@
 #   docker compose up --build
 #   curl localhost:8000/health
 #
-# First boot is slow on purpose: the ollama service pulls its models before it
-# reports healthy, and nothing that depends on it starts until it does.
+# First boot is slow on purpose: the ollama service pulls its models AND loads one
+# into memory before it reports healthy, and nothing that depends on it starts
+# until it does. Reporting ready on a downloaded-but-cold model is the same lie as
+# reporting ready on a container that has not started — the first request pays for
+# it either way, and the fallback hides the evidence.
 # Reliability posture, uniform across services: `restart: unless-stopped` brings a
 # crashed container back (but respects an operator's explicit stop), memory/cpu
 # limits keep one runaway service from starving the rest of the laptop, and
@@ -29,9 +32,33 @@ services:
     stop_grace_period: 20s
     environment:
       MCP_SERVER: http://mcp:8080/mcp
+      # The one lever that ungates a discovered tool, and it is on this side of
+      # the wire on purpose. `lookup_fact` is a read against a fixed dictionary
+      # in a server this repo also ships, which is the review the entry stands
+      # for — everything else the server publishes stays behind /approve, no
+      # matter how read-only it says it is.
+      ASSISTANT_MCP_READONLY_ALLOWLIST: lookup_fact
       QDRANT_URL: http://qdrant:6333
       OLLAMA_HOST: http://ollama:11434
       ASSISTANT_DB: /data/assistant.db
+      # The ollama service pulls this model; without naming it here the store
+      # silently used `hash_embed`, which matches on shared vocabulary and not
+      # on meaning — so the deployed stack answered "what is the reimbursement
+      # policy" with nothing, while a page about refunds sat in the corpus. The
+      # collection name carries the embedder and its width, so changing this
+      # value starts a new collection instead of reading the old vectors as if
+      # they meant the same thing.
+      ASSISTANT_EMBED_MODEL: nomic-embed-text
+      # How long one composition may take before the offline stitcher answers
+      # instead. The library default is 60 seconds, which suits a model with a
+      # GPU under it; this stack does not have one. Docker Desktop exposes no
+      # GPU to containers, so the 9B here runs at about half a token per second
+      # and every answer arrived from the fallback — a stack that was working
+      # exactly as configured, failing its own end-to-end check because of a
+      # number compiled into the code. Fifteen minutes is the budget for a model
+      # running on a CPU inside a VM; the host-model overlay puts it back to the
+      # library default, because there slow really does mean broken.
+      COMPOSE_TIMEOUT_SECONDS: "900"
       # Ship spans to a real collector with the observability overlay (adds a pinned
       # otel-collector and sets OTEL_EXPORTER_OTLP_ENDPOINT — see the overlay file):
       #   docker compose -f docker-compose.yml -f docker-compose.observability.yml up
@@ -60,16 +87,19 @@ services:
       ollama:
         condition: service_healthy
     healthcheck:
+      # /ready, not /health: the process being up is not the same claim as the
+      # model tier being able to finish a request, and `depends_on:
+      # service_healthy` is a promise to whatever starts next.
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')",
         ]
       interval: 10s
-      timeout: 3s
-      retries: 12
+      timeout: 10s
+      retries: 30
 
   mcp:
     build: ../../../workshops/assistant/after
@@ -106,23 +136,43 @@ services:
     mem_limit: 12g # a 9B model plus the embedder need real headroom
     cpus: 4.0
     stop_grace_period: 30s # let an in-flight generation finish before SIGKILL
+    environment:
+      # Ollama unloads an idle model after five minutes by default, which turns
+      # every pause between checks into another cold start. Holding it resident
+      # is what makes the warmup below stay true for the length of a run.
+      OLLAMA_KEEP_ALIVE: 1h
     entrypoint: ["/bin/sh", "-c"]
-    command: # bootstrap: serve, pull the two models the course uses, then keep serving
+    command: # bootstrap: serve, pull, WARM, then keep serving
       - |
         ollama serve &
         sleep 2
         ollama pull qwen3.5:9b
         ollama pull nomic-embed-text
+        # A pulled model is a file on disk. Loading a 9B into memory on CPU takes
+        # minutes, and the composer's budget is sixty seconds — so without this
+        # line the first real question times out, the offline composer answers,
+        # and a stack that reported itself healthy quietly serves a degraded
+        # answer to whoever showed up first. Paying the load here means the
+        # readiness signal and the truth agree.
+        ollama run qwen3.5:9b "ok" >/dev/null 2>&1
+        touch /tmp/warm
         wait
     volumes:
       - ollama-models:/root/.ollama # pulled models survive `compose down`
     healthcheck:
-      # healthy = the MODELS are in, not merely the daemon — so the assistant's
-      # service_healthy wait actually waits for the bootstrap to finish
-      test: ["CMD-SHELL", "ollama list | grep -q qwen3.5 && ollama list | grep -q nomic-embed-text"]
+      # healthy = the models are downloaded AND one of them has completed a
+      # generation. `ollama list` alone was the old check, and it is satisfied by
+      # a model nobody can use yet. The image ships no curl, wget or python, so
+      # the CLI and a sentinel file are the tools available — the assistant's
+      # own /ready endpoint is what proves the round trip end to end.
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /tmp/warm && ollama list | grep -q qwen3.5 && ollama list | grep -q nomic-embed-text",
+        ]
       interval: 15s
       timeout: 5s
-      retries: 80 # first boot downloads ~6 GB of models; be patient, not broken
+      retries: 120 # first boot downloads ~6 GB and then loads it; patient, not broken
 
 volumes:
   assistant-data:

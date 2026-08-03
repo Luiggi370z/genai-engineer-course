@@ -6,7 +6,7 @@ below its healthy floor and prescribe exactly one fix. Debug the search like a
 pipeline: one variable at a time, then re-measure.
 **Prerequisite.** None — standalone tool; the mindset is Phase 3's eval loop
 applied to your own pipeline.
-**Effort.** ~20 min · gentle.
+**Effort.** ~20 min to green on the fast tests · no integration tier · ~35 min realistic first pass.
 
 ## Do this
 

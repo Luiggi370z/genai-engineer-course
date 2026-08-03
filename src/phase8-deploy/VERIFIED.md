@@ -37,8 +37,10 @@ That is a debugging affordance, not a shorter suite: fix what check 12 caught an
 re-prove it in two minutes instead of re-running eleven checks that already
 passed. The checks share state deliberately — one corpus, one outbox, one set of
 approvals, and later checks assert on what earlier ones left behind — so resuming
-is only meaningful against volumes a full run has already populated, and CI runs
-the whole thing.
+is only meaningful against volumes a full run has already populated. Every lane
+that reports a result runs the whole thing: push CI builds the image and
+validates the compose files without booting the stack, and the scheduled `e2e`
+workflow runs all of it with `--ci`.
 
 Adding the flag immediately paid for itself by exposing two checks that had been
 passing for the wrong reason. The collector check waited for the root span and
@@ -60,8 +62,32 @@ passed the whole time, and that is the part worth sitting with rather than the c
 nothing was broken, the answers were grounded, `/health` was green, and **the model
 was never the one answering**. The suite asked "is this answer grounded in the
 corpus", which the fallback composer also satisfies, and never asked "did the model
-write it". It is eighteen minutes now on the same lane, and forty-five seconds with
-`--host-model`, with the model composing in both.
+write it". It is forty-five seconds now with `--host-model`, and twelve minutes on
+the self-contained lane — the twenty-five became twelve by spending it generating
+rather than timing out, with the model composing in both.
+
+The second half of that took another failed run to see. Bounding the completion cut
+the work; it did not make the work fit, because 60 seconds was never a budget this
+lane could meet — 0.52 tokens/second and a hundred tokens of answer is three minutes
+whatever you do to the prompt. So every composition still timed out, the fallback
+still answered, and check 4 — now that it asserts the model composed — failed the
+whole run on a stack with nothing wrong with it. The budget moved out of the library
+and into the deployment that knows its own hardware: `COMPOSE_TIMEOUT_SECONDS`, set
+to fifteen minutes in `docker-compose.yml` and back to sixty seconds in the
+host-model overlay. A constant that is correct behind a GPU and absurd without one
+is a configuration item wearing a constant's clothes.
+
+Raising it exposed the third one, which was the same mistake at a different layer.
+The secure overlay caps the whole request at `REQUEST_DEADLINE_SECONDS`, and
+`deadline.capped` hands a call the tighter of the two clocks — so a 120-second
+request budget silently overruled the 900-second composition budget that had just
+been set for it. Two numbers describing nested spans of time, tuned independently,
+which is a thing that stays correct only by accident. Worse, the stream failed
+differently from the batch path: `/ask/stream` broke out of its loop on an expired
+deadline without a final frame, so the client got chunks and then nothing — a
+truncated answer that looks exactly like a finished one. The deadline is now
+sixteen minutes on that lane, and every way the stream can end ends in a `done`
+frame that says which way it was.
 
 Two fixes, in the order they matter. The composer now asks for a **bounded**
 completion — `think=False` and a `num_predict` ceiling (`adapters.py`). A reasoning
@@ -81,7 +107,9 @@ point the container at it through `host.docker.internal` and switch the in-stack
 service off with an unenabled profile, which also makes the overlay the smallest real
 use of `!override` in the repo (the base file's `depends_on` waits for a service the
 overlay has just turned off). The default lane stays self-contained, because check 1's
-claim is one command with nothing installed, and CI runs that lane.
+claim is one command with nothing installed — and it is the self-contained lane the
+scheduled workflow runs, on a smaller model, so the claim is exercised rather than
+asserted.
 
 What the bounded composer did not rescue, on the CPU lane, is everything after the
 first few checks. Check 4 composes with a freshly loaded model and an idle machine and

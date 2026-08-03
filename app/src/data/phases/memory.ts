@@ -5,7 +5,7 @@ import type { PhaseContent } from "../types";
 export const memory: PhaseContent = {
   id: "p-memory",
   weeks: "Weeks 10–11",
-  color: "#0F766E",
+  accent: { light: "#0E6F67", dark: "#19AA9F" },
   title: "Agents That Remember & Collaborate",
   tagline:
     "Your agent from the last phase wakes up with amnesia every session and does every job itself. This phase gives it a memory you can invalidate, a context window you spend on purpose, and workers it can delegate to — at a cost you can defend.",
@@ -316,7 +316,7 @@ def run(tasks: list[Task], route=route) -> Run:
         },
         {
           kind: "table",
-          headers: ["", "MCP", "A2A"],
+          headers: ["Dimension", "MCP", "A2A"],
           rows: [
             [
               "Question it answers",
@@ -436,6 +436,7 @@ def test_forget_actually_forgets(store: MemoryStore):
       id: "p-memory-e1",
       title: "Four memory types behind one interface",
       repo: "phase5-memory/01-memory-types",
+      effort: { fast: 75, integration: 20, realistic: 120 },
       rung: "faded",
       proves: "implement",
       task: "Implement `write`, `recall` and `forget` over four namespaces on the retrieval stack you already know. Then prove the types stay separated: a procedural recipe must never come back as the answer to a semantic question about the user, and a forgotten fact must be gone — not merely outranked.",
@@ -476,6 +477,7 @@ def test_procedural_memory_never_answers_a_semantic_question(store):
       id: "p-memory-e2",
       title: "Spend the window on purpose",
       repo: "phase5-memory/02-context-engineering",
+      effort: { fast: 60, integration: 20, realistic: 100 },
       rung: "faded",
       proves: "implement",
       task: "Build a context assembler with a hard token budget and the four moves: pin the constraints, compress old turns, evict superseded facts, park the bulk. Then plant a poisoned fact in a transcript and show you can trace it to its source and remove it.",
@@ -511,6 +513,7 @@ def test_compression_preserves_every_hard_fact():
       id: "p-memory-e3",
       title: "A crew that earns its keep (medium)",
       repo: "phase5-memory/03-supervisor-crew",
+      effort: { fast: 45, integration: null, realistic: 75 },
       rung: "faded",
       proves: "integrate",
       task: "Build a supervisor that delegates to two workers with tiered models, and account for cost per node. Run the same task list single-tier and tiered, then report the cost delta with quality held constant. Add the trajectory assertion that the supervisor actually delegated instead of doing the work itself.",
@@ -541,6 +544,7 @@ def test_a_worker_failure_does_not_sink_the_run():
       id: "p-memory-e4",
       title: "Rent two implementations, keep your interface",
       repo: "phase5-memory/04-memory-frameworks",
+      effort: { fast: 60, integration: 25, realistic: 100 },
       rung: "faded",
       proves: "integrate",
       task: "Implement your `MemoryStore` protocol twice — once on Mem0, once on LangMem — and run one shared contract suite against both plus an offline fake. Then write the one-paragraph adoption verdict: which you would ship, and what would make you change your mind.",
@@ -627,6 +631,8 @@ class LangMemStore:                    # langmem over a LangGraph store
     subtitle:
       "Give the assistant a memory it can invalidate, a context budget it respects, and a research crew it delegates to — with the cost written down.",
     repo: "workshops/assistant",
+    doc: "WORKSHOP-MEMORY-CREW.md",
+    effort: { fast: 180, integration: 30, realistic: 360 },
     proves: "integrate",
     assesses: ["p-memory-o1", "p-memory-o2", "p-memory-o3", "p-memory-o4"],
     needs: ["p3-o2", "p-evals-o5"],

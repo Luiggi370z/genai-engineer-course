@@ -1,5 +1,7 @@
 # Workshop · The interview loop  (ends Phase 9)
 
+**Effort.** ~2 h of focused build time · no integration tier · ~4 h realistic first pass.
+
 Eight workshops in, you have a system: a bench, a retrieval service, an eval suite, an
 agent with memory and guardrails, an MCP server, and a deployment with traces and a
 cost ladder. You can also, right now, probably not explain it out loud for forty

@@ -8,6 +8,9 @@
 #                                    is not a ready Qdrant
 #   - every port is published     -> internal services are on the host network
 #   - ollama pulls no models      -> the assistant boots against an empty model store
+#   - and pulling is not warming  -> a model on disk still takes minutes to load, so
+#                                    "healthy" can mean "your first question will
+#                                    time out and be answered by the fallback"
 #
 # The reference wiring is in ../after/docker-compose.yml — but write the checks
 # first and let them tell you what to fix.

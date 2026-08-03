@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { goToSection, useActiveSection } from "./useActiveSection";
+import { goToSection } from "./useActiveSection";
 
 export interface TocEntry {
   id: string;
@@ -31,8 +31,15 @@ interface Thumb {
  * Hidden below `xl` by the caller: on a narrow window it would either eat the reading
  * measure or float over the text, and a table of contents is not worth either.
  */
-export function PhaseToc({ entries, accent }: { entries: TocEntry[]; accent: string }) {
-  const active = useActiveSection(entries);
+export function PhaseToc({
+  entries,
+  accent,
+  active,
+}: {
+  entries: TocEntry[];
+  accent: string;
+  active: string | null;
+}) {
   const [thumb, setThumb] = useState<Thumb>({ top: 0, height: 0 });
   const listRef = useRef<HTMLUListElement>(null);
 

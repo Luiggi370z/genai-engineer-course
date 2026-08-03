@@ -3,9 +3,23 @@ import type { Phase } from "../data/types";
 /** Kept identical to the shipped bundle so existing student progress loads. */
 const PROGRESS_KEY = "genai_workbook_progress_v1";
 const THEME_KEY = "genai_workbook_theme";
+const PLACE_KEY = "genai_workbook_place_v1";
 
 export type Progress = Record<string, boolean>;
 export type Theme = "light" | "dark";
+
+/**
+ * Where the reader was: which view, and how far down it.
+ *
+ * Its own key rather than a field on progress, because the two have different
+ * lifetimes — `Reset progress` clears what you have done and must not also
+ * forget where you were reading, and an exported progress file is a record of
+ * work, not of a scroll position on somebody else's laptop.
+ */
+export interface Place {
+  view: string;
+  sectionId?: string;
+}
 
 /**
  * Every checkable id in a phase, in the order a student meets them. This is the
@@ -58,6 +72,52 @@ export function saveTheme(theme: Theme): void {
   } catch {
     // see saveProgress
   }
+}
+
+export function loadPlace(): Place | null {
+  try {
+    const raw = localStorage.getItem(PLACE_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const box = parsed as Record<string, unknown>;
+    if (typeof box.view !== "string" || !box.view) return null;
+    return typeof box.sectionId === "string"
+      ? { view: box.view, sectionId: box.sectionId }
+      : { view: box.view };
+  } catch {
+    return null;
+  }
+}
+
+export function savePlace(place: Place): void {
+  try {
+    localStorage.setItem(PLACE_KEY, JSON.stringify(place));
+  } catch {
+    // see saveProgress
+  }
+}
+
+/**
+ * A percentage that does not round a start into nothing.
+ *
+ * `Math.round(1/252 * 100)` is `0`, so a reader who ticked their first box was
+ * told they had made no progress — the one moment in the course where the
+ * number is doing motivational work. The two guard bands say "you have started"
+ * and "you are not finished" without inventing precision: everything between
+ * those reads as an ordinary rounded percentage.
+ */
+export function formatPct(pct: number): string {
+  if (pct >= 1) return "100%";
+  if (pct > 0.99) return ">99%";
+  if (pct <= 0) return "0%";
+  if (pct < 0.01) return "<1%";
+  return `${Math.round(pct * 100)}%`;
+}
+
+/** Done and total for a set of checkable ids — the number behind the ring. */
+export function tally(progress: Progress, ids: string[]): { done: number; total: number } {
+  return { done: ids.filter((id) => progress[id]).length, total: ids.length };
 }
 
 /**

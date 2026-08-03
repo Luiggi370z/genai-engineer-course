@@ -5,7 +5,7 @@ where the docstring is the model's only interface, every argument is validated, 
 errors come back as data. The irreversible one teaches the rule you can't bend:
 approval lives in application state, never in the tool signature.
 **Prerequisite.** 4.1 ReAct from scratch (you have a loop that calls tools).
-**Effort.** ~30 min · gentle
+**Effort.** ~30 min to green on the fast tests · no integration tier · ~50 min realistic first pass.
 
 ## Do this
 

@@ -1,0 +1,94 @@
+# The end-to-end lane: boot the whole composed stack and run all fifteen checks.
+#
+# Named for what it measures. This job runs a 1.7B chat model, because a hosted
+# runner is four CPU cores with no GPU and the course's 9B generates at roughly
+# half a token per second there — every answer would come from the offline
+# fallback and the run would take hours to say so. What a small model still
+# proves is everything that is not the model: the stack boots and passes its own
+# healthchecks, the JWT gate refuses unauthenticated and under-scoped requests,
+# retrieval is hybrid over Qdrant with a real embedder, injections are refused in
+# four spellings, a gated tool pauses and then runs exactly once for the approver
+# only, retries replay instead of repeating, tools discovered over MCP are chosen
+# by the planner and gated by local policy, memory stays partitioned per subject,
+# spans reach a collector outside the process, and state survives a restart.
+#
+# What it does NOT prove is answer quality. That needs the real model, and it is
+# `./src/verify-e2e.sh` with no flags, on a machine with the disk and the
+# patience — a release gate, recorded in docs/RELEASE-CHECKLIST.md.
+#
+# Not on push: a full pass boots four services and pulls a model, which is
+# minutes of runner time per commit for a signal that changes far less often than
+# the code does. Nightly plus a button covers the drift this catches — usually an
+# upstream image or model tag moving under a pin.
+name: e2e (wiring, small model)
+
+on:
+  schedule:
+    - cron: "17 4 * * *" # nightly, off the hour so it does not queue behind everyone else
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "chat model tag (registered ci-tier tag by default)"
+        required: false
+        default: ""
+      from:
+        description: "start at check N (debugging a failure; not a shorter suite)"
+        required: false
+        default: ""
+
+# A nightly that stacks up behind itself learns nothing new and costs real money.
+concurrency:
+  group: e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # The secure overlay refuses to start without a secret, and the teardown
+      # step below has to be able to read the same compose files the run used —
+      # so it lives at job scope rather than being minted inside the script.
+      # Ephemeral: one value per run, never leaves the runner.
+      ASSISTANT_JWT_SECRET: ${{ github.run_id }}-${{ github.run_attempt }}-e2e-secret-32-bytes-min
+      CI_CHAT_MODEL: ${{ inputs.model || 'qwen3.5:1.7b' }}
+      COMPOSE_FILES: >-
+        -f docker-compose.yml
+        -f docker-compose.secure.yml
+        -f docker-compose.observability.yml
+        -f docker-compose.ci.yml
+    steps:
+      - uses: actions/checkout@v5
+
+      # Two model downloads and four images. Without this the runner runs out of
+      # room partway through the ollama pull, which surfaces as a healthcheck
+      # timeout twenty minutes in rather than as "the disk is full".
+      - name: reclaim runner disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+
+      - name: run every check against the CI overlay
+        run: |
+          args=(--model "$CI_CHAT_MODEL")
+          if [ -n "${{ inputs.from }}" ]; then args+=(--from "${{ inputs.from }}"); fi
+          ./src/verify-e2e.sh "${args[@]}"
+
+      # Whatever happened, the stack's own account of it. A failure at check 13
+      # is usually explained by a line in the collector's log, and re-running the
+      # workflow to look is another forty minutes.
+      - name: stack logs
+        if: always()
+        run: docker compose $COMPOSE_FILES logs --no-color > "$RUNNER_TEMP/stack.log" || true
+        working-directory: src/phase8-deploy/01-compose/after
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-stack-logs
+          path: ${{ runner.temp }}/stack.log
+
+      - name: tear down
+        if: always()
+        run: docker compose $COMPOSE_FILES down -v || true
+        working-directory: src/phase8-deploy/01-compose/after

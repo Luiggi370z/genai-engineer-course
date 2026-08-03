@@ -7,32 +7,44 @@ import { Dashboard } from "./components/layout/Dashboard";
 import { ElectivesView } from "./components/layout/ElectivesView";
 import { Sidebar } from "./components/layout/Sidebar";
 import { PhaseView } from "./components/phase/PhaseView";
+import { goToSection } from "./components/phase/useActiveSection";
 import { prerequisites } from "./data/intro";
 import { phases } from "./data/phases";
+import { accentVars } from "./lib/accent";
 import {
   clearProgress,
   exportProgressFile,
+  loadPlace,
   loadProgress,
   loadTheme,
+  type Place,
   type Progress,
   parseProgressFile,
   phaseIds,
+  savePlace,
   saveProgress,
   saveTheme,
   type Theme,
+  tally,
 } from "./lib/progress";
 
 export function App() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [theme, setTheme] = useState<Theme>("light");
   const [view, setView] = useState<string>("dash");
+  // Where the reader was last time, offered rather than restored: the app opens
+  // on the dashboard, and a Resume card takes them back. Jumping straight into
+  // the middle of Phase 5 on a cold open would be a surprise, and the dashboard
+  // is also where the prerequisites and the manifest live.
+  const [place, setPlace] = useState<Place | null>(null);
   const [navOpen, setNavOpen] = useState(false);
-  const navDialogRef = useRef<HTMLElement>(null);
+  const navDialogRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     setProgress(loadProgress());
     setTheme(loadTheme());
+    setPlace(loadPlace());
   }, []);
 
   // Dialog semantics for the mobile nav: focus moves in on open, Escape closes,
@@ -92,7 +104,44 @@ export function App() {
   const navigate = useCallback((next: string) => {
     setView(next);
     document.getElementById("main-scroll")?.scrollTo({ top: 0 });
+    // Only phases are places you resume to. The dashboard is where Resume is
+    // offered, and the electives shelf is a shelf — going to either leaves the
+    // last phase on offer. The section is dropped rather than carried over: you
+    // are at the top of a different page now, and keeping "Workshop" from the
+    // phase you just left would send the next Resume click somewhere you have
+    // never been.
+    if (!phases.some((phase) => phase.id === next)) return;
+    const here = { view: next };
+    savePlace(here);
+    setPlace(here);
   }, []);
+
+  // Reported by `PhaseView` as the reader scrolls. Written straight through to
+  // storage rather than held in state and flushed on unload: a browser tab that
+  // is closed, crashed or discarded never runs an unload handler, and losing a
+  // reading position to a crash is exactly the case this feature is for.
+  const rememberSection = useCallback((sectionId: string) => {
+    setPlace((current) => {
+      if (!current || current.sectionId === sectionId) return current;
+      const next = { view: current.view, sectionId };
+      savePlace(next);
+      return next;
+    });
+  }, []);
+
+  const resume = useCallback(() => {
+    if (!place) return;
+    const target = place.sectionId;
+    setView(place.view);
+    if (!target) {
+      document.getElementById("main-scroll")?.scrollTo({ top: 0 });
+      return;
+    }
+    // Two frames, not one: the phase has to mount before its sections exist,
+    // and `scrollIntoView` on an element that is not there yet is a no-op that
+    // silently leaves the reader at the top.
+    requestAnimationFrame(() => requestAnimationFrame(() => goToSection(target)));
+  }, [place]);
 
   const exportProgress = useCallback(() => {
     const blob = new Blob([exportProgressFile(loadProgress())], { type: "application/json" });
@@ -136,11 +185,15 @@ export function App() {
   // Prerequisites plus the nine phases, and deliberately nothing else. The electives
   // shelf has no checkable ids, so skipping every optional side quest still reaches
   // 100% — otherwise "optional" would quietly render as "incomplete".
-  const overallPct = useMemo(() => {
-    if (!progress) return 0;
-    const ids = [...prerequisites.map((p) => p.id), ...phases.flatMap(phaseIds)];
-    return ids.filter((id) => progress[id]).length / ids.length;
-  }, [progress]);
+  //
+  // The count travels with the percentage. A ring at "<1%" is honest and still
+  // opaque; "1 of 252" says what the denominator is and how big the course
+  // actually is, which is the question the percentage was standing in for.
+  const overall = useMemo(
+    () => tally(progress ?? {}, [...prerequisites.map((p) => p.id), ...phases.flatMap(phaseIds)]),
+    [progress],
+  );
+  const overallPct = overall.total ? overall.done / overall.total : 0;
 
   if (!progress) {
     return (
@@ -156,7 +209,7 @@ export function App() {
   const nextPhase = activePhase ? phases.find((p) => p.num === activePhase.num + 1) : undefined;
 
   return (
-    <div className={theme === "dark" ? "dark" : "light"}>
+    <div className={theme === "dark" ? "dark" : "light"} style={accentVars(theme)}>
       <div className="grid-bg flex h-screen overflow-hidden text-ink">
         {/* Plain anchor on purpose: `main` carries tabIndex={-1}, so the default
             fragment navigation moves focus into the content, no JS needed. */}
@@ -185,7 +238,10 @@ export function App() {
               className="absolute inset-0 bg-black/35"
               onClick={() => setNavOpen(false)}
             />
-            <aside
+            {/* A `div`, not an `aside`: `role="dialog"` on a complementary
+                landmark is a role conflict, and the element is a dialog here,
+                not a sidebar. */}
+            <div
               ref={navDialogRef}
               role="dialog"
               aria-modal="true"
@@ -205,7 +261,7 @@ export function App() {
                 onImport={importProgress}
                 onReset={resetProgress}
               />
-            </aside>
+            </div>
           </div>
         )}
 
@@ -253,6 +309,7 @@ export function App() {
                 progress={progress}
                 onToggle={toggle}
                 onNav={navigate}
+                onSection={rememberSection}
                 nextPhase={nextPhase}
               />
             ) : view === "electives" ? (
@@ -264,6 +321,9 @@ export function App() {
                 onNav={navigate}
                 phasePct={phasePct}
                 overallPct={overallPct}
+                overall={overall}
+                place={place}
+                onResume={resume}
               />
             )}
           </main>

@@ -4,7 +4,7 @@
 claim honestly: every run reports cost and quality together, so "cheaper" cannot
 quietly mean "worse".
 **Prerequisite.** 5.2 Context engineering, plus the error-as-data habit from Phase 4.
-**Effort.** ~45 min · moderate.
+**Effort.** ~45 min to green on the fast tests · no integration tier · ~75 min realistic first pass.
 
 ## Do this
 

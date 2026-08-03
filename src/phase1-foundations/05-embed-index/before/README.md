@@ -2,7 +2,7 @@
 
 **Goal.** Build a mini vector store — local embeddings, a numpy matrix, cosine top-k `search` — and learn the seam that matters: the embedder is injected, which is what makes the ranking testable without a model and swappable for BGE-M3 or Qdrant in Phase 2.
 **Prerequisite.** 1.4 Chunking (chunks are what this index holds and searches).
-**Effort.** ~30 min · gentle.
+**Effort.** ~30 min to green on the fast tests · no integration tier · ~50 min realistic first pass.
 
 ## Do this
 

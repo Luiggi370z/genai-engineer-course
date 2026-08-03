@@ -6,7 +6,7 @@ import type { PhaseContent } from "../types";
 export const designDefend: PhaseContent = {
   id: "p4",
   weeks: "Weeks 12–13",
-  color: "#EA580C",
+  accent: { light: "#AA4009", dark: "#E37B45" },
   title: "Whiteboard It & Defend It",
   tagline:
     "Two skills that separate seniors from the pack: designing a GenAI system out loud, and knowing exactly how attackers break agents — and how to stop them.",
@@ -352,6 +352,7 @@ def looks_like_injection(text):
       id: "p4-e2",
       title: "Attack your own Phase-4 assistant",
       repo: "phase6-design-defend/01-red-team",
+      effort: { fast: 60, integration: null, realistic: 95 },
       rung: "faded",
       proves: "operate",
       task: "Write one working example of each major attack family from the catalog against your Workshop-4 assistant: a direct injection, an indirect one (hide instructions in an email/news page it reads), a payload split, and an encoded payload. Then write the same attack four more times — percent-encoded, HTML-entity-encoded, in leetspeak, and with a zero-width space inside the key word — and log which ones land.",
@@ -367,6 +368,7 @@ def looks_like_injection(text):
       id: "p4-e3",
       title: "Cost model on real numbers",
       repo: "phase6-design-defend/02-cost-model",
+      effort: { fast: 20, integration: null, realistic: 35 },
       rung: "faded",
       proves: "integrate",
       task: "Estimate $/query for 100K queries/day using the Phase-1 usage-based cost function. Show how a cache hit rate and a local routing tier change the bill.",
@@ -400,6 +402,8 @@ def looks_like_injection(text):
     title: "Workshop · Harden the assistant",
     subtitle: "Take your Phase-4 personal assistant and armor it against the full attack catalog.",
     repo: "workshops/assistant",
+    doc: "WORKSHOP-HARDENED.md",
+    effort: { fast: 120, integration: 60, realistic: 240 },
     proves: "operate",
     assesses: ["p4-o3", "p4-o4"],
     needs: ["p3-o2", "p3-o3"],

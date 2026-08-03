@@ -1,5 +1,7 @@
 # Workshop · Deployed stack  (ends Phase 8)
 
+**Effort.** ~5 h of focused build time · +2 h for the integration tier · ~10 h realistic first pass.
+
 The assistant works, it is hardened, and it speaks MCP. It is also a black box that
 costs an amount nobody has measured and takes a length of time nobody has bounded.
 This layer closes that: **see it, then make it cheaper without making it worse.**
@@ -153,6 +155,16 @@ debug at 3 a.m. Take it in any order; each item is independently green-able.
 - [ ] `ASSISTANT_EMBED_MODEL` swaps the hash vector for **real embeddings**, and the
       collection's dimension is **measured from the injected embedder**, not declared. A
       hardcoded `64` is a 400 from Qdrant on the first write after the deploy
+- [ ] The **collection is named after the embedder and its width**. Qdrant checks the
+      dimension of an incoming vector and nothing else, so two 768-wide models write into
+      each other's index, search cleanly and return noise — a corruption with no error
+      in it anywhere
+- [ ] Search runs **both arms**: a dense prefetch and a sparse one, fused by Qdrant's own
+      RRF, with the tenant filter on **each** — a filter applied to one of two prefetches
+      is not a filter
+- [ ] `ASSISTANT_MIN_SCORE` puts a floor under the **dense** score, not the fused one.
+      Fused scores are reciprocal ranks: the top hit of a search that found nothing
+      relevant still scores like a top hit
 - [ ] A failure is **classified before it is retried**: `TypeError` and a 4xx surface on
       the first attempt, a dead socket gets another go. `retry on Exception` buys three
       times the latency before the same 500, with the traceback pointing at the third
@@ -270,7 +282,10 @@ Offline and deterministic by default — the fast tests drive the real FastAPI a
 with a TestClient and no network. Each real adapter turns on with one env var
 (`settings.py`): `QDRANT_URL`, `ASSISTANT_EMBED_MODEL` (real embeddings instead of
 the deterministic hash vector — it matches on shared vocabulary, so
-"reimbursement" will not find a page about "refunds"), `OLLAMA_HOST`,
+"reimbursement" will not find a page about "refunds"), `ASSISTANT_MIN_SCORE` (the
+relevance floor that lets retrieval return nothing instead of the nearest thing
+it has), `ASSISTANT_RERANK_MODEL` (an optional cross-encoder over the fused
+candidates), `OLLAMA_HOST`,
 `MCP_SERVER`, `ASSISTANT_DB`,
 `OTEL_EXPORTER_OTLP_ENDPOINT`, plus the optional hardening/connector vars —
 `ASSISTANT_JWT_SECRET` **or** `ASSISTANT_JWKS_URL` (Bearer JWT on every mutating
@@ -336,6 +351,19 @@ the same spans arriving at a real otel-collector **outside the process**.
       response in `RUNBOOK.md`)
 - [ ] Memory survives a **process restart** (`sqlite_memory.py`; the tests reopen
       the store cold)
+- [ ] A recalled memory **answers the question** rather than riding along beside a
+      refusal — attributed, uncited, and reported as `grounding: "memory"`. Assert on
+      the answer: the version of this test that read `answer["memories"]` passed
+      against an assistant that replied "I don't know" with the fact in its own payload
+- [ ] An **irrelevant** memory grants nothing. Recall is greedy, so without a relevance
+      filter knowing one fact about a caller would answer every question the corpus
+      could not
+- [ ] A discovered tool is **gated by default**, and the server's `readOnlyHint` cannot
+      change that. The old default read an absent `requires_approval` key as permission,
+      so a server ungated every tool it published by staying quiet about them
+- [ ] `ASSISTANT_MCP_READONLY_ALLOWLIST` is the only thing that opens the gate, hints can
+      only tighten it, and `tier.mcp_ungated` on `/health` says how many tools the
+      operator has actually reviewed
 - [ ] MCP tools arrive by **discovery through the real SDK** (`adapters.mcp_tools`
       against `mcp_server.py`, in-memory in the integration lane, over HTTP in the
       composed stack)
@@ -356,7 +384,15 @@ the same spans arriving at a real otel-collector **outside the process**.
 - [ ] `make report` writes `PORTFOLIO.md` — eval scores per slice, live red-team
       containment, latency percentiles read off the spans, the cost story and the
       ADR list, every number measured by `src/assistant/report.py` and the
-      generator itself tested (a breach cannot pass silently)
+      generator itself tested (a breach cannot pass silently) — and the page
+      opens with a provenance block naming every instrument, because the number
+      most likely to be misquoted is the one from the cheapest tier
+- [ ] `make release-evidence` runs the same harness against the DEPLOYED stack:
+      Qdrant with the semantic embedder, hybrid retrieval, reranking on, a RAGAS
+      0.4 judge on a pinned model, and all 58 rows of the Phase 6 red-team
+      dataset with its eleven benign controls. It refuses to run on a fallen-back
+      component, and it reports bypasses and false positives side by side — so
+      "contained everything" cannot be bought by refusing everything
 - [ ] The SAME run writes `evals/report.json`, version-stamped with values
       derived from what ran (the `prompt` stamp is a hash of the prompt builder's
       source, so editing the prompt and keeping the label is not possible), and

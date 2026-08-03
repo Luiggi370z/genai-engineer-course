@@ -3,8 +3,10 @@ to the offline tier instead of 500ing, load is shed politely at the door, every
 side effect survives a retry unchanged, and an irreversible call that crashes
 mid-flight leaves a question rather than silence."""
 
+import json
 import sqlite3
 import sys
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -13,12 +15,18 @@ from fastapi.testclient import TestClient
 from assistant import deadline
 from assistant.adapters import InMemoryRag
 from assistant.api import create_app
-from assistant.composers import ABSTAIN, offline_compose
-from assistant.fallbacks import FallbackRag, fallback_composer, fallback_stream
+from assistant.composers import ABSTAIN, StreamTruncated, offline_compose
+from assistant.fallbacks import (
+    COMPOSE_POLICY,
+    FallbackRag,
+    fallback_composer,
+    fallback_stream,
+)
 from assistant.idempotency import IdempotencyStore
 from assistant.outbox import FAILED, PENDING, SENT, Outbox, recorded_registry
 from assistant.resilience import Policy
-from assistant.settings import Settings
+from assistant.service import build_assistant
+from assistant.settings import COMPOSE_TIMEOUT_SECONDS, Settings
 from assistant.tools import REGISTRY, rewrap
 
 FAST = Policy(attempts=2, base_delay=0.0, timeout=None)
@@ -69,6 +77,43 @@ def test_a_dead_composer_falls_back_to_offline_prose():
     assert "brain" in seen
 
 
+def test_the_composition_budget_is_deployment_policy_not_a_constant():
+    """Why this is configurable at all, in one sentence: the self-contained
+    end-to-end lane failed on a correctly configured stack.
+
+    Docker Desktop gives a container no GPU, so the in-stack 9B answers at about
+    half a token per second. Every composition passed 60 seconds, the offline
+    stitcher answered, and the run failed on check 4 — after seventeen minutes,
+    with nothing wrong except a number compiled into a library. Both paths read
+    it from the same setting so batch and stream cannot drift apart."""
+    slow = Settings(ollama_host="http://ollama:11434", compose_timeout=900)
+    assert slow.compose_timeout == 900
+    assert Settings().compose_timeout == COMPOSE_TIMEOUT_SECONDS
+
+
+def test_the_budget_comes_from_the_environment_the_container_was_given(monkeypatch):
+    monkeypatch.setenv("COMPOSE_TIMEOUT_SECONDS", "900")
+    assert Settings.from_env().compose_timeout == 900
+
+
+def test_a_composer_slower_than_its_budget_falls_back_at_the_budget():
+    """The behaviour the setting buys, at a hundredth of the scale: a primary
+    that takes longer than it is allowed is a failure, and the fallback answers
+    rather than the caller waiting."""
+    import time as _time
+
+    def molasses(goal, contexts, state, memories=None):
+        _time.sleep(1)
+        return "the model got there eventually"
+
+    seen: dict[str, str] = {}
+    compose = fallback_composer(
+        molasses, seen.__setitem__, replace(COMPOSE_POLICY, attempts=1, timeout=0.05)
+    )
+    assert compose("q", ["the fact"], [], []) == "the fact"
+    assert "brain" in seen
+
+
 def test_a_stream_that_dies_before_the_first_chunk_streams_offline_instead():
     def dead_stream(goal, contexts, state, memories=None):
         raise ConnectionError("ollama unreachable")
@@ -101,7 +146,14 @@ def test_a_stream_that_stalls_before_the_first_chunk_falls_back_at_the_deadline(
     assert "brain" in seen
 
 
-def test_a_stream_that_stalls_mid_flight_truncates_instead_of_hanging():
+def test_a_stream_that_stalls_mid_flight_raises_truncated_rather_than_ending():
+    """The chunks already on the wire stay — they cannot be recalled — but the
+    stream must not end *normally*, because a normal end means "that was the
+    whole answer" to every layer above. This used to `return`, and a model that
+    died mid-sentence was served as a complete, cited answer.
+
+    The distinction is the whole test: same text either way, different claim
+    about it."""
     import time as _time
 
     def trickle_then_stall(goal, contexts, state, memories=None):
@@ -111,9 +163,28 @@ def test_a_stream_that_stalls_mid_flight_truncates_instead_of_hanging():
 
     seen: dict[str, str] = {}
     stream = fallback_stream(trickle_then_stall, seen.__setitem__, timeout=0.05)
-    out = "".join(stream("q", [], [], []))
-    assert out == "first ", "chunks already on the wire stay; the stall truncates"
+    out = []
+    with pytest.raises(StreamTruncated):
+        for chunk in stream("q", [], [], []):
+            out.append(chunk)
+    assert "".join(out) == "first ", "chunks already on the wire stay"
     assert "brain" in seen, "the truncation is reported, not absorbed"
+
+
+def test_a_stream_that_errors_mid_flight_also_raises_truncated():
+    """A crash after the first chunk is the same situation as a stall: the
+    offline fallback cannot answer any more, because half an answer is already
+    delivered and the two would not join up."""
+
+    def trickle_then_die(goal, contexts, state, memories=None):
+        yield "first "
+        raise ConnectionError("ollama went away")
+
+    seen: dict[str, str] = {}
+    stream = fallback_stream(trickle_then_die, seen.__setitem__, timeout=1.0)
+    with pytest.raises(StreamTruncated):
+        list(stream("q", [], [], []))
+    assert "brain" in seen
 
 
 def test_the_degraded_composer_does_not_fabricate_grounding():
@@ -150,6 +221,50 @@ def test_health_is_never_shed():
     c.post("/ask", json={"question": "drain the bucket"})
     assert c.post("/ask", json={"question": "x"}).status_code == 429
     assert c.get("/health").status_code == 200, "probes must keep working under limit"
+    assert c.get("/ready").status_code == 200, "so must the readiness probe"
+
+
+# --- readiness is not liveness -------------------------------------------------
+
+
+def test_the_offline_tier_is_ready_immediately_because_it_loads_nothing():
+    c = TestClient(create_app(Settings()))
+    assert c.get("/ready").status_code == 200
+    assert c.get("/health").json()["ready"] is True
+
+
+def test_a_model_tier_that_cannot_answer_is_not_ready():
+    """The failure this endpoint exists for. Compose used to call ollama healthy
+    once the models were DOWNLOADED; the assistant came up, `/health` said ok,
+    and the first question timed out loading a cold 9B and was answered by the
+    offline fallback. Every probe was green and the answer was degraded.
+
+    503 is the whole point: an orchestrator reading this does not route to the
+    container, and a deploy that never clears it fails loudly instead of
+    silently serving fallbacks."""
+    app = create_app(Settings(ollama_host="http://unreachable:11434"))
+    # Resolved here rather than waiting on the startup thread: the question is
+    # what the answer IS, not how soon it lands, and a sleep would test neither.
+    app.state.ready, app.state.ready_detail = app.state.assistant.warm()
+
+    c = TestClient(app)
+    response = c.get("/ready")
+    assert response.status_code == 503
+    assert response.json()["ready"] is False
+    assert response.json()["detail"], "a refusal with no reason is not operable"
+    assert c.get("/health").json()["ready"] is False
+
+
+def test_warm_reports_not_ready_when_the_brain_fell_back():
+    """A composer that answers by falling back has not proved the model works —
+    it has proved the fallback works. Reporting ready on that is how the cold
+    start stayed invisible."""
+    assistant = build_assistant(Settings(ollama_host="http://unreachable:11434"))
+    assistant.compose = lambda *_args, **_kwargs: "offline prose"
+    assistant.degraded["brain"] = "composition fell back to offline: timeout"
+    ok, detail = assistant.warm()
+    assert ok is False
+    assert "degraded" in detail
 
 
 # --- approvals: one grant, one run; replays are no-ops -------------------------
@@ -332,13 +447,21 @@ def test_the_stream_is_bounded_the_same_way(monkeypatch):
 
 
 def test_an_upgrade_over_an_older_table_still_replays(tmp_path):
-    """Red until TODO 1 migrates the table rather than only redefining it.
+    """The bug this closes cost an end-to-end run: `CREATE TABLE IF NOT EXISTS`
+    does nothing when the table exists, including when it exists with the wrong
+    shape. A volume written by the build that only stored keys kept its
+    two-column table, the new code's `UPDATE ... SET result` raised `no such
+    column: result`, and it raised on the RETRY path — the health check was
+    green, every read worked, and the first client to time out and ask again got
+    a 500 for its trouble.
 
-    Every other test here starts from an empty database, which is the one case a
-    missing migration survives. This one starts from the schema this scaffold
-    ships — the schema in the Docker volume of anybody who ran the stack before
-    your change — and it is the case that broke in production: green health
-    check, working reads, and `no such column: result` on the first retry."""
+    Red until TODO 1 migrates the table rather than only redefining it. Every
+    other test here starts from an empty database, which is the one case a
+    missing migration survives; this one starts from the schema the scaffold
+    ships, which is the schema in the Docker volume of anybody who ran the stack
+    before the change. That is why the schema is compared to the database rather
+    than assumed: the only honest test of a migration is one that starts from
+    the old schema."""
     db = tmp_path / "assistant.db"
     old = sqlite3.connect(db)
     old.execute(
@@ -533,3 +656,37 @@ def test_a_stream_stops_early_when_nobody_is_listening():
     assert root.attributes["request.abandoned"] == "caller disconnected", (
         "and the trace says why, so the short answer is not a mystery"
     )
+
+
+def test_an_abandoned_stream_still_ends_in_a_done_frame_that_says_so():
+    """Stopping early is right. Stopping in silence is not.
+
+    Found by the self-contained end-to-end lane, where a request budget expired
+    mid-generation: the client got chunks and then nothing, which on the wire is
+    exactly what a dropped connection looks like — so the half answer already on
+    screen reads as the whole one. Same contract as a mid-stream stall: the
+    stream ends in `done`, and `done` says it was cut off."""
+    app = create_app(Settings())
+    a = app.state.assistant
+    frames: list[str] = []
+    gone = {"yet": False}
+
+    def endless(goal, contexts, state, memories=None):
+        for i in range(1000):
+            yield f"word{i} "
+
+    a.stream_compose = endless
+    with deadline.budget(None, cancelled=lambda: gone["yet"]):
+        for frame in a.ask_stream("tell me everything"):
+            frames.append(frame)
+            if len(frames) >= 3:
+                gone["yet"] = True
+
+    last = frames[-1]
+    assert last.startswith("event: done"), "a stream that stops must still end"
+    body = json.loads(last.split("data: ", 1)[1])
+    assert body["truncated"] is True
+    assert body["abandoned"] == "caller disconnected"
+    # the text that did reach the client is in the frame, so a caller can keep
+    # what arrived without pretending it was the answer
+    assert body["answer"].startswith("word0")

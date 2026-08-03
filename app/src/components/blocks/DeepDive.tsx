@@ -42,13 +42,13 @@ export function DeepDive({ title, blocks, accent }: DeepDiveProps) {
           <HugeiconsIcon icon={ArrowRight01Icon} size={14} strokeWidth={2.5} />
         </span>
         <span
-          className="font-mono text-[9.5px] uppercase tracking-[0.16em]"
+          className="font-mono text-[11px] uppercase tracking-[0.16em]"
           style={{ color: accent }}
         >
           Deep dive
         </span>
         <span className="flex-1 text-[12.5px] font-medium leading-snug text-ink/80">{title}</span>
-        <span className="shrink-0 font-mono text-[9.5px] uppercase tracking-[0.12em] text-graphite">
+        <span className="shrink-0 font-mono text-[11px] uppercase tracking-[0.12em] text-graphite">
           {open ? "Hide" : "Optional"}
         </span>
       </button>

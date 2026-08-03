@@ -4,7 +4,7 @@
 park) and an `assemble()` that fills a prompt under a hard token cap without ever
 truncating a claim or evicting a pin.
 **Prerequisite.** 5.1 Four kinds of memory (these lines are what a recall returns).
-**Effort.** ~60 min · moderate.
+**Effort.** ~60 min to green on the fast tests · +20 min for the integration tier · ~100 min realistic first pass.
 
 ## Do this
 

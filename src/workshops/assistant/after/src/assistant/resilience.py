@@ -41,6 +41,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
@@ -126,14 +127,31 @@ def resilient(
         # /ask hostage for half an hour past its 60s budget.) shutdown(wait=False)
         # lets the worker thread die with the overrun call still on it.
         pool = ThreadPoolExecutor(max_workers=1)
+        # The worker gets a COPY of this request's context, and what it writes
+        # there is copied back on success. A thread otherwise starts with an
+        # empty context in both directions, and both directions had already gone
+        # wrong: the request budget was invisible to anything the call ran, and
+        # the token counts Ollama reports — set by the adapter into a ContextVar
+        # — were written into a context that died with the thread. The release
+        # page said "tokens estimated by word split" while the provider had been
+        # returning exact counts all along, which is the failure mode this whole
+        # module is supposed to prevent: a fallback that reads like a result.
+        ctx = copy_context()
         try:
-            future = pool.submit(fn, *args, **kwargs)
+            future = pool.submit(ctx.run, fn, *args, **kwargs)
             try:
-                return future.result(timeout=limit)
+                result = future.result(timeout=limit)
             except FutureTimeout:
                 raise TimeoutError(
                     f"{getattr(fn, '__name__', 'call')} exceeded {limit:.3g}s"
                 ) from None
+            # Only on success, and only after the result is in hand: an
+            # abandoned call is still running on that thread, still writing to
+            # that context, and adopting its half-finished state would be worse
+            # than losing it.
+            for var, value in ctx.items():
+                var.set(value)
+            return result
         finally:
             pool.shutdown(wait=False, cancel_futures=True)
 

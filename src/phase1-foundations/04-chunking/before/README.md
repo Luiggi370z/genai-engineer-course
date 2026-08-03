@@ -2,7 +2,7 @@
 
 **Goal.** Build the two workhorse splitters — fixed-size word windows with overlap, and heading-aware sections — plus a worst-chunk inspector, so you see what each strategy does to a real document before Phase 2 retrieval depends on it.
 **Prerequisite.** none — pure Python, no client or model involved.
-**Effort.** ~20 min · gentle.
+**Effort.** ~20 min to green on the fast tests · no integration tier · ~35 min realistic first pass.
 
 ## Do this
 

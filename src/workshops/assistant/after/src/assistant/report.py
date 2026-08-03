@@ -41,7 +41,7 @@ from assistant.observe import duration_ms, percentile, time_by_tool
 from assistant.provenance import corpus_version, dataset_version, prompt_version
 from assistant.service import build_assistant
 from assistant.settings import Settings
-from assistant.usage import Usage
+from assistant.usage import Usage, take_last
 from assistant.usage import measure as measure_usage
 
 # The corpus and golden set are small on purpose: the point of the report is the
@@ -115,6 +115,11 @@ class Measured:
     tokens_in: int
     tokens_out: int
     runs: int
+    #: `counted`, `estimated`, or `mixed`. Beside the tokens rather than in the
+    #: prose, so the JSON the gate reads carries it too — a cost threshold set
+    #: against counted tokens means something different when the next run
+    #: estimates them.
+    tokens_source: str = "estimated"
     versions: dict[str, str] = field(default_factory=dict)
 
 
@@ -137,39 +142,62 @@ def versions_for(assistant: Assistant) -> dict[str, str]:
     }
 
 
-def run_evals(assistant: Assistant, meter: dict | None = None) -> evals.SuiteResult:
+def run_evals(
+    assistant: Assistant,
+    meter: dict | None = None,
+    judge: evals.Judge | None = None,
+) -> evals.SuiteResult:
     """Score the live service against the golden set, counting what it consumed.
 
     The token count is taken from the prompt the composer would build and the
     answer it produced, so the cost line describes THIS workload rather than a
-    guess about a similar one."""
+    guess about a similar one.
+
+    `judge` is a parameter because the release lane (`release.py`) scores the
+    same rows against the same service with RAGAS instead of lexical overlap.
+    One harness, two rulers, each named in its own report — rather than two
+    harnesses that will eventually disagree for a reason nobody can find."""
     meter = meter if meter is not None else {}
 
     def answer(question: str) -> tuple[str, list[str]]:
         response = assistant.ask(question)
         text, contexts = response["answer"], response.get("contexts", [])
-        used = measure_usage(
+        # What core.py already metered for this exchange — including the
+        # provider's own token counts when it reported them. Re-measuring here
+        # would rebuild a slightly different prompt and quietly overwrite a
+        # counted number with an estimated one. An abstention never composes, so
+        # there is nothing to take and the estimate stands in.
+        used = take_last() or measure_usage(
             composers.grounded_prompt(question, contexts, [], response.get("memories")),
             text,
         )
         meter["in"] = meter.get("in", 0) + used.tokens_in
         meter["out"] = meter.get("out", 0) + used.tokens_out
+        meter[used.source] = meter.get(used.source, 0) + 1
         return text, contexts
 
-    return run_suite(GOLDEN, answer, KeywordJudge())
+    return run_suite(GOLDEN, answer, judge or KeywordJudge())
 
 
-def eval_section(result: evals.SuiteResult) -> str:
+#: What the offline tier's scores were produced by. A heading and a paragraph,
+#: because the number and the instrument have to travel together — see
+#: `release.py` for the same section under a real judge.
+OFFLINE_JUDGE_NOTE = (
+    "Scored by the deterministic `KeywordJudge` — lexical overlap, honestly "
+    "named. The `abstention` slice is judged by string check (did it refuse), "
+    "which is the slice a support assistant is actually hired for. For "
+    "model-judged RAGAS numbers, run `make release-evidence`."
+)
+
+
+def eval_section(
+    result: evals.SuiteResult,
+    heading: str = "Eval scores (offline judge)",
+    note: str = OFFLINE_JUDGE_NOTE,
+) -> str:
     """Render the scored suite, per slice."""
     table = evals.format_table(result)
-    return (
-        "## Eval scores (offline judge)\n\n"
-        f"```\n{table}\n```\n\n"
-        "Scored by the deterministic `KeywordJudge` — lexical overlap, honestly "
-        "named. The `abstention` slice is judged by string check (did it refuse), "
-        "which is the slice a support assistant is actually hired for. For "
-        "model-judged RAGAS numbers, run the integration lane in `phase3-evals`.\n"
-    )
+    return f"## {heading}\n\n```\n{table}\n```\n\n{note}\n"
 
 
 def run_probes(assistant: Assistant) -> list[tuple[str, bool]]:
@@ -196,27 +224,53 @@ def render_probes(results: list[tuple[str, bool]]) -> tuple[str, bool]:
     body = (
         "## Red-team containment\n\n"
         "| probe | result |\n|---|---|\n" + "\n".join(rows) + "\n\n"
-        "Live probes against the running service, not fixture reads. The full "
-        "45-case versioned dataset lives in `phase6-design-defend/01-red-team`.\n"
+        # Counted, not typed. The sentence that said "45-case" was true when it
+        # was written and wrong by the next commit, because the dataset it
+        # described lives in another directory and grew there.
+        f"Live probes against the running service, not fixture reads — and {len(results)} "
+        "of them, which is a smoke test rather than a red team. The versioned "
+        "dataset lives in `phase6-design-defend/01-red-team`; `make "
+        "release-evidence` runs every row of it, benign controls included, "
+        "against the deployed stack.\n"
     )
     return body, all(contained for _, contained in results)
 
 
-def latency_section(assistant: Assistant) -> str:
-    """Percentiles read off the same spans /health counts — no extra timers."""
-    runs = [duration_ms(s) for s in assistant.rec.named("agent.run")]
+#: The agent loop: planning and tool calls, no composition. What the offline
+#: tier can honestly measure.
+AGENT_RUN_SPAN = "agent.run"
+
+OFFLINE_LATENCY_NOTE = (
+    "Offline tier, so these are pipeline-overhead numbers; run "
+    "`make release-evidence` against the composed stack for model-tier "
+    "percentiles."
+)
+
+
+def latency_section(
+    assistant: Assistant, note: str = OFFLINE_LATENCY_NOTE, span: str = AGENT_RUN_SPAN
+) -> str:
+    """Percentiles read off the same spans /health counts — no extra timers.
+
+    Which span is a real choice, so it is a parameter and it is printed. The
+    agent loop is what the offline tier has to measure — there is no model in it
+    — but on the deployed tier that span excludes composition, which is where
+    every second of a real answer goes. The release page quoted `agent.run` at a
+    tenth of a millisecond under the sentence "these include real model time".
+    Both halves were produced by this function; only the sentence was wrong."""
+    runs = [duration_ms(s) for s in assistant.rec.named(span)]
     p50, p95, p99 = (percentile(runs, p) for p in (50, 95, 99))
     per_tool = time_by_tool(assistant.rec.spans())
     tool_rows = "\n".join(f"| tool.{name} | {ms:.1f} |" for name, ms in sorted(per_tool.items()))
     return (
         "## Latency (from the spans)\n\n"
-        f"`agent.run` over {len(runs)} runs: "
+        f"`{span}` over {len(runs)} runs: "
         f"P50 {p50:.1f} ms · P95 {p95:.1f} ms · P99 {p99:.1f} ms\n\n"
         + ("| where the time went | total ms |\n|---|---|\n" + tool_rows + "\n\n"
            if per_tool else "")
-        + "Offline tier, so these are pipeline-overhead numbers; rerun against the "
-        "composed stack (`OLLAMA_HOST` set) for model-tier percentiles. The P99 is "
-        "the number the CI gate budgets — the tail confesses before the mean does.\n"
+        + note
+        + " The P99 is the number the CI gate budgets — the tail confesses "
+        "before the mean does.\n"
     )
 
 
@@ -228,17 +282,38 @@ def cost_usd(assistant: Assistant, tokens_in: int, tokens_out: int) -> float:
     return Usage(tokens_in, tokens_out).cost(assistant.settings.price_tier)
 
 
+#: How the tokens on a page were arrived at, said in the same breath as the
+#: number. `estimated` is not a disclaimer to be buried: a word count and a
+#: tokenizer differ by a third on ordinary English, and the gap is systematic.
+TOKEN_SOURCE_NOTE = {
+    "counted": "counted by the provider (`prompt_eval_count` / `eval_count`)",
+    "estimated": "**estimated** by word split — the provider reported no counts",
+    "mixed": "**part estimated**: some exchanges were counted by the provider "
+    "and some fell back to a word split",
+}
+
+
+def token_source(meter: dict) -> str:
+    """Which of the three the run earned. Anything unmetered reads as estimated,
+    because the safe direction for a claim about measurement is downward."""
+    counted, estimated = meter.get("counted", 0), meter.get("estimated", 0)
+    if counted and estimated:
+        return "mixed"
+    return "counted" if counted else "estimated"
+
+
 def cost_section(assistant: Assistant, measured: Measured) -> str:
     """The cost story, honestly told for the tier that ran."""
     tier = assistant.tier()
+    note = TOKEN_SOURCE_NOTE[measured.tokens_source]
     return (
         "## Cost\n\n"
         f"Composer tier: `{tier['brain']}`, priced against the "
         f"`{assistant.settings.price_tier}` list: "
         f"**${measured.cost_usd:.4f}** for {measured.tokens_in:,} tokens in and "
-        f"{measured.tokens_out:,} out across {measured.runs} runs. Self-hosted "
+        f"{measured.tokens_out:,} out across {measured.runs} runs, {note}. Self-hosted "
         "generation has no per-token invoice, so the honest number here is zero — "
-        "but the tokens are counted either way, which is the difference between a "
+        "but the tokens are metered either way, which is the difference between a "
         "cost gate and a comforting sentence. Point the composer at a paid API, "
         "set `ASSISTANT_PRICE_TIER`, and the same measurement becomes a bill the "
         "CI gate blocks on before it reaches the invoice.\n"
@@ -253,6 +328,35 @@ def decisions_section() -> str:
         "Full context and consequences in the ADRs; architecture and data-flow "
         "diagrams in `ARCHITECTURE.md`; threats and mitigations in "
         "`THREAT-MODEL.md`; incident procedures in `RUNBOOK.md`.\n"
+    )
+
+
+def provenance(assistant: Assistant, tokens: str = "estimated") -> str:
+    """What this page measured, stated before the first number rather than after
+    the last one.
+
+    The failure this prevents is not a wrong number — every number below is
+    correct for what it measured. It is a number quoted somewhere else without
+    its instrument: "faithfulness 0.94" reads like a RAGAS score, and this one is
+    lexical overlap against an in-memory retriever. `release.py` prints the same
+    kind of block for the deployed stack, and the two are meant to be read side
+    by side.
+    """
+    tier = assistant.tier()
+    return (
+        "> **Provenance — offline proxy.** Retrieval `{rag}`, composer `{brain}`, "
+        "judged by the lexical `KeywordJudge`, {golden} golden rows and "
+        "{probes} containment probes, tokens {tokens}. Every number "
+        "on this page is a proxy measured in one second with no services running. "
+        "The full-fidelity equivalent — Qdrant with the semantic embedder and "
+        "reranking, a RAGAS judge, the whole Phase 6 dataset — is `make "
+        "release-evidence`, and it is the one a release quotes.\n"
+    ).format(
+        rag=tier["rag"],
+        brain=tier["brain"],
+        golden=len(GOLDEN),
+        probes=len(REDTEAM_PROBES),
+        tokens=TOKEN_SOURCE_NOTE[tokens],
     )
 
 
@@ -281,6 +385,7 @@ def measure(assistant: Assistant | None = None) -> tuple[str, Measured]:
         tokens_in=tokens_in,
         tokens_out=tokens_out,
         runs=len(runs),
+        tokens_source=token_source(meter),
         versions=versions_for(assistant),
     )
 
@@ -296,7 +401,8 @@ def measure(assistant: Assistant | None = None) -> tuple[str, Measured]:
         "One command reproduces every number on this page: `make report` in "
         "`workshops/assistant/after`. Nothing below is hand-written — and the same "
         "run writes `evals/report.json`, which is what the merge gate reads, so the "
-        "page a human believes and the numbers CI enforces cannot drift apart.\n"
+        "page a human believes and the numbers CI enforces cannot drift apart.\n\n"
+        + provenance(assistant, measured.tokens_source)
     )
     page = "\n".join([
         header, eval_section(suite), redteam_md,
@@ -335,12 +441,12 @@ def main() -> int:
     Path(args.out).write_text(page)
     json_path = Path(args.json)
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(_dump(measured))
+    json_path.write_text(dump(measured))
     print(f"wrote {args.out} and {json_path}")
     return 0 if "CONTAINMENT FAILURE" not in page else 1
 
 
-def _dump(measured: Measured) -> str:
+def dump(measured: Measured) -> str:
     """Pretty, sorted, newline-terminated — a report a human can diff between two
     runs without the diff being about key order."""
     return json.dumps(asdict(measured), indent=2, sort_keys=True) + "\n"

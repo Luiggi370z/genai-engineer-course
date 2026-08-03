@@ -5,7 +5,7 @@ fused server-side by Qdrant, then a cross-encoder rerank on top. You implement
 no algorithms; you pick and connect libraries, which is the actual job.
 **Prerequisite.** 2.1 Eval harness (you saw that the exact-match slice is where
 retrieval fails — this lesson is the fix).
-**Effort.** ~50 min · moderate.
+**Effort.** ~50 min to green on the fast tests · +25 min for the integration tier · ~85 min realistic first pass.
 
 ## Do this
 

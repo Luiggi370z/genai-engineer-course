@@ -6,7 +6,7 @@ Not "which framework is best" — which one your constraint picks, and which
 dimensions your test was too small to decide.
 **Prerequisite.** 4.3 Human-in-the-loop (you've hand-rolled what LangGraph's
 checkpointer automates).
-**Effort.** ~75 min · moderate
+**Effort.** ~60 min to green on the fast tests · +45 min for the integration tier · ~2.5 h realistic first pass.
 
 ## Do this
 
@@ -76,12 +76,19 @@ for free, what you still have to build) belong to the framework.
 CrewAI needs **Python 3.12** and a model **on the host** — Ollama serving
 `qwen3.5:9b` at `localhost:11434`.
 
-On a newer interpreter it dies inside Chroma's Pydantic v1 shim with `unable to
-infer type for attribute "chroma_server_nofile"`. That is a Python version
-bound wearing a CrewAI bug's clothes, and the test skips with that message
-rather than letting you chase it. A model pulled inside a Docker volume is
-likewise not reachable from a host-run test.
+The interpreter bound is handled for you, in the only place that can be trusted
+to hold: this lesson pins `requires-python = ">=3.12,<3.13"`, so `make setup`
+fetches a 3.12 and builds the venv on it, and `tests/conftest.py` refuses to
+collect on anything else with a sentence that names the interpreter. Everywhere
+else the course is 3.11+; this is the one lesson that is not, and it says so
+loudly rather than failing obscurely.
 
-Both skips are data. LangGraph and Pydantic AI run offline on any supported
-Python; CrewAI constrains your interpreter and needs a live model to test at
+What it protects you from: on 3.13 CrewAI dies inside Chroma's Pydantic v1 shim
+with `unable to infer type for attribute "chroma_server_nofile"` — a Python
+version bound wearing a CrewAI bug's clothes, three libraries deep from anything
+you wrote.
+
+The model is the remaining skip, and it is data: a model pulled inside a Docker
+volume is not reachable from a host-run test. LangGraph and Pydantic AI run
+offline; CrewAI constrains your interpreter *and* needs a live model to test at
 all — that belongs in the observability row of your matrix.

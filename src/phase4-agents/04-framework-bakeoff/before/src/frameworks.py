@@ -18,9 +18,16 @@ service.
 
 ## The TODOs
 
-1. `langgraph_run` — a two-node graph (look up → answer) compiled with a
-   `MemorySaver`, invoked with a `thread_id`, and then *asked* whether its state
-   survived. Do not hardcode `resumable=True`; read it back with `get_state`.
+1. `_langgraph_app` + `langgraph_run` — a two-node graph (look up → answer)
+   compiled with whatever checkpointer it is handed, invoked with a `thread_id`,
+   and then *asked* whether its state survived.
+
+   Do not hardcode `resumable=True`, and do not ask the app that just ran. That
+   was the first version of this lesson and it measured nothing: an app holding
+   its own `MemorySaver` remembers the call it just made, always, whatever the
+   framework is. Build a SECOND app over the SAME checkpointer and ask that one.
+   Splitting the graph construction into `_langgraph_app` is what makes that
+   possible, which is why it is a separate function.
 2. `pydantic_ai_run` — one `Agent` with a registered tool and a `BaseModel`
    output type. Drive it with `TestModel` so it runs offline.
 3. `crewai_run` — one `Agent` with the same tool, one `Task`, one `Crew`.
@@ -79,14 +86,34 @@ class Run:
     tool_calls: tuple[str, ...]
     #: Did the framework leave state behind that a second invocation can read?
     #: Measure it. Do not quote the README.
+    #: Did the framework leave state behind that something OTHER than the object
+    #: that produced it can read back? Measured by asking, not by trusting the
+    #: README — and the "other object" part is what makes the answer mean
+    #: anything. An agent that remembers its own last call is not durable.
     resumable: bool
 
     def used_the_tool(self) -> bool:
         return bool(self.tool_calls)
 
 
-def langgraph_run(topic: str = TOPIC, thread: str = "bakeoff") -> Run:
-    raise NotImplementedError  # TODO 1
+def _langgraph_app(checkpointer, recorder: Recorder):
+    """TODO 1a: build and compile the two-node graph against `checkpointer`.
+
+    Separate from `langgraph_run` so the measurement there can build a second
+    app over the same store. That is the only way to tell "this object still
+    remembers" apart from "the state outlived the object".
+    """
+    raise NotImplementedError  # TODO 1a
+
+
+def langgraph_run(topic: str = TOPIC, thread: str = "bakeoff", checkpointer=None) -> Run:
+    """TODO 1b: run it on `thread`, then measure `resumable` from outside.
+
+    Default the checkpointer to a `MemorySaver` when none is passed. Take the
+    reading from a second `_langgraph_app` over the same one — not from the app
+    that just ran.
+    """
+    raise NotImplementedError  # TODO 1b
 
 
 def pydantic_ai_run(topic: str = TOPIC) -> Run:

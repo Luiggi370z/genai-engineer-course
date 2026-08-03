@@ -9,6 +9,7 @@ code against a real model.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 from pydantic import BaseModel, Field, ValidationError
@@ -80,10 +81,84 @@ def violation_rate(texts: list[str], violations: list[str]) -> float:
     """Share of cases that never produced a valid object. Lower is better.
 
     Note what this does *not* measure: whether the fields are right. A model can
-    hit a 0% violation rate and still invent every total. That gap is why Phase 3
-    exists — validity is a type check, accuracy is an eval.
+    hit a 0% violation rate and still invent every total. That is what
+    `field_accuracy` is for, and the gap between the two numbers is the whole
+    finding of the shoot-out.
     """
     return len(violations) / len(texts) if texts else 0.0
+
+
+def field_accuracy(
+    got: Sequence[Invoice | None], expected: Sequence[Invoice]
+) -> dict[str, float]:
+    """Share correct per field — the other half of the shoot-out.
+
+    The exercise asks you to compare a frontier model against the one on your
+    laptop, and a violation rate cannot answer that: constrained decoding takes
+    both to roughly zero, so the interesting difference lives entirely in whether
+    the values are right. Per field rather than one average, because they fail
+    differently — `vendor` is copied out of the text, `total` has to be read off
+    the right line, and `date` has to be reformatted, which is where a small
+    model loses. Averaging the three hides the one you would have tiered on.
+
+    Totals compare within a cent: a float that came back from JSON is not going
+    to be bit-identical, and treating `4231.5` and `4231.50` as different answers
+    would measure the parser rather than the model.
+
+    `got` is positional and may carry `None` where the provider produced nothing.
+    A hole rather than a shorter list, because dropping the failures would slide
+    every later answer onto the wrong expected row and score a model as wrong
+    about invoices it read correctly.
+    """
+    fields = list(Invoice.model_fields)
+    if not expected:
+        return dict.fromkeys(fields, 0.0)
+    scores = {}
+    for field in fields:
+        hits = sum(
+            1
+            for want, have in zip(expected, got, strict=False)
+            if have is not None and _same(getattr(want, field), getattr(have, field))
+        )
+        scores[field] = hits / len(expected)
+    return scores
+
+
+def _same(want: Any, have: Any) -> bool:
+    if isinstance(want, float) and isinstance(have, float):
+        return abs(want - have) < 0.01
+    return str(want).strip().casefold() == str(have).strip().casefold()
+
+
+def compare_providers(
+    texts: list[str],
+    expected: list[Invoice],
+    clients: dict[str, Extractor],
+    model: str = "qwen3.5:9b",
+) -> dict[str, dict[str, float]]:
+    """One row per provider: violation rate, then accuracy per field.
+
+    Parameterized by client rather than by provider name so the offline tier can
+    run the identical comparison against fakes — the shoot-out is a measurement
+    procedure, and a procedure you can only run with two API keys is one you
+    cannot test. Point it at `build_client("gpt")` and `build_client("local")`
+    and it is the exercise.
+    """
+    rows = {}
+    for name, client in clients.items():
+        got: list[Invoice | None] = []
+        violations: list[str] = []
+        for text in texts:
+            try:
+                got.append(extract_invoice(text, client, model=model))
+            except (ValidationError, ValueError) as exc:
+                got.append(None)
+                violations.append(f"{text[:40]}… → {type(exc).__name__}")
+        rows[name] = {
+            "violation_rate": violation_rate(texts, violations),
+            **field_accuracy(got, expected),
+        }
+    return rows
 
 
 if __name__ == "__main__":

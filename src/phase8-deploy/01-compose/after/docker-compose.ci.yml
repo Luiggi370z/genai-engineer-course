@@ -1,0 +1,59 @@
+# The CI overlay: the same stack, wired the same way, with a model small enough
+# for a hosted runner to actually finish a generation.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ci.yml up --build
+#   ../../../verify-e2e.sh --model qwen3.5:1.7b
+#
+# What this lane proves and what it does not, stated up front because a green
+# check that measured something other than what its name says is worse than no
+# check. GitHub's ubuntu-latest runner is four CPU cores and no GPU. The course
+# model is a 9B, measured at 0.52 tokens/second on CPU inside Docker Desktop
+# against a 60-second composer budget — so on a hosted runner every answer would
+# come from the offline fallback and the run would take hours to tell you so.
+#
+# Swapping in a 1.7B changes what the numbers mean and nothing about the wiring:
+# retrieval still goes through Qdrant with a real embedder, the gate still signs
+# and verifies every request, tools are still discovered over MCP and still gated,
+# spans still leave the process. Those are the properties this lane is for. Answer
+# QUALITY is not one of them — a 1.7B writes worse answers than a 9B and that is
+# not a regression this workflow can detect. The full-fidelity claim is
+# `verify-e2e.sh` on a machine with the disk and the patience for the real model.
+#
+# The embedder is unchanged: `nomic-embed-text` is ~270 MB and runs in
+# milliseconds, so there is no reason to weaken the one component whose behaviour
+# the semantic-recall check in check 4 actually depends on.
+services:
+  assistant:
+    environment:
+      # settings.py reads this; the base stack leaves it at the 9B default.
+      OLLAMA_MODEL: ${CI_CHAT_MODEL:-qwen3.5:1.7b}
+      # A small model is a slower thinker per token but a much faster one per
+      # answer; the real reason to raise this is that a shared runner's CPU is
+      # contended in ways a laptop's is not.
+      REQUEST_DEADLINE_SECONDS: "180"
+
+  ollama:
+    # `!override` because the base command pulls and warms the 9B by name. Adding
+    # to it rather than replacing it would download six gigabytes this lane never
+    # uses, on a runner with a disk quota.
+    command: !override
+      - |
+        ollama serve &
+        sleep 2
+        ollama pull ${CI_CHAT_MODEL:-qwen3.5:1.7b}
+        ollama pull nomic-embed-text
+        ollama run ${CI_CHAT_MODEL:-qwen3.5:1.7b} "ok" >/dev/null 2>&1
+        touch /tmp/warm
+        wait
+    # The 9B's headroom is the reason the base file asks for 12 GB, which is more
+    # than a hosted runner has to spare.
+    mem_limit: 6g
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -f /tmp/warm && ollama list | grep -q nomic-embed-text",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 90

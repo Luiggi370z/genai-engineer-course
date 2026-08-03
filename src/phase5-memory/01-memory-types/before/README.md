@@ -4,7 +4,7 @@
 collection, namespaced by `(user, kind)` in the payload, with a `forget` that
 actually forgets — on the retrieval stack you already built in Phase 2.
 **Prerequisite.** Phase 2 (you have written to and searched a Qdrant collection).
-**Effort.** ~75 min · involved.
+**Effort.** ~75 min to green on the fast tests · +20 min for the integration tier · ~2 h realistic first pass.
 
 ## Do this
 

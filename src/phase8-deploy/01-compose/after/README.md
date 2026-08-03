@@ -78,5 +78,20 @@ Two things follow, and only one of them is about speed:
 
 - The self-contained lane stays the **default**, for CI and for anyone cloning this repo, because "one command, nothing installed, no keys" is a claim `verify-e2e.sh`'s first check exists to prove — and a lane that needs a host daemon and a pre-pulled model cannot make it. This overlay is the local shortcut, and both lanes print which one is running.
 - If your production plan is "containerised model on a VM without a GPU", that 0.52 tokens/second is your latency budget, not a laptop artifact. Either give the container the accelerator, call a model over the network, or design for the number you actually have.
+- Timeouts are part of that budget, and the base file now says so: `COMPOSE_TIMEOUT_SECONDS: "900"`. The library default of 60 seconds is a GPU's number. At half a token per second every composition blew through it, the offline stitcher answered, and the end-to-end run failed on a stack that was working exactly as configured — the timeout was the only thing wrong, and it was compiled into a library rather than declared next to the deployment it described. The host-model overlay sets it back to 60, because with Metal underneath, a minute without an answer is a fault rather than a slow day.
 
 The overlay is also the smallest honest example of `!override`: the base file makes the assistant wait for the `ollama` service to report healthy, so without replacing that list the stack would wait forever for a container this overlay just turned off.
+
+## CI overlay (what a hosted runner can honestly measure)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ci.yml up --build
+../../../verify-e2e.sh --ci             # the nightly workflow's exact lane
+../../../verify-e2e.sh --model TAG      # the same, with a tag you choose
+```
+
+`docker-compose.ci.yml` swaps the chat model for a 1.7B and leaves everything else alone. The reason is the number above: a GitHub runner is four CPU cores with no GPU, so the 9B would miss the composer's budget on every request and the whole run would report the fallback tier's behaviour under the model's name.
+
+This is the part worth taking with you. A cheap lane is only worth having if it is **labelled by what it measures**, and the labelling has to survive being quoted out of context — a green check gets pasted into a pull request without its workflow name attached. So the model tag is registered in `app/src/data/reference.ts` as a `ci`-tier entry with the exact list of files allowed to name it, `check-claims` fails if it appears anywhere else, the workflow is called `e2e (wiring, small model)`, and the script prints its lane twice: once before check 1 and once under the final count.
+
+What the small model still proves is most of the suite: the stack boots and passes its own healthchecks, the gate refuses unauthenticated and under-scoped calls, retrieval is hybrid over Qdrant with the real embedder (unchanged — `nomic-embed-text` is small and fast, and weakening it would gut check 4's semantic-recall assertion), injections are refused in four spellings, a gated tool pauses and runs once for the approver only, retries replay, discovered tools obey local policy, memory stays partitioned, spans reach the collector, state survives a restart. What it cannot prove is answer quality; that is the unqualified `./verify-e2e.sh`, and `docs/RELEASE-CHECKLIST.md` makes it a precondition for publishing.

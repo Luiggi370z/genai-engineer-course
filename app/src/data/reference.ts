@@ -193,6 +193,15 @@ export interface CourseModel {
   /** Which `HARDWARE` row you need before it is comfortable. */
   needs: string;
   what: string;
+  /**
+   * `course` is what every lesson runs. `ci` is a deliberate, registered
+   * exception for a lane that cannot run the course model — declared here so it
+   * is a decision with a reason attached rather than a second tag that appeared
+   * in a compose file one day.
+   */
+  tier?: "course" | "ci";
+  /** For `ci` entries: the only files allowed to name this tag. */
+  onlyIn?: string[];
 }
 
 /**
@@ -219,9 +228,9 @@ export const MODELS: CourseModel[] = [
   },
   {
     role: "rerank",
-    tag: "BAAI/bge-reranker-v2-m3",
+    tag: "BAAI/bge-reranker-base",
     needs: "~8 GB",
-    what: "Cross-encoder rerank, ~90 MB of ONNX weights on first run",
+    what: "Cross-encoder rerank, ~1 GB of ONNX weights on first run",
   },
   {
     role: "judge",
@@ -235,10 +244,28 @@ export const MODELS: CourseModel[] = [
     needs: "16 GB",
     what: "The Phase 6 guard model that screens input and output",
   },
+  {
+    role: "chat",
+    tier: "ci",
+    tag: "qwen3.5:1.7b",
+    needs: "hosted runner (4 vCPU, no GPU)",
+    what:
+      "The scheduled E2E lane only. A hosted runner cannot finish a 9B CPU " +
+      "generation inside the composer's budget, so that lane proves the wiring " +
+      "with a small model and says so in its name. Answer quality is not " +
+      "measured there — see docker-compose.ci.yml",
+    onlyIn: [
+      "src/phase8-deploy/01-compose/after/docker-compose.ci.yml",
+      "src/verify-e2e.sh",
+      ".github/workflows/e2e.yml",
+      "app/src/data/reference.ts",
+    ],
+  },
 ];
 
+/** The tag every lesson uses. CI-tier entries are exceptions, never defaults. */
 export function modelFor(role: ModelRole): CourseModel {
-  const found = MODELS.find((m) => m.role === role);
+  const found = MODELS.find((m) => m.role === role && (m.tier ?? "course") === "course");
   if (!found) throw new Error(`no canonical model for role ${role}`);
   return found;
 }

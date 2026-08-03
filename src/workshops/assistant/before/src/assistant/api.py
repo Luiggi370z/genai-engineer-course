@@ -2,7 +2,7 @@
 
 `create_app` builds the FastAPI app around an assembled Assistant: the load-
 shedding middleware at the door, the optional Bearer-JWT dependency on every
-mutating route, and the four endpoints (/health, /ingest, /ask + /ask/stream,
+mutating route, and the endpoints (/health + /ready, /ingest, /ask + /ask/stream,
 /approve). No business logic lives here — the routes translate HTTP in and out
 of `Assistant` calls, which is why the whole surface is testable with a
 TestClient and no network.
@@ -25,9 +25,10 @@ Reference: ../../after/src/assistant/api.py.
 from __future__ import annotations
 
 from collections.abc import Callable
+from threading import Thread
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -65,6 +66,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.assistant = assistant
     s = assistant.settings
 
+    # --- readiness, resolved off the request path -------------------------------
+    # A cold 9B model takes minutes to load and the composer budget is 60 seconds,
+    # so "the process started" and "the next request will succeed" are different
+    # facts. Warming in a thread keeps startup fast and moves the wait to /ready,
+    # where an orchestrator is already looking. The offline tier has nothing to
+    # load, so it answers immediately rather than making every test wait a tick.
+    app.state.ready, app.state.ready_detail = False, "warming up"
+
+    def warm_up() -> None:
+        app.state.ready, app.state.ready_detail = assistant.warm()
+
+    if s.ollama_host:
+        Thread(target=warm_up, name="warmup", daemon=True).start()
+    else:
+        warm_up()
+
     # --- load shedding: refuse politely at the door, don't fall over inside ------
     bucket = (
         TokenBucket(rate=s.rate_limit_rps, burst=s.rate_limit_burst)
@@ -76,7 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def throttle(request: Request, call_next):
-        if request.url.path != "/health":  # probes must never be shed
+        if request.url.path not in ("/health", "/ready"):  # probes must never be shed
             if bucket is not None and not bucket.take():
                 return JSONResponse({"detail": "rate limit exceeded"}, status_code=429)
             if cap is not None and not cap.enter():
@@ -192,7 +209,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "tier": assistant.tier(),
             "degraded": assistant.degraded,
             "spans_recorded": len(assistant.rec.spans()),
+            # Liveness says the process is up; this says the model tier can
+            # actually finish a request. They are different questions and used
+            # to have one answer — see /ready.
+            "ready": app.state.ready,
         }
+
+    @app.get("/ready")
+    def ready(response: Response) -> dict:
+        """Readiness, separated from liveness because they fail differently.
+
+        A container that is up but cannot complete a request inside its budget
+        should not receive traffic, and should not report itself ready to the
+        orchestrator that decides whether the rollout succeeded. The stack used
+        to conflate the two: compose called ollama healthy once the models were
+        *downloaded*, the assistant came up, `/health` said ok, and the first
+        real question timed out on a cold model and was answered by the offline
+        fallback. Every probe was green and the answer was wrong.
+
+        503 until proven otherwise, because the failure mode of guessing wrong
+        in the other direction is silent.
+        """
+        if not app.state.ready:
+            response.status_code = 503
+        return {"ready": app.state.ready, "detail": app.state.ready_detail}
 
     def once(subject: str, operation_name: str, key: str | None, work) -> dict:
         """TODO 3: run a side effect at most once per (subject, operation, key).

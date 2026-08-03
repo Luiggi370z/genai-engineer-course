@@ -1,5 +1,7 @@
 # Workshop · Memory + research crew  (ends Phase 5)
 
+**Effort.** ~3 h of focused build time · +30 min for the integration tier · ~6 h realistic first pass.
+
 The assistant currently starts every session as a stranger and does every job on the
 frontier model. This layer adds the two things that make it feel like software: **memory
 with an expiry date** and **delegation with a receipt**.

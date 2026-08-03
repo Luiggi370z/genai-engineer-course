@@ -151,7 +151,12 @@ test("an exercise with no solution notes and a workshop with no deliverables fai
       deliverables: [],
     },
   });
-  assert.deepEqual(phaseRules(noDeliverables), ["empty-content"]);
+  // Filtered because this workshop also names no brief, which is a different
+  // rule with its own test.
+  assert.deepEqual(
+    phaseRules(noDeliverables).filter((r) => r !== "workshop-doc"),
+    ["empty-content"],
+  );
 });
 
 test("an elective without a trigger fails — that is the whole contract", () => {
@@ -358,4 +363,102 @@ test("a tier outside the two is rejected", () => {
 
 test("a workshop with no stretch tier fails", () => {
   assert.ok(tierRules(tiered({ stretch: [] })).includes("workshop-tiers"));
+});
+
+/** An exercise pointing at a lesson, plus the README line that agrees with it. */
+const withEffort = (effort, line) => ({
+  phases: [
+    sound({
+      exercises: [
+        {
+          id: "px-e1",
+          title: "Do it",
+          task: "t",
+          rung: "faded",
+          assesses: ["px-o1"],
+          solution: ["s"],
+          repo: "phase-01/lesson-1.1",
+          ...(effort ? { effort } : {}),
+        },
+      ],
+    }),
+  ],
+  effortLineOf: () => line,
+});
+
+test("the workbook's effort estimate has to be the lesson's effort estimate", () => {
+  // The drift this rule exists to catch: someone edits the README to say 50
+  // minutes and the card keeps promising 25, or the reverse. Neither number is
+  // checkable by a reader, so the build checks it.
+  const drifted = withEffort(
+    { fast: 25, integration: 15, realistic: 45 },
+    "**Effort.** ~50 min to green on the fast tests · +15 min for the integration tier · ~45 min realistic first pass.",
+  );
+  const found = audit(drifted).errors.find((e) => e.rule === "effort-matches-lesson");
+  assert.ok(found);
+  assert.match(found.message, /~25 min/);
+});
+
+test("agreeing estimates pass", () => {
+  const agreed = withEffort(
+    { fast: 25, integration: 15, realistic: 45 },
+    "**Effort.** ~25 min to green on the fast tests · +15 min for the integration tier · ~45 min realistic first pass.",
+  );
+  assert.deepEqual(audit(agreed).errors, []);
+});
+
+test("a lesson whose card promises no time at all is the same failure", () => {
+  // Silence reads as "this is quick". It is the estimate a learner acts on, so
+  // an absent one is a claim too.
+  const silent = withEffort(
+    null,
+    "**Effort.** ~25 min to green on the fast tests · no integration tier · ~45 min realistic first pass.",
+  );
+  assert.ok(rules(silent).includes("effort-matches-lesson"));
+});
+
+test("a README that lost its effort line is caught, not ignored", () => {
+  const stripped = withEffort({ fast: 25, integration: null, realistic: 45 }, "");
+  assert.ok(rules(stripped).includes("effort-matches-lesson"));
+});
+
+test("an exercise pointing at something that is not a lesson is not asked for an estimate", () => {
+  // Two exercises hand out a worksheet and a résumé template. There is no
+  // before/README.md to agree with, so demanding one would be noise.
+  const worksheet = { ...withEffort(null, null) };
+  assert.deepEqual(audit(worksheet).errors, []);
+});
+
+test("a workshop is held to its brief's estimate in workshop language", () => {
+  // A workshop has no "fast tests" to go green, so the two renderings differ on
+  // purpose — and the gate is what keeps the difference from becoming drift.
+  const workshop = tiered({
+    repo: "workshops/assistant",
+    doc: "WORKSHOP-RAG-SERVICE.md",
+    effort: { fast: 120, integration: 60, realistic: 240 },
+  });
+  const input = { phases: [sound({ workshop })], effortLineOf: () => "" };
+  const found = audit(input).errors.find((e) => e.rule === "effort-matches-lesson");
+  assert.ok(found);
+  assert.match(found.message, /of focused build time/);
+  // And hours, because "~240 min" is a number you have to convert before you
+  // can decide whether you have the afternoon.
+  assert.match(found.message, /~4 h realistic/);
+
+  const agreed = {
+    phases: [sound({ workshop })],
+    effortLineOf: () =>
+      "**Effort.** ~2 h of focused build time · +60 min for the integration tier · ~4 h realistic first pass.",
+  };
+  assert.deepEqual(audit(agreed).errors, []);
+});
+
+test("a workshop pointing at a brief that is not there is caught", () => {
+  const workshop = tiered({
+    repo: "workshops/assistant",
+    doc: "WORKSHOP-GHOST.md",
+    effort: { fast: 120, integration: null, realistic: 240 },
+  });
+  const rulesFound = rules({ phases: [sound({ workshop })], effortLineOf: () => null });
+  assert.ok(rulesFound.includes("workshop-doc"));
 });

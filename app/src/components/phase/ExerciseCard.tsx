@@ -4,6 +4,7 @@ import Tick02Icon from "@hugeicons/core-free-icons/Tick02Icon";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { useState } from "react";
 import type { Exercise } from "../../data/types";
+import { formatEffort, summarizeEffort } from "../../lib/effort";
 import { InlineText } from "../../lib/markdown";
 import { CodeBlock } from "../blocks/CodeBlock";
 
@@ -52,7 +53,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
               {exercise.title}
             </h3>
             <span
-              className="rounded px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide"
+              className="rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide"
               style={
                 blank
                   ? { background: accent, color: "#fff" }
@@ -69,7 +70,7 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
                 actually demonstrates — a blank-editor task can still only prove
                 you can build in isolation. */}
             <span
-              className="rounded border border-line px-1.5 py-0.5 font-mono text-[9.5px] uppercase tracking-wide text-graphite"
+              className="rounded border border-line px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wide text-graphite"
               title="What finishing this demonstrates: understand → implement → integrate → operate"
             >
               proves {exercise.proves}
@@ -79,14 +80,24 @@ export function ExerciseCard({ exercise, index, done, onToggle, accent }: Exerci
             <InlineText text={exercise.task} />
           </p>
           {exercise.repo && (
-            <div className="mt-1.5 font-mono text-[10.5px] text-graphite">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[11px] text-graphite">
               <span className="rounded border border-line bg-ink/[0.03] px-1.5 py-0.5">
                 repo: {exercise.repo}
               </span>
+              {/* The estimate the lesson itself claims — the integrity gate
+                  fails the build if these two ever disagree. */}
+              {exercise.effort && (
+                <span
+                  className="rounded border border-line px-1.5 py-0.5"
+                  title={formatEffort(exercise.effort)}
+                >
+                  {summarizeEffort(exercise.effort)}
+                </span>
+              )}
             </div>
           )}
           {blank && (
-            <div className="mt-1.5 font-mono text-[10.5px] text-graphite">
+            <div className="mt-1.5 font-mono text-[11px] text-graphite">
               <span className="rounded border border-dashed border-line px-1.5 py-0.5">
                 no repo — new directory, uv init, nothing else
               </span>

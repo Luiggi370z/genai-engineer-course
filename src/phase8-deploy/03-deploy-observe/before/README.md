@@ -9,7 +9,7 @@ by name, a smoke check that proves the *right* code is serving, and a rollback t
 knows when it cannot help.
 **Prerequisite.** 1.2 Token & cost meter — the token and dollar numbers you attach
 to each span come from there.
-**Effort.** ~90 min · moderate.
+**Effort.** ~2 h to green on the fast tests · no integration tier · ~3 h realistic first pass.
 
 ## Do this
 

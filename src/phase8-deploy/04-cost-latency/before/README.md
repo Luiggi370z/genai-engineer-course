@@ -6,7 +6,7 @@ the cost per request, or the eval score, never reporting a saving without the
 quality number next to it.
 **Prerequisite.** 8.3 Deploy & observe — the percentile and spend-by-tier thinking
 comes straight from there.
-**Effort.** ~90 min · involved.
+**Effort.** ~90 min to green on the fast tests · +30 min for the integration tier · ~2.5 h realistic first pass.
 
 ## Do this
 

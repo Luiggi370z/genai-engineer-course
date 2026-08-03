@@ -49,12 +49,21 @@ def _normalise(text: str) -> set[str]:
 
 
 def build_server() -> Any:
-    """Build (not run) the MCP server so tests can drive it in-memory."""
+    """Build (not run) the MCP server so tests can drive it in-memory.
+
+    Every tool here is annotated `read_only_hint=True`, which is true and which
+    the client is right not to take our word for. The annotations exist so the
+    propagation path is real end to end; what ungates a tool on the other side
+    is the operator's `ASSISTANT_MCP_READONLY_ALLOWLIST`, and a server saying
+    nice things about itself is not on it.
+    """
     from mcp.server import MCPServer
+    from mcp.types import ToolAnnotations
 
     mcp = MCPServer("assistant-knowledge")
+    READ = ToolAnnotations(read_only_hint=True, destructive_hint=False)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ)
     def lookup_fact(topic: str) -> dict:
         """Look up a company fact by topic. Use for policy/how-does-X questions.
 
@@ -63,12 +72,12 @@ def build_server() -> Any:
         """
         return _lookup_fact(topic)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ)
     def list_topics() -> list[str]:
         """List the topics this knowledge server can answer. Use to discover scope."""
         return sorted(_FACTS)
 
-    @mcp.tool()
+    @mcp.tool(annotations=READ)
     def word_count(text: str) -> dict:
         """Count the words in a piece of text. A safe, read-only utility tool."""
         return {"words": len(text.split())}

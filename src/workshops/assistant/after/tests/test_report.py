@@ -152,3 +152,74 @@ def test_a_breach_cannot_pass_silently():
     body, contained = redteam_section(sabotaged)
     assert contained is False
     assert "**BREACHED**" in body
+
+
+def test_the_offline_page_says_its_tokens_are_estimated(page, measured):
+    """The offline composer reports nothing, so the numbers are a word count.
+
+    Printed with a dollar sign beside them, an estimate and an invoice look
+    identical — which is how "cost: $0.0000 for 300 tokens" gets quoted as a
+    measurement. The page has to say which one it is, and the JSON has to carry
+    it too, because the gate reads the JSON.
+    """
+    assert measured[1].tokens_source == "estimated"
+    assert "**estimated** by word split" in page
+
+
+def test_provider_counts_win_over_the_word_split():
+    """What the provider will invoice beats what we guessed it would.
+
+    Ollama returns `prompt_eval_count` and `eval_count` on every completion and
+    the adapter forwards them into the meter. They are not close to a word split
+    — a tokenizer splits punctuation and subwords — so preferring them is the
+    difference between a cost gate and a plausible-looking number.
+    """
+    from assistant import usage
+
+    usage.take_last()
+    usage.report(tokens_in=1234, tokens_out=56)
+    used = usage.measure("three words here", "one")
+    assert (used.tokens_in, used.tokens_out) == (1234, 56)
+    assert used.source == "counted"
+
+
+def test_a_count_is_used_once_and_never_inherited():
+    """The failure a stale count causes is silent: the next exchange bills the
+    previous one's tokens and every number stays plausible."""
+    from assistant import usage
+
+    usage.take_last()
+    usage.report(tokens_in=99, tokens_out=99)
+    usage.measure("a", "b")
+    second = usage.measure("some words in a prompt", "and an answer")
+    assert second.source == "estimated"
+    assert second.tokens_in != 99
+
+
+def test_a_half_reported_response_is_not_half_counted():
+    """One count without the other is not a measurement, so the adapter reports
+    neither and the estimate stands in, labelled."""
+    from assistant import usage
+    from assistant.adapters import _report_usage
+
+    usage.take_last()
+    usage.take_reported()
+    _report_usage({"response": "hi", "eval_count": 12})
+    assert usage.take_reported() is None
+
+    _report_usage({"response": "hi", "prompt_eval_count": 30, "eval_count": 12})
+    reported = usage.take_reported()
+    assert reported is not None
+    assert (reported.tokens_in, reported.tokens_out) == (30, 12)
+
+
+def test_the_source_travels_with_the_number_onto_the_span():
+    """A cost attribute looks the same either way; the span says which it is."""
+    from assistant import observe
+
+    assistant = build_assistant(Settings())
+    assistant.rag.add(["Refunds are processed within 5 business days."])
+    assistant.ask("How long do refunds take?")
+    compose = [s for s in assistant.rec.spans() if s.name == observe.COMPOSE_SPAN]
+    assert compose, "no compose span was recorded"
+    assert compose[-1].attributes[observe.TOKENS_SOURCE] == "estimated"

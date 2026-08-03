@@ -2,7 +2,7 @@
 
 **Goal.** Build the checks that make an eval dataset defensible — slice coverage, near-duplicate and leakage detection, provenance — then use them to find and fix the real problems planted in `evals/golden.jsonl`. Every score you will ever quote is a property of these questions.
 **Prerequisite.** Workshop 2's RAG service — this golden set is written over the kind of corpus it retrieves from.
-**Effort.** ~40 min · moderate
+**Effort.** ~75 min to green on the fast tests · no integration tier · ~2 h realistic first pass.
 
 ## Do this
 

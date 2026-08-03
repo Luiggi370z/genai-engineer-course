@@ -66,6 +66,9 @@ providers need an account and cost real money — small, metered, and entirely o
 
 **Software.** Python 3.11+, [uv](https://docs.astral.sh/uv/),
 [Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.
+One lesson — 4.4, the framework bakeoff — pins **3.12** exactly, because CrewAI's
+dependency tree does not build on anything newer. It declares that itself and uv
+fetches the interpreter; you do not need 3.12 for anything else.
 
 ---
 
@@ -98,7 +101,18 @@ That builds all three artifacts from one commit and stamps `dist/BUILD.json` wit
 `dist/` is deliberately not in the repository — it is reproducible from any commit,
 and committing a megabyte of minified output per release would grow every clone
 forever. If you are the one publishing, run `./verify-dist.sh` first: it is what
-catches a `dist/` you built, kept working past, and were about to upload anyway.
+catches a `dist/` you built, kept working past, and were about to upload anyway. It
+checks the archive member by member — each of the 715 files' own sha256, recorded at
+package time and compared against both the zip and `git archive HEAD` — so a lesson
+that is present under the right name but carries the wrong bytes fails there rather
+than in a student's terminal.
+
+Publishing itself is a tag: pushing `v*` runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds with
+`./package.sh`, gates on `./verify-dist.sh`, checks the stamp names the tagged commit,
+and attaches the three artifacts plus `BUILD.json` to the GitHub release. Running it by
+hand still works and is the same code; the workflow exists because the step people skip
+under time pressure is the verification, not the build.
 
 Your progress in `course.html` is saved in the browser's `localStorage`, so tick things
 off as you go — but keep in mind it lives in that one browser on that one machine. Three

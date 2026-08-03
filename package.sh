@@ -76,7 +76,22 @@ cp app/dist/course.html "$STAGE/course.html"
 cp release/README.md "$STAGE/README.md"
 
 echo "==> Packaging the companion repo"
-git archive --format=zip --prefix="$NAME/" -o "$STAGE/$NAME.zip" HEAD -- src
+# One generated member rides along: src/RELEASE_COMMIT. `verify-e2e.sh` bakes the
+# commit into the image so /health can say which code is serving, and it read that
+# from git — which the archive does not contain. Without the stamp the shipped
+# verifier compared the image's `dev` version against an empty string and failed
+# check 3 on a stack that was fine.
+#
+# The prefix dance is `git archive`'s rule, not ours: `--add-file` takes the last
+# `--prefix` seen BEFORE it, so the src-level prefix is set for the stamp and then
+# reset for the tracked tree.
+commit=$(git rev-parse HEAD)
+printf '%s\n' "$commit" >"$STAGE/RELEASE_COMMIT"
+git archive --format=zip \
+  --prefix="$NAME/src/" --add-file="$STAGE/RELEASE_COMMIT" \
+  --prefix="$NAME/" \
+  -o "$STAGE/$NAME.zip" HEAD -- src
+rm -f "$STAGE/RELEASE_COMMIT"
 
 # Belt and braces. If the ignore rules ever stop covering a build artifact, the
 # failure should be loud here rather than a multi-gigabyte download for a student.
@@ -92,9 +107,8 @@ fi
 # at the files themselves can settle, because a minified bundle looks equally
 # plausible whatever it was built from.
 echo "==> Stamping the build"
-commit=$(git rev-parse HEAD)
 python3 - "$STAGE" "$commit" "$NAME" <<'PY'
-import hashlib, json, subprocess, sys
+import hashlib, json, subprocess, sys, zipfile
 from pathlib import Path
 
 stage, commit, name = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
@@ -107,6 +121,20 @@ def tree(prefix):
         ["git", "rev-parse", f"HEAD:{prefix}"], capture_output=True, text=True, check=True
     ).stdout.strip()
 
+# One digest per member, of the member's CONTENT rather than of the archive.
+# The archive's own hash is already in `artifacts`, and it answers a narrower
+# question than it appears to: rezipping the same files with a different git or
+# compression level changes it, so a mismatch there means "rebuilt", not
+# "different". Hashing what is inside each entry is stable across all of that,
+# which is what lets verify-dist.sh compare the shipped tree against HEAD file by
+# file instead of comparing a list of names and hoping the bytes followed.
+with zipfile.ZipFile(stage / f"{name}.zip") as zf:
+    members = {
+        info.filename.removeprefix(f"{name}/"): hashlib.sha256(zf.read(info)).hexdigest()
+        for info in zf.infolist()
+        if not info.is_dir()
+    }
+
 stamp = {
     "commit": commit,
     # Tree hashes, not just the commit: they answer "did the content change"
@@ -118,6 +146,7 @@ stamp = {
         "README.md": sha256(stage / "README.md"),
         f"{name}.zip": sha256(stage / f"{name}.zip"),
     },
+    "files": dict(sorted(members.items())),
 }
 (stage / "BUILD.json").write_text(json.dumps(stamp, indent=2) + "\n")
 PY
@@ -136,5 +165,6 @@ echo
 echo "  $OUT/README.md           $(du -h "$OUT/README.md" | cut -f1)"
 echo "  $OUT/course.html         $(du -h "$OUT/course.html" | cut -f1)"
 echo "  $OUT/$NAME.zip  $(du -h "$OUT/$NAME.zip" | cut -f1)"
-echo "  $OUT/BUILD.json          ${commit:0:12}"
+members=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["files"]))' "$OUT/BUILD.json")
+echo "  $OUT/BUILD.json          ${commit:0:12} · $members members hashed"
 echo "  $((lessons / 2)) lesson pairs · no build artifacts"

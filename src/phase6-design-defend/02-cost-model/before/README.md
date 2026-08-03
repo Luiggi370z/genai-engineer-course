@@ -2,7 +2,7 @@
 
 **Goal.** Build a $/query cost model for a 100K-queries/day workload and show how the levers compound in order: cache first (hits are ~free), then route the remaining misses to a local tier. This is the arithmetic you bring to a "why is our LLM bill so high?" conversation.
 **Prerequisite.** none.
-**Effort.** ~20 min · gentle
+**Effort.** ~20 min to green on the fast tests · no integration tier · ~35 min realistic first pass.
 
 ## Do this
 

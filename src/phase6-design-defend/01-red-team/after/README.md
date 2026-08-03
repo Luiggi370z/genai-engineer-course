@@ -1,6 +1,6 @@
 # 6.1 Red-team — reference
 
-Layered guardrails (decode + squash + scan, spotlight, L3 gate) + least-privilege + HITL, proven by a red-team suite of **58 rows** (version 3) across direct, indirect, encoded, mutated, multilingual, exfiltration, approval-bypass, tool-output and PII families, plus **11 benign controls** — one per detector, so the filter cannot pass by blocking everything. Bar = containment: no landed injection fires a gated tool.
+Layered guardrails (decode + squash + scan, spotlight, L3 gate) + least-privilege + HITL, proven by a red-team suite of **58 rows** (version 3): **47 attacks** across direct, indirect, encoded, mutated, multilingual, exfiltration, approval-bypass, tool-output and PII families, and **11 benign controls** — one per detector, so the filter cannot pass by blocking everything. Bar = containment: no landed injection fires a gated tool.
 
 **Two scan surfaces.** `decode_and_normalize` expands (base64, percent-encoding, HTML entities), appending each decoding rather than substituting it. `squash` removes the separators an attacker hides behind: NFKC folding, Unicode `Cf` (zero-width space, soft hyphen) stripping, leet folding, then everything non-alphanumeric deleted. `SQUASHED_INJECTION` patterns are written without separators to match it. Together they close the obfuscation gap that earlier versions of this lesson left open on purpose — `1gn0re`, `i g n o r e`, `Ign<ZWSP>ore`, `ｉｇｎｏｒｅ` and `I-G-N-O-R-E` are now all one string.
 

@@ -1,6 +1,6 @@
 # ADR-0008 — Memory is partitioned by subject, not labelled with one
 
-**Status:** accepted
+**Status:** accepted (amended — see "Amendment: a partition nobody reads from")
 
 ## Context
 
@@ -39,6 +39,41 @@ which.
 cross, because it is the operator's view: "what has this service remembered" is
 a question that needs the whole answer. The asymmetry is the only sharp edge and
 it is documented at both ends.
+
+## Amendment: a partition nobody reads from
+
+The isolation above was correct and the recall it protected went nowhere.
+`offline_compose` and both model composers abstained whenever contexts and tool
+state were empty; `memories` was passed in, spotlighted into the prompt, attached
+to the response — and never allowed to answer. Ask the assistant a question about
+something you told it and it replied "I don't know" with the fact sitting in the
+`memories` field of the very same payload.
+
+The tests agreed with the bug because they asserted on `answer["memories"]`. That
+is the shape of the mistake worth naming: a test that reads the metadata proves
+the plumbing, and the plumbing was never what was broken.
+
+**Memory is a third class of evidence**, alongside retrieved documents and tool
+output. When it is the only evidence and it bears on the question, it answers.
+Three rules make that safe:
+
+1. **Relevance is required.** `relevant_memories` applies the same content-word
+   filter documents get. Recall is greedy — it returns what it has about the
+   caller — so without this, knowing someone's timezone would answer every
+   question the corpus could not, confidently and wrongly. A document question
+   with an unrelated memory in scope still abstains.
+2. **It is attributed, never asserted.** The answer opens "You told me earlier",
+   and the model tier uses `memory_prompt` rather than `grounded_prompt` —
+   because that prompt demands `[c#]` ids, and a model asked to cite with nothing
+   to cite invents one.
+3. **It never earns a citation.** Enforced by a test that was already there
+   (memories present, `citations == []`) and only became load-bearing once
+   memory could answer at all.
+
+`grounding: "documents" | "tools" | "memory" | "none"` rides on the response so
+the class is inspectable from outside. A caller can check a document answer
+against its citations; a memory answer has none by design, and saying which is
+which is the difference between personalisation and a silent downgrade.
 
 ## Alternatives considered
 

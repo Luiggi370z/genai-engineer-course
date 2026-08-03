@@ -16,7 +16,13 @@ from typing import Any
 
 from assistant import auth
 from assistant.agent import Step
-from assistant.composers import Composer, StreamComposer, offline_compose, word_stream
+from assistant.composers import (
+    Composer,
+    StreamComposer,
+    StreamTruncated,
+    offline_compose,
+    word_stream,
+)
 from assistant.resilience import Policy, resilient
 
 RAG_POLICY = Policy(attempts=3, base_delay=0.2, timeout=10.0)
@@ -113,10 +119,16 @@ def fallback_stream(
     because the slowness happens between yields — so the primary is drained on a
     worker thread and each chunk must arrive within `timeout`. A model that dies
     or stalls BEFORE the first chunk falls back to the offline answer; one that
-    stalls MID-stream truncates (those chunks are already on the wire). Either
-    way the degradation is reported, never absorbed. (Caught live: a thinking
-    model spent minutes reasoning before its first token, and the unbounded
-    stream held /ask/stream hostage the whole time.)"""
+    stalls MID-stream raises `StreamTruncated`, because those chunks are already
+    on the wire and cannot be taken back. Either way the degradation is
+    reported, never absorbed. (Caught live: a thinking model spent minutes
+    reasoning before its first token, and the unbounded stream held /ask/stream
+    hostage the whole time.)
+
+    Raising rather than returning is the point of the second case. `return`
+    ends the generator normally, and every layer above reads a normal end as
+    "that was the whole answer" — so a model that died mid-sentence gets
+    delivered as a complete, cited, confident fragment."""
 
     def stream(
         goal: str,
@@ -142,16 +154,18 @@ def fallback_stream(
                 kind, payload = frames.get(timeout=timeout)
             except Empty:
                 report("brain", f"stream produced no chunk within {timeout}s")
-                if not yielded:
-                    yield from degraded(goal, contexts, state, memories or [])
+                if yielded:
+                    raise StreamTruncated(f"no chunk within {timeout}s") from None
+                yield from degraded(goal, contexts, state, memories or [])
                 return
             if kind == "chunk":
                 yielded = True
                 yield payload
             elif kind == "error":
                 report("brain", f"stream fell back to offline: {payload}")
-                if not yielded:
-                    yield from degraded(goal, contexts, state, memories or [])
+                if yielded:
+                    raise StreamTruncated(str(payload)) from payload
+                yield from degraded(goal, contexts, state, memories or [])
                 return
             else:
                 return

@@ -11,12 +11,14 @@ export const SCROLL_ROOT = "main-scroll";
 const BAND = 0.2;
 
 /**
- * Which section is being read, shared by the two things that need to say so: the
- * sticky rail on wide screens and the chip bar on narrow ones.
+ * Which section is being read.
  *
- * One hook rather than one per navigator, because two implementations of "which
- * section am I in" would eventually disagree, and a table of contents pointing at
- * a different section than the bar above it is worse than having only one of them.
+ * Called once, by `PhaseView`, and handed down to the three things that need the
+ * answer: the sticky rail on wide screens, the chip bar on narrow ones, and the
+ * saved reading position. It used to be called once per navigator — two
+ * implementations of "which section am I in" eventually disagree, and a table of
+ * contents pointing somewhere other than the bar above it is worse than having
+ * only one of them.
  */
 export function useActiveSection(entries: TocEntry[]): string | null {
   const [active, setActive] = useState<string | null>(entries[0]?.id ?? null);

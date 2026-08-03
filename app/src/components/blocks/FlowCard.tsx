@@ -28,7 +28,7 @@ export function FlowCard({ node, accent, edge = "top", badge, className, ref }: 
     >
       {badge !== undefined && (
         <div
-          className="mb-0.5 font-mono text-[9.5px] uppercase tracking-[0.14em] tabular-nums"
+          className="mb-0.5 font-mono text-[11px] uppercase tracking-[0.14em] tabular-nums"
           style={{ color: accent }}
         >
           Step {badge}

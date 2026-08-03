@@ -47,6 +47,9 @@ smaller or hosted judge), and `llama-guard3:8b` for the Phase 6 guardrails.
 
 **Software.** Python 3.11+, [uv](https://docs.astral.sh/uv/),
 [Ollama](https://ollama.com), and Docker for the Phase 8 deployment lessons.
+One lesson — 4.4, the framework bakeoff — pins **3.12** exactly, because CrewAI's
+dependency tree does not build on anything newer. It declares that itself and uv
+fetches the interpreter; you do not need 3.12 for anything else.
 
 **Hardware.** Four honest tiers — pick yours and nothing you *learn* changes:
 

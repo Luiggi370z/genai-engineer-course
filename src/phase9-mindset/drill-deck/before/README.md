@@ -5,7 +5,7 @@ spaced-repetition deck: fumbled cards resurface sooner, and repeat offenders lan
 on a leech list — your interview-prep priority queue.
 **Prerequisite.** None — this is a standalone tool; the cards reference material
 from every phase.
-**Effort.** ~25 min · gentle.
+**Effort.** ~25 min to green on the fast tests · no integration tier · ~40 min realistic first pass.
 
 ## Do this
 

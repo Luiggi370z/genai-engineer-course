@@ -6,7 +6,7 @@ RAGAS with a pinned LLM judge. Without it, "did my retrieval change help?" is a
 vibe, not a number.
 **Prerequisite.** Phase 1 (you have a pipeline that returns an answer plus
 contexts). This is the first lesson of Phase 2 on purpose — measure before you tune.
-**Effort.** ~45 min · moderate.
+**Effort.** ~45 min to green on the fast tests · +25 min for the integration tier · ~80 min realistic first pass.
 
 ## Do this
 
@@ -41,8 +41,16 @@ of the harness: a failure tells you *where* retrieval is weak, not just that it 
 
 ## Going further (optional integration lane)
 `make test-integration` runs the real RAGAS metrics (`Faithfulness`,
-`LLMContextRecall`) once you fill the three TODOs in `src/ragas_eval.py` — a
-pinned, temperature-0 judge served by Ollama's OpenAI-compatible endpoint. Needs
-Ollama running locally — free, but the judge model is a multi-GB download and
-RAGAS pulls a heavy dependency tree. Skippable: the fast tier already proves the
-harness logic.
+`ContextRecall`) once you fill the TODOs in `src/ragas_eval.py` — a pinned,
+temperature-0 judge served by Ollama's OpenAI-compatible endpoint.
+
+Use the **0.4 surface**: `ragas.metrics.collections` for the metric classes,
+`ragas.llms.llm_factory` over an `openai.AsyncOpenAI` client for the judge, and
+`score(...)` one row at a time. Most tutorials still show `from ragas.metrics
+import Faithfulness` with `evaluate()`; that path imports, warns, and quietly
+puts you on a different API from the one lesson 3.2 teaches. A test in this
+lesson asserts the installed version, so the drift fails loudly.
+
+Needs Ollama running locally — free, but the judge model is a multi-GB download
+and RAGAS pulls a heavy dependency tree. Skippable: the fast tier already proves
+the harness logic.

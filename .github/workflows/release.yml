@@ -1,0 +1,83 @@
+# Cuts a release from a tag: build the three files, verify them, attach them.
+#
+# The reason this exists is that packaging was a local ritual — `./package.sh`,
+# then remember to run `./verify-dist.sh`, then upload three files by hand — and
+# the failure mode of a ritual is skipping the middle step on the one evening you
+# are in a hurry. A stale `dist/` looks exactly like a fresh one.
+#
+# The tag is the input, not the branch: `package.sh` refuses to build unless the
+# working tree matches HEAD, so the checkout below IS the release. Nothing here
+# rebuilds anything the local run would not.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  # Rehearse it without minting a tag. The upload step is skipped, so a dry run
+  # cannot publish; everything up to it is the identical path.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: verify-dist.sh resolves trees and blobs at HEAD with
+      # `git rev-parse` and `git archive`, and a shallow clone answers neither.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+
+      # The content gates, before the build rather than after: a release that
+      # ships a workbook whose claims disagree with the lessons is worse than no
+      # release, and `pnpm build` alone would not notice.
+      - run: pnpm verify
+        working-directory: app
+
+      - run: ./package.sh
+
+      # The point of the job. package.sh can succeed and still produce something
+      # that should not be published — a zip whose members drifted from HEAD, a
+      # stamp naming another commit, a shipped verify-e2e.sh that cannot resolve
+      # its own commit outside a checkout. All five checks, on the artifact that
+      # is about to be uploaded rather than on a local one.
+      - run: ./verify-dist.sh
+
+      # A tag says what the release claims to be; the stamp says what it is. If
+      # they disagree, somebody tagged one commit and built another.
+      - name: The stamp names the tagged commit
+        run: |
+          stamped=$(python3 -c 'import json;print(json.load(open("dist/BUILD.json"))["commit"])')
+          if [ "$stamped" != "$GITHUB_SHA" ]; then
+            echo "error: dist/BUILD.json names $stamped, the tag points at $GITHUB_SHA" >&2
+            exit 1
+          fi
+          members=$(python3 -c 'import json;print(len(json.load(open("dist/BUILD.json"))["files"]))')
+          echo "release $GITHUB_REF_NAME · ${stamped:0:12} · $members verified zip members"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ github.ref_name }}
+          path: dist/
+
+      # Only a tag publishes. A dispatch run has proved the same things and is
+      # allowed to stop here.
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/course.html
+            dist/README.md
+            dist/genai-engineer-workbook-src.zip
+            dist/BUILD.json
+          generate_release_notes: true

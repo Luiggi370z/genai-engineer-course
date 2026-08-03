@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from src.health import (
+    cold_model_healthchecks,
     compose_ok,
     health,
     load_services,
@@ -48,6 +49,26 @@ def test_every_service_has_a_healthcheck():
 
 def test_dependencies_wait_for_health_not_start():
     assert weak_dependencies(load_services(COMPOSE)) == []
+
+
+def test_the_model_service_is_healthy_only_once_the_model_is_warm():
+    """A downloaded model is not a usable one. This stack went healthy on
+    `ollama list`, which passes the moment the file lands — and then the first
+    question timed out loading it and was answered by the offline fallback, on a
+    stack whose every probe was green."""
+    assert cold_model_healthchecks(load_services(COMPOSE)) == []
+
+
+def test_a_download_only_healthcheck_is_caught(tmp_path):
+    cold = tmp_path / "docker-compose.yml"
+    cold.write_text(
+        "services:\n"
+        "  ollama:\n"
+        "    image: ollama/ollama:0.32.5\n"
+        "    healthcheck:\n"
+        "      test: ['CMD-SHELL', 'ollama list | grep -q qwen3.5']\n"
+    )
+    assert cold_model_healthchecks(load_services(cold)) == ["ollama"]
 
 
 def test_only_the_assistant_reaches_the_host():
@@ -101,7 +122,7 @@ def test_an_overlay_that_narrows_a_list_without_override_is_caught(tmp_path):
     first, the loopback bind loses it, and the hardened profile is the only one
     that will not start — reported as "address already in use" on a port nothing
     else in the stack wants. A reviewer that models the overlay as a replacement
-    calls this file correct."""
+    calls this file correct, which is the failure this test exists to prevent."""
     appended = tmp_path / "appended.yml"
     appended.write_text(
         "services:\n"

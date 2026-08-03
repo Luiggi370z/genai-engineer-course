@@ -2,7 +2,7 @@
 
 **Goal.** Build an eval harness where the judge is injected, so every piece of grading logic — abstention handling, per-slice aggregation, instrument recording — is testable offline with a fake judge, and only the real, pinned RAGAS judge lives behind the opt-in tier.
 **Prerequisite.** 3.1 — the golden set with slices and abstention flags is what this harness runs.
-**Effort.** ~60 min · involved
+**Effort.** ~60 min to green on the fast tests · +25 min for the integration tier · ~100 min realistic first pass.
 
 ## Do this
 

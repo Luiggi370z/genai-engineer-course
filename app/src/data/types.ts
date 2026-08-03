@@ -175,11 +175,36 @@ export type Rung = "faded" | "independent";
  */
 export type Mastery = "understand" | "implement" | "integrate" | "operate";
 
+/**
+ * What a lesson costs, in the three numbers a learner actually needs.
+ *
+ * A single "~40 min" was being asked to mean three things: how long until the
+ * offline tests pass, how long until the tier that downloads weights and starts
+ * containers passes, and how long a first pass really takes with the reading and
+ * the two wrong turns in it. The round-3 audit called three of those single
+ * numbers not credible, and they were — as totals. They were fine as fast-tier
+ * numbers.
+ *
+ * `integration` is null for a lesson with no integration tier, which is not the
+ * same as zero: zero would claim the tier is free.
+ */
+export interface Effort {
+  fast: number;
+  integration: number | null;
+  realistic: number;
+}
+
 export interface Exercise {
   id: string;
   title: string;
   task: string;
   repo?: string;
+  /**
+   * Required for any exercise whose `repo` is a lesson — the integrity gate
+   * re-renders this and demands the lesson's `before/README.md` agree, so the
+   * estimate in the workbook and the estimate in the lesson cannot drift.
+   */
+  effort?: Effort;
   /**
    * Required so an unlabelled exercise cannot compile, the same guardrail
    * `teaches` and `assesses` provide. An `"independent"` exercise must carry no
@@ -237,6 +262,14 @@ export interface Workshop {
   title: string;
   subtitle: string;
   repo: string;
+  /** The brief inside `repo`, e.g. `WORKSHOP-RAG-SERVICE.md`. */
+  doc: string;
+  /**
+   * Hours, tiered like a lesson's. Required, because a workshop is the item most
+   * likely to be started on a weeknight and abandoned; the integrity gate holds
+   * it to the number the brief in `doc` claims.
+   */
+  effort: Effort;
   /** What finishing the workshop demonstrates. See `Mastery`. */
   proves: Mastery;
   /** Objectives the workshop puts together. A capstone should cover most of the phase. */
@@ -317,11 +350,25 @@ export interface Resource {
   url: string;
 }
 
+/**
+ * The phase accent, once per theme.
+ *
+ * One colour cannot serve both: an accent legible on white card stock is a dark
+ * one, and a dark accent on `#1c211f` is the round-3 audit's finding — four
+ * phases whose 11px labels sat under 4.5:1. Both values are checked against
+ * their own card and paper backgrounds by `check-a11y.mjs`, so a hand-picked
+ * colour that looks fine in one theme cannot ship broken in the other.
+ */
+export interface Accent {
+  light: string;
+  dark: string;
+}
+
 /** A phase as authored. `num` is assigned by the course order. */
 export interface PhaseContent {
   id: string;
   weeks: string;
-  color: string;
+  accent: Accent;
   title: string;
   tagline: string;
   /**

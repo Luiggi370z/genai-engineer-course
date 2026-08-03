@@ -6,7 +6,7 @@ answers are just wrong. You practice the back-to-front debugging playbook, then
 make the structural fix.
 **Prerequisite.** 2.1 Eval harness (a cratering metric is how you'd notice this
 in the wild) and 2.2 (you know the retrieval stack you're debugging).
-**Effort.** ~25 min · gentle.
+**Effort.** ~25 min to green on the fast tests · no integration tier · ~40 min realistic first pass.
 
 ## Do this
 

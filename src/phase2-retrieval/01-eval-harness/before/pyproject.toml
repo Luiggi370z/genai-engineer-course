@@ -11,7 +11,17 @@ dependencies = [
 dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1"]
 # The real deal: RAGAS with an LLM judge. Heavy dep tree + needs a judge model,
 # so it's opt-in: `make test-integration` (needs Ollama running).
-integration = ["ragas>=0.2,<1", "langchain-openai>=0.2,<1"]
+# Verified against ragas 0.4.3 on 2026-07-31 — pin narrowly, upgrade deliberately.
+# These three lines must match phase3-evals/02-llm-judge, which teaches the same
+# API against the same judge; `check-claims` fails the build when they drift.
+integration = [
+  "ragas>=0.4,<0.5",
+  "openai>=1.60,<3",
+  # Not optional: ragas.llms.base imports langchain_community.chat_models.vertexai,
+  # which langchain-community 0.4 removed. Unpinned, the judged tier dies on import
+  # with ModuleNotFoundError. Pinned as a known-good pair — see README.
+  "langchain-community>=0.3.27,<0.4",
+]
 
 [tool.ruff]
 line-length = 100

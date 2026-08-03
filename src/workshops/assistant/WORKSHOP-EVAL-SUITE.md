@@ -1,5 +1,7 @@
 # Workshop · Eval suite + CI gate  (ends Phase 3)
 
+**Effort.** ~2.5 h of focused build time · +30 min for the integration tier · ~5 h realistic first pass.
+
 The previous layer gave the assistant a retrieval core that answers questions. This
 one answers the only question that matters next: **how do you know it's any good?**
 

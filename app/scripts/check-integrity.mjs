@@ -26,18 +26,27 @@ import { appRoot, loadCourseData } from "./lib/load-data.mjs";
 
 const srcRoot = path.resolve(appRoot, "../src");
 
+/** What the lesson README or workshop brief itself claims, or null if there is no such file. */
+function effortLineOf(relative) {
+  const file = path.join(srcRoot, relative);
+  if (!fs.existsSync(file)) return null;
+  return fs.readFileSync(file, "utf8").match(/^\*\*Effort\.\*\*.*$/m)?.[0] ?? "";
+}
+
 const { phases, prerequisites, electives } = await loadCourseData();
 const { errors, counts } = audit({
   phases,
   prerequisites,
   electives,
   repoExists: (repo) => fs.existsSync(path.join(srcRoot, repo)),
+  effortLineOf,
 });
 
 console.log(
   `Integrity scan · ${counts.ids} ids · ${counts.blocks} blocks · ` +
     `${counts.resources} resources · ${counts.electives} electives · ` +
-    `${counts.defenses} defended checkpoints`,
+    `${counts.defenses} defended checkpoints · ` +
+    `${counts.efforts} effort estimates matched to their lesson`,
 );
 
 if (process.argv.includes("--report")) {

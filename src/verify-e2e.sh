@@ -7,40 +7,63 @@
 #   ./verify-e2e.sh --only 12    boot, then run check 12 and nothing else
 #   ./verify-e2e.sh --no-build   skip the image build (the stack is already current)
 #   ./verify-e2e.sh --host-model use the HOST's ollama (much faster on a Mac; see below)
+#   ./verify-e2e.sh --ci         the CI overlay: a small chat model on a hosted runner
+#   ./verify-e2e.sh --model TAG  override the chat model tag (implies --ci)
 #   ./verify-e2e.sh --list       print the checks and exit
+#   ./verify-e2e.sh --print-commit  print the commit this run would expect, and exit
 #
 # Needs Docker and disk for two Ollama models (~6 GB on first boot). Everything else
 # in this repo verifies offline; this is the one script that proves the composed
 # stack really boots, authenticates, retrieves, refuses, contains, and traces.
 #
-# A full pass takes about eighteen minutes, nearly all of it waiting on a local
-# model — or about forty-five seconds with `--host-model`, below. A verifier you can
+# A full pass on the self-contained lane takes about twelve minutes on a machine
+# whose containers have no GPU, nearly all of it waiting on the model — or about
+# forty-five seconds with `--host-model`, below. A verifier you can
 # only run from the top is a verifier that stops being run: fix something check 12
-# caught, and re-proving it should not cost another seventeen minutes of checks that
+# caught, and re-proving it should not cost another twelve minutes of checks that
 # already passed. Hence `--from` and `--only`.
 #
 # `--host-model` attacks those minutes instead of working around them, and is worth
 # reading about even if you never use it, because the measurement is the lesson.
 # Docker Desktop on macOS gives containers no GPU, so the containerised Ollama runs a
-# 9B model on CPU inside a VM: 0.52 tokens/second, against a composer budget of 60
-# seconds. The same model on the same machine's own Ollama, with Metal: 81
-# tokens/second. `--host-model` points the container at it through
-# `host.docker.internal` and switches the stack's ollama service off — eighteen
-# minutes becomes forty-five seconds, with the model composing every answer.
+# 9B model on CPU inside a VM: 0.52 tokens/second. The same model on the same
+# machine's own Ollama, with Metal: 81 tokens/second. `--host-model` points the
+# container at it through `host.docker.internal` and switches the stack's ollama
+# service off — twelve minutes becomes forty-five seconds, with the model composing
+# every answer either way.
+#
+# "Either way" is newer than it sounds. The composer's 60-second budget is right
+# behind a GPU and absurd at half a token per second, so on the self-contained lane
+# every answer used to arrive from the offline fallback and check 4 failed — a
+# correctly configured stack failing its own verifier over a constant compiled into
+# the code. The base compose file now sets COMPOSE_TIMEOUT_SECONDS to fifteen
+# minutes, the secure overlay's REQUEST_DEADLINE_SECONDS to sixteen so it contains
+# rather than undercuts it, and the host-model overlay puts both back to GPU
+# numbers, because there slow really does mean broken.
 #
 # The default stays self-contained, because check 1's claim is that a stranger
 # clones this repo and runs ONE command with nothing installed and no keys — and a
-# lane that needs a host daemon and a pre-pulled model cannot make that claim. CI
-# runs the default. Use `--host-model` for the local loop, and run the default lane
-# before you believe a green result.
+# lane that needs a host daemon and a pre-pulled model cannot make that claim.
+# Use `--host-model` for the local loop, and run the default lane before you
+# believe a green result.
+#
+# Where this actually runs, since an earlier version of this header claimed more
+# than was true: push CI builds the image and validates the compose files, and
+# does NOT boot the stack. The scheduled `e2e` workflow runs `--ci`, which is
+# every check below against a 1.7B chat model — enough to prove the WIRING
+# (retrieval, the gate, containment, discovery, tracing, durability) and not the
+# model, because a hosted runner has four CPU cores and no GPU. The
+# full-fidelity run with the real 9B is the unqualified `./verify-e2e.sh`, on a
+# machine with the disk and the patience for it, and it is a release gate rather
+# than a per-push one. Every lane prints which one it is, twice.
 #
 # What they assume, stated plainly: the checks SHARE STATE. They ingest into one
 # corpus, spend approvals, fill the outbox and write memories, and several of the
 # later ones assert on what the earlier ones left behind — check 9 reads the send
 # that check 8 authorized. Resuming works because the SQLite and Qdrant volumes
 # outlive the run; against an empty volume (a first run, or after `down -v`), only
-# a full pass is meaningful. `--from` is a debugging loop, not a shorter suite,
-# and CI runs the whole thing.
+# a full pass is meaningful. `--from` is a debugging loop, not a shorter suite —
+# every lane that reports a result runs the whole thing.
 #
 # It runs the SECURE profile, not the zero-key demo one, so every check below is
 # made through the gate a deployed service actually has in front of it: a Bearer
@@ -48,14 +71,17 @@
 # to reach inside the container now go over HTTP as somebody.
 #
 #   1. compose up --build reaches healthy (healthchecks gate the whole chain)
-#   2. /health reports the REAL tier: qdrant + sqlite + ollama + mcp+builtin, and
-#      the gate is live — an unauthenticated mutating request is refused
+#   2. /health reports the REAL tier: qdrant + sqlite + ollama + mcp+builtin, it
+#      reports the model tier as READY (warm, not merely downloaded), and the gate
+#      is live — an unauthenticated mutating request is refused
 #   3. the running container reports the COMMIT it was built from, and it is the
 #      one compose just built — the probe that catches a half-finished rollout
 #      still served by an old machine that passes every other check here
-#   4. /ingest then /ask returns a grounded answer with contexts + citations, and
+#   4. /ingest then /ask returns a grounded answer with contexts + citations,
 #      /ask/stream delivers the same answer as SSE chunks that passed the output
-#      gate BEFORE they were released (tier.stream == safe-buffered)
+#      gate BEFORE they were released (tier.stream == safe-buffered), and
+#      retrieval is SEMANTIC — a question sharing no vocabulary with a document
+#      still finds it, which a hash embedder cannot do
 #   5. the corpus is operable, not just searchable: a citation resolves back to its
 #      exact text over /evidence, re-ingesting the same source UPDATES it instead of
 #      duplicating it, and DELETE /corpus/{source} makes the evidence 404
@@ -69,10 +95,14 @@
 #      replays the ORIGINAL answer instead of applying the effect twice, and every
 #      irreversible call that ran is accounted for in /outbox with nothing pending
 #  10. a plain-English question makes the assistant CHOOSE a tool it discovered
-#      over MCP at boot — registry-driven selection, not a hardcoded tool name
+#      over MCP at boot — registry-driven selection, not a hardcoded tool name —
+#      and a second discovered tool with the SAME read-only annotation but no
+#      allowlist entry does not run: the server's claim informs the gate, only
+#      local policy opens it
 #  11. two AUTHENTICATED callers share the service and not their memories: with
 #      alice's token and bob's token against the same deployed API, alice's
-#      recalled fact never reaches bob, and the rows are namespaced by the
+#      recalled fact ANSWERS her question — attributed, uncited, grounding
+#      "memory" — never reaches bob, and the rows are namespaced by the
 #      verified `sub` in SQLite
 #  12. the runs left spans behind (spans_recorded on /health), a caller-supplied
 #      x-request-id comes back on both the header and the body, and that same id
@@ -132,12 +162,19 @@ FROM=1
 ONLY=0
 BUILD="--build"
 HOST_MODEL=0
+PRINT_COMMIT=0
+CI_LANE=0
+CI_MODEL="qwen3.5:1.7b" # registered in app/src/data/reference.ts as the ci-tier chat tag
 
 while (($#)); do
   case "$1" in
     --down) DOWN=1 ;;
     --no-build) BUILD="" ;;
     --host-model) HOST_MODEL=1 ;;
+    --ci) CI_LANE=1 ;;
+    --model) CI_LANE=1; CI_MODEL="${2:?--model needs a tag}"; shift ;;
+    --model=*) CI_LANE=1; CI_MODEL="${1#*=}" ;;
+    --print-commit) PRINT_COMMIT=1 ;;
     --from) FROM="${2:?--from needs a check number}"; shift ;;
     --from=*) FROM="${1#*=}" ;;
     --only) ONLY="${2:?--only needs a check number}"; shift ;;
@@ -145,7 +182,7 @@ while (($#)); do
     --list)
       for i in $(seq 1 $TOTAL); do printf '%2d  %s\n' "$i" "${TITLE[$i]}"; done
       exit 0 ;;
-    -h|--help) sed -n '2,35p' "$SELF"; exit 0 ;;
+    -h|--help) sed -n '2,48p' "$SELF"; exit 0 ;;
     *) die "unknown argument: $1 (try --help)" ;;
   esac
   shift
@@ -159,6 +196,14 @@ done
 # both lanes say which they are, and the preflight turns "the host is not set up
 # for this" into a message here instead of a composer timeout in check 4.
 MODEL_LANE="in-stack ollama (CPU-only in Docker Desktop; slow by design, self-contained)"
+if ((HOST_MODEL)) && ((CI_LANE)); then
+  die "--host-model and --ci are two different answers to the same question; pick one"
+fi
+if ((CI_LANE)); then
+  export CI_CHAT_MODEL="$CI_MODEL"
+  COMPOSE="$COMPOSE -f docker-compose.ci.yml"
+  MODEL_LANE="CI overlay, chat model $CI_MODEL — proves the WIRING, not the model's answers"
+fi
 if ((HOST_MODEL)); then
   HOST_OLLAMA="http://127.0.0.1:11434"
   WANT_MODEL="${OLLAMA_MODEL:-qwen3.5:9b}"
@@ -178,7 +223,41 @@ export ASSISTANT_JWT_SECRET="${ASSISTANT_JWT_SECRET:-$(head -c 48 /dev/urandom |
 # Baked into the image by `ARG GIT_SHA` so the running service can say which code
 # it is. Check 3 compares it to what /health reports — the one probe that catches
 # a half-finished rollout still served by a healthy old machine.
-export GIT_SHA="${GIT_SHA:-$(git -C "$(dirname "$0")/.." rev-parse HEAD)}"
+#
+# Three sources in order, because this script runs in three situations and only
+# one of them has git. The released ZIP is `git archive`, which ships no `.git`,
+# and the previous one-liner — `${GIT_SHA:-$(git rev-parse HEAD)}` — turned that
+# into an EMPTY string: `export` swallowed the failure, compose defaulted the
+# build arg to `dev`, and check 3 then compared "dev" against "". The companion
+# README advertises the unqualified `./verify-e2e.sh` as the release claim, so
+# the student was the one who met it. A `dev` fallback both sides agree on is an
+# honest answer; an empty expectation is a broken check wearing a failure's face.
+#
+# (`$SELF`, not `$0`: the `cd` above has already happened, so a relative `$0` no
+# longer resolves. That was a second latent break in the same line.)
+SRC_DIR="$(dirname "$SELF")"
+resolve_git_sha() {
+  if [[ -n "${GIT_SHA:-}" ]]; then printf '%s' "$GIT_SHA"; return; fi
+  local sha
+  if sha="$(git -C "$SRC_DIR" rev-parse HEAD 2>/dev/null)" && [[ -n "$sha" ]]; then
+    printf '%s' "$sha"; return
+  fi
+  # Written into the archive by package.sh: the release's own commit, for the
+  # copy of this script that has no repository around it.
+  if [[ -f "$SRC_DIR/RELEASE_COMMIT" ]]; then
+    sha="$(tr -d '[:space:]' <"$SRC_DIR/RELEASE_COMMIT")"
+    if [[ -n "$sha" ]]; then printf '%s' "$sha"; return; fi
+  fi
+  printf 'dev'
+}
+GIT_SHA="$(resolve_git_sha)"
+export GIT_SHA
+
+# Lets the release gate ask THIS script what it would expect, instead of a copy
+# of its logic answering. `verify-dist.sh` runs it against an extracted ZIP,
+# which is the one environment where the answer used to be wrong and the one
+# environment a checkout cannot simulate.
+if ((PRINT_COMMIT)); then printf '%s\n' "$GIT_SHA"; exit 0; fi
 
 # jget FILE KEY.PATH — read a value out of a JSON response without needing jq
 jget() {
@@ -262,6 +341,19 @@ boot() {
   done
   echo "assistant is answering"
 
+  # Answering is not the same as ready. /health returns 200 as soon as the process
+  # is up; /ready returns 503 until the model tier has actually completed a
+  # generation. Waiting on the wrong one is how check 4 used to fail on a stack
+  # that was merely cold: the composer timed out loading a 9B, the offline
+  # fallback answered, and the run recorded a degraded answer as the model's.
+  until curl -sf "$BASE/ready" -o /tmp/e2e-ready.json 2>/dev/null; do
+    ((SECONDS < deadline)) || die "the model tier never warmed up in ${BOOT_TIMEOUT}s — $(curl -s "$BASE/ready")"
+    sleep 5
+  done
+  echo "model tier is warm: $(jget /tmp/e2e-ready.json detail)"
+  # Re-read: /health's `ready` flag has flipped since the first poll.
+  curl -sf "$BASE/health" -o /tmp/e2e-health.json
+
   # Two callers, two tokens, for the rest of the run. Everything the script does is
   # done AS somebody, which is the only way per-subject behaviour can be observed
   # from outside the container.
@@ -283,6 +375,10 @@ check_2() {
   # The guard model is off here on purpose — the deterministic screen is the floor,
   # and this asserts an operator can tell which one is in front of them from outside.
   [[ "$(jget /tmp/e2e-health.json tier.guard)"  == "regex-only"    ]] || die "unexpected guard tier"
+  # Readiness, asserted rather than assumed. boot() waited for it; this is the
+  # record that the stack said so, because a `ready` that quietly went missing
+  # from the payload would turn that wait into a no-op nobody noticed.
+  [[ "$(jget /tmp/e2e-health.json ready)"       == "True"          ]] || die "/health does not report the model tier as ready"
   # A gate that is configured but not enforced is the failure this catches: ask
   # without a token and the answer must be 401, not an answer.
   local code
@@ -372,7 +468,26 @@ EOF
   else
     die "the model stopped composing for a reason that is not the stream budget: $brain"
   fi
+  # Semantic recall, asserted where it can actually fail. The deployed stack
+  # pulled `nomic-embed-text` and then never set ASSISTANT_EMBED_MODEL, so the
+  # vector store ran on `hash_embed` — a bag-of-words vector that matches shared
+  # vocabulary and nothing else. Every check above still passed, because every
+  # one of them asked about "refunds" using the word "refunds".
+  [[ "$(jget /tmp/e2e-health.json tier.embed)" == "nomic-embed-text" ]] ||
+    die "the vector store is not using a real embedder — retrieval is vocabulary overlap"
+  [[ "$(jget /tmp/e2e-health.json tier.retrieval)" == "hybrid-rrf" ]] ||
+    die "retrieval is not hybrid — the sparse arm is what finds an exact string"
+  as "$ALICE" -X POST "$BASE/ingest" -H 'content-type: application/json' \
+    -d '{"docs": [{"text": "staff are reimbursed for travel expenses within ten business days of filing",
+                   "source": "expenses.md"}]}' >/dev/null
+  # Not one word in common with the document except "for". A hash embedder scores
+  # this at zero; a real one puts it first.
+  ask "how quickly do i get money back for a work trip" \
+    || die "the synonym question was refused"
+  grep -qi "reimburse" /tmp/e2e-ask.json \
+    || die "semantic recall failed: no word in that question appears in the answer's source"
   echo "grounded answer came back with contexts, citations, and streamed through the gate"
+  echo "semantic recall works: a question sharing no vocabulary with the document found it"
 }
 
 check_5() {
@@ -562,6 +677,28 @@ check_10() {
   grep -qi "five business days" /tmp/e2e-ask.json ||
     die "the discovered tool ran but its result never reached the answer"
   echo "the planner picked lookup_fact off the registry and answered from it"
+
+  # ...and that only worked because the operator allowlisted it. The MCP server
+  # publishes `word_count` with the same read-only annotation and it is not on
+  # the list, so it pauses. This is the check that would have caught the old
+  # default: `requires_approval` read an absent key as False, and every tool a
+  # server chose not to describe ran unreviewed.
+  ask "count the words in this sentence please"
+  if grep -q '"ran: word_count"' /tmp/e2e-ask.json; then
+    die "a discovered tool nobody allowlisted ran without approval"
+  fi
+  python3 - <<'EOF'
+import json
+body = json.load(open("/tmp/e2e-ask.json"))
+pending = body.get("pending")
+# Either it paused for approval or the planner did not pick it; both mean it did
+# not RUN. What must never happen is the audit line above.
+assert pending is None or pending["tool"] == "word_count", pending
+print("un-allowlisted discovered tool:", "paused" if pending else "not selected")
+EOF
+  [[ "$(jget /tmp/e2e-health.json tier.mcp_ungated)" == "1" ]] ||
+    die "the deployed stack has ungated more discovered tools than the one it reviewed"
+  echo "annotations informed the gate and only local policy opened it"
 }
 
 check_11() {
@@ -573,7 +710,16 @@ check_11() {
   ask "I prefer to be called Lu and I work in the Lima timezone" "$ALICE"
 
   ask "which timezone should we schedule in" "$ALICE"
-  grep -q "Lima" /tmp/e2e-ask.json || die "alice lost her own memory across requests"
+  # Asserted on the ANSWER, not on the metadata beside it. Grepping the whole
+  # response body passed for months against a service that recalled "Lima"
+  # perfectly, attached it to the payload, and replied "I don't know" — recall
+  # that reaches the response and not the reader is recall nobody has.
+  grep -qi "lima" <<<"$(jget /tmp/e2e-ask.json answer)" ||
+    die "alice's own fact did not reach her answer — recall is decorative"
+  [[ "$(jget /tmp/e2e-ask.json grounding)" == "memory" ]] ||
+    die "a memory-grounded answer is not reported as one"
+  [[ "$(jget /tmp/e2e-ask.json citations)" == "[]" ]] ||
+    die "a memory was passed off as a citation"
   cp /tmp/e2e-ask.json /tmp/e2e-alice.json
 
   ask "which timezone should we schedule in" "$BOB"
@@ -708,10 +854,15 @@ check_15() {
   ask "I prefer refund updates by email" || die "the memorable turn was not accepted"
   $COMPOSE restart assistant >/dev/null
   local deadline=$((SECONDS + 120))
-  until curl -sf "$BASE/health" -o /tmp/e2e-health.json 2>/dev/null; do
-    ((SECONDS < deadline)) || die "assistant did not come back after restart"
+  # /ready, not /health: the restarted process re-runs its warmup, and asking it
+  # a question before that finishes measures the fallback, not the restart.
+  # The model itself stays resident across an assistant restart (OLLAMA_KEEP_ALIVE
+  # lives in the other container), so this is fast — it is a handshake, not a load.
+  until curl -sf "$BASE/ready" -o /dev/null 2>/dev/null; do
+    ((SECONDS < deadline)) || die "assistant did not come back ready after restart"
     sleep 3
   done
+  curl -sf "$BASE/health" -o /tmp/e2e-health.json
   # Qdrant was stopped in check 14 and may still be re-passing its healthcheck;
   # retry the grounded ask until the real tier is back rather than racing it.
   local ask_deadline=$((SECONDS + 90))
@@ -745,7 +896,9 @@ else
   printf '\nE2E: all %s checks passed, every one of them through the gate\n' "$RAN"
 fi
 # Repeated at the end because that is where a green line gets pasted into a pull
-# request, and "all 15 passed" means something different on the lane CI does not run.
-((HOST_MODEL)) && printf 'lane: %s\n' "$MODEL_LANE"
+# request, and "all 15 passed" means something different on each lane. The CI lane
+# says so loudest: it is the one whose green is most likely to be quoted as if it
+# were the release claim.
+((HOST_MODEL || CI_LANE)) && printf 'lane: %s\n' "$MODEL_LANE"
 ((DOWN)) && $COMPOSE down
 exit 0

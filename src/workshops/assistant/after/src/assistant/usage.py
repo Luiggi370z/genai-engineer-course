@@ -14,16 +14,24 @@ bill the merge gate can block on, with no new instrumentation.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import dataclass
+from typing import Literal
 
 from assistant.crew import PRICE
 from assistant.memory import count_tokens
+
+#: How a Usage was arrived at. Reported wherever the number is, because the two
+#: are not interchangeable: `counted` is what the provider will invoice, and
+#: `estimated` is a word count standing in for a tokenizer nobody ran.
+Source = Literal["counted", "estimated"]
 
 
 @dataclass(frozen=True)
 class Usage:
     tokens_in: int
     tokens_out: int
+    source: Source = "estimated"
 
     @property
     def total(self) -> int:
@@ -38,10 +46,63 @@ class Usage:
         return round((self.tokens_in * price_in + self.tokens_out * price_out) / 1e6, 6)
 
 
+#: What the provider said the last exchange cost, if it said anything.
+#:
+#: A ContextVar rather than a return value because the composer is a `Callable
+#: [..., str]` — one seam, swapped between the offline composer, Ollama and a
+#: hosted API — and widening that signature to carry token counts would force
+#: every composer to have an opinion about billing. The adapter that talks to a
+#: provider drops the provider's own numbers here; `measure` picks them up if
+#: they are there. Context-local, so concurrent requests cannot read each
+#: other's.
+_REPORTED: ContextVar[Usage | None] = ContextVar("reported_usage", default=None)
+
+
+def report(tokens_in: int, tokens_out: int) -> None:
+    """Called by an adapter with the counts the provider returned."""
+    _REPORTED.set(Usage(tokens_in=tokens_in, tokens_out=tokens_out, source="counted"))
+
+
+def take_reported() -> Usage | None:
+    """Read and clear. Clearing matters: a stale count is worse than no count,
+    because the next exchange would be billed for the previous one."""
+    reported = _REPORTED.get()
+    _REPORTED.set(None)
+    return reported
+
+
+#: The result of the most recent `measure`, for a caller downstream of the one
+#: that metered. `report.py` scores answers that `core.py` already metered; it
+#: used to re-measure them from a prompt it rebuilt itself, which was a second
+#: opinion nobody wanted and — once the provider's real counts arrived — a
+#: worse one.
+_LAST: ContextVar[Usage | None] = ContextVar("last_usage", default=None)
+
+
+def take_last() -> Usage | None:
+    """Read and clear, for the same reason as `take_reported`: an exchange that
+    never reached a model (an abstention) must not inherit the previous one."""
+    last = _LAST.get()
+    _LAST.set(None)
+    return last
+
+
 def measure(prompt: str, completion: str) -> Usage:
-    """Tokens in and out for one model exchange.
+    """Tokens in and out for one model exchange — the provider's numbers if it
+    reported any, otherwise the estimate.
+
+    Ollama returns `prompt_eval_count` and `eval_count` on every completion and
+    the adapter forwards them, so the deployed tier is billed on real tokens
+    rather than on words. When nothing was reported — the offline composer, a
+    provider that stays quiet — `count_tokens` stands in, and the Usage says so
+    rather than letting an approximation be quoted as a measurement.
 
     `count_tokens` is the same approximation the context budget uses (memory.py).
     Sharing it means the budget and the bill are denominated in the same unit; a
     real tokenizer swaps in there and both follow."""
-    return Usage(tokens_in=count_tokens(prompt), tokens_out=count_tokens(completion))
+    reported = take_reported()
+    used = reported or Usage(
+        tokens_in=count_tokens(prompt), tokens_out=count_tokens(completion)
+    )
+    _LAST.set(used)
+    return used

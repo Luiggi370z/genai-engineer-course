@@ -24,7 +24,16 @@ MCP_SPECS = [
 ]
 
 
-def discovered_registry() -> tuple[dict[str, Tool], list[tuple[str, dict]]]:
+#: What the operator reviewed and judged a read. Discovered tools are gated by
+#: default (`mcp_client.gate`), so these tests name the allowlist explicitly —
+#: without it every one of them would be a test about the approval pause rather
+#: than about selection, which is a different file.
+REVIEWED = ["lookup_fact", "word_count"]
+
+
+def discovered_registry(
+    allowlist: list[str] | None = None,
+) -> tuple[dict[str, Tool], list[tuple[str, dict]]]:
     """The builtin registry plus tools that arrived at runtime, and a log of what
     the MCP invoker was actually asked to call."""
     from assistant.mcp_client import extend_assistant
@@ -35,7 +44,9 @@ def discovered_registry() -> tuple[dict[str, Tool], list[tuple[str, dict]]]:
         calls.append((name, args))
         return {"called": name, "args": args}
 
-    return extend_assistant(REGISTRY, MCP_SPECS, invoker), calls
+    return extend_assistant(
+        REGISTRY, MCP_SPECS, invoker, REVIEWED if allowlist is None else allowlist
+    ), calls
 
 
 # --- the property Workshop 7 claimed -------------------------------------------
@@ -146,6 +157,35 @@ def test_the_whole_service_answers_using_a_discovered_tool():
     from assistant.service import build_assistant
     from assistant.settings import Settings
 
+    spec = {
+        "name": "lookup_fact",
+        "description": "Look up a company fact by topic. Use for policy questions.",
+        "required_args": ("topic",),
+        "read_only": True,
+    }
+    fact = lambda name, args: {  # noqa: E731
+        "fact": "Refunds are processed within five business days."
+    }
+
+    assistant = build_assistant(
+        Settings(mcp_readonly_allowlist=("lookup_fact",))
+    )
+    assistant.base_registry = extend_assistant(
+        assistant.base_registry, [spec], fact, ("lookup_fact",)
+    )
+    answer = assistant.ask("look up the company fact for the refund window")
+    assert "five business days" in answer["answer"]
+    assert answer["audit"] == ["ran: lookup_fact"]
+
+
+def test_the_same_discovered_tool_pauses_when_the_operator_never_reviewed_it():
+    """Same server, same self-description, no allowlist entry: the answer is an
+    approval pause rather than a fact. The tool's own claim about itself made no
+    difference, which is the property worth having."""
+    from assistant.mcp_client import extend_assistant
+    from assistant.service import build_assistant
+    from assistant.settings import Settings
+
     assistant = build_assistant(Settings())
     assistant.base_registry = extend_assistant(
         assistant.base_registry,
@@ -153,12 +193,13 @@ def test_the_whole_service_answers_using_a_discovered_tool():
             "name": "lookup_fact",
             "description": "Look up a company fact by topic. Use for policy questions.",
             "required_args": ("topic",),
+            "read_only": True,  # the server insists
         }],
         lambda name, args: {"fact": "Refunds are processed within five business days."},
     )
     answer = assistant.ask("look up the company fact for the refund window")
-    assert "five business days" in answer["answer"]
-    assert answer["audit"] == ["ran: lookup_fact"]
+    assert answer["pending"]["tool"] == "lookup_fact"
+    assert "five business days" not in answer["answer"]
 
 
 def test_a_gated_tool_still_gets_gated_when_the_planner_picks_it():

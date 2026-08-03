@@ -108,6 +108,11 @@ class Measured:
     tokens_in: int
     tokens_out: int
     runs: int
+    #: `counted`, `estimated`, or `mixed`. Beside the tokens rather than in the
+    #: prose, so the JSON the gate reads carries it too — a cost threshold set
+    #: against counted tokens means something different when the next run
+    #: estimates them.
+    tokens_source: str = "estimated"
     versions: dict[str, str] = field(default_factory=dict)
 
 
@@ -123,26 +128,55 @@ def versions_for(assistant: Assistant) -> dict[str, str]:
     raise NotImplementedError
 
 
-def run_evals(assistant: Assistant, meter: dict | None = None) -> evals.SuiteResult:
+def run_evals(
+    assistant: Assistant,
+    meter: dict | None = None,
+    judge: evals.Judge | None = None,
+) -> evals.SuiteResult:
     """TODO 2: score the live service against GOLDEN, counting what it consumed.
 
     Adapt `assistant.ask` into the `(answer, contexts)` shape `run_suite` wants
-    and score with the KeywordJudge. While you are in there, add up tokens with
-    `usage.measure` over the prompt `composers.grounded_prompt` would build and
-    the answer that came back, into `meter["in"]` / `meter["out"]`. The cost line
-    has to describe THIS workload, not a guess about a similar one — and it has
-    to use the same meter the compose span does, or the traces and the report
-    will quote different totals.
+    and score with `judge`, defaulting to the KeywordJudge. While you are in
+    there, total what each answer consumed into `meter["in"]` / `meter["out"]`.
+
+    Take the exchange `core.py` already metered — `usage.take_last()` — rather
+    than measuring it again here: re-measuring rebuilds a slightly different
+    prompt, and it would overwrite a count the provider reported with an
+    estimate. Fall back to `usage.measure` over the prompt
+    `composers.grounded_prompt` would build when there is nothing to take, which
+    is what an abstention leaves behind. Count the sources as you go —
+    `meter[used.source] += 1` — so the page can say which kind of number it is
+    printing.
+
+    The judge is a parameter for the same reason it is one in phase 3: the
+    release lane (`release.py`) scores these rows with RAGAS instead. One
+    harness, two rulers — rather than two harnesses that will one day disagree
+    for a reason nobody can find.
     """
     raise NotImplementedError
 
 
-def eval_section(result: evals.SuiteResult) -> str:
+#: What the offline tier's scores were produced by. A heading and a paragraph,
+#: because the number and the instrument have to travel together.
+OFFLINE_JUDGE_NOTE = (
+    "Scored by the deterministic `KeywordJudge` — lexical overlap, honestly "
+    "named. The `abstention` slice is judged by string check (did it refuse), "
+    "which is the slice a support assistant is actually hired for. For "
+    "model-judged RAGAS numbers, run `make release-evidence`."
+)
+
+
+def eval_section(
+    result: evals.SuiteResult,
+    heading: str = "Eval scores (offline judge)",
+    note: str = OFFLINE_JUDGE_NOTE,
+) -> str:
     """TODO 3: render the scored suite, per slice.
 
-    `evals.format_table(result)` inside a fenced code block under a
-    `## Eval scores (offline judge)` heading, closing with a sentence that NAMES
-    the judge — an unlabelled offline score is a lie with extra steps.
+    `evals.format_table(result)` inside a fenced code block under `## {heading}`,
+    closing with `note`. Both are parameters because the release lane renders the
+    same table under a real judge, and an unlabelled score is a lie with extra
+    steps whichever tier produced it.
     """
     raise NotImplementedError
 
@@ -167,13 +201,32 @@ def redteam_section(assistant: Assistant) -> tuple[str, bool]:
     return render_probes(run_probes(assistant))
 
 
-def latency_section(assistant: Assistant) -> str:
+#: The agent loop: planning and tool calls, no composition. What the offline
+#: tier can honestly measure.
+AGENT_RUN_SPAN = "agent.run"
+
+OFFLINE_LATENCY_NOTE = (
+    "Offline tier, so these are pipeline-overhead numbers; run "
+    "`make release-evidence` against the composed stack for model-tier "
+    "percentiles."
+)
+
+
+def latency_section(
+    assistant: Assistant, note: str = OFFLINE_LATENCY_NOTE, span: str = AGENT_RUN_SPAN
+) -> str:
     """TODO 6: percentiles read OFF THE SPANS — no timers of your own.
 
-    `assistant.rec.named("agent.run")` + `duration_ms` + `percentile` give you
-    P50/P95/P99; `time_by_tool` says where the wall clock went. Label the numbers
-    as offline-tier pipeline overhead and point at the composed stack for
-    model-tier percentiles.
+    `assistant.rec.named(span)` + `duration_ms` + `percentile` give you
+    P50/P95/P99; `time_by_tool` says where the wall clock went. Close with
+    `note`, then the sentence about P99 being the number the gate budgets — the
+    tail confesses before the mean does.
+
+    Print the span name you measured. Which one it is matters: the agent loop is
+    all the offline tier has, and on the deployed tier it excludes composition —
+    where every second of a real answer goes. The release page once quoted a
+    tenth of a millisecond under the words "real model time", and both halves
+    came out of this function.
     """
     raise NotImplementedError
 
@@ -189,11 +242,33 @@ def cost_usd(assistant: Assistant, tokens_in: int, tokens_out: int) -> float:
     raise NotImplementedError
 
 
+#: How the tokens on a page were arrived at, said in the same breath as the
+#: number. `estimated` is not a disclaimer to be buried: a word count and a
+#: tokenizer differ by a third on ordinary English, and the gap is systematic.
+TOKEN_SOURCE_NOTE = {
+    "counted": "counted by the provider (`prompt_eval_count` / `eval_count`)",
+    "estimated": "**estimated** by word split — the provider reported no counts",
+    "mixed": "**part estimated**: some exchanges were counted by the provider "
+    "and some fell back to a word split",
+}
+
+
+def token_source(meter: dict) -> str:
+    """Which of the three the run earned. Anything unmetered reads as estimated,
+    because the safe direction for a claim about measurement is downward."""
+    counted, estimated = meter.get("counted", 0), meter.get("estimated", 0)
+    if counted and estimated:
+        return "mixed"
+    return "counted" if counted else "estimated"
+
+
 def cost_section(assistant: Assistant, measured: Measured) -> str:
     """TODO 8: the cost story, honestly told for the tier that ran.
 
     State the tier, the price list, the dollars, and the token counts behind
-    them. "Zero because we made no calls" is only credible next to the count.
+    them. "Zero because we made no calls" is only credible next to the count —
+    and neither is credible without `TOKEN_SOURCE_NOTE[measured.tokens_source]`
+    beside it, because an estimate and an invoice print identically.
     """
     raise NotImplementedError
 
@@ -210,16 +285,32 @@ def decisions_section() -> str:
     raise NotImplementedError
 
 
+def provenance(assistant: Assistant, tokens: str = "estimated") -> str:
+    """TODO 11: a blockquote naming what this page measured, printed BEFORE the
+    first number rather than after the last one.
+
+    The retrieval and composer tiers, the judge, how many golden rows and probes
+    ran, how the tokens were arrived at (`TOKEN_SOURCE_NOTE[tokens]`) — and a
+    pointer to `make release-evidence` as the full-fidelity equivalent.
+
+    The failure this prevents is not a wrong number; every number below is
+    correct for what it measured. It is a number quoted somewhere else without
+    its instrument: "faithfulness 0.94" reads like a RAGAS score, and this one is
+    lexical overlap against an in-memory retriever.
+    """
+    raise NotImplementedError
+
+
 def measure(assistant: Assistant | None = None) -> tuple[str, Measured]:
-    """TODO 11: one trial run, rendered for both audiences.
+    """TODO 12: one trial run, rendered for both audiences.
 
     Build the offline assistant when none is given, ingest CORPUS, run the evals
     once and the probes once, then assemble BOTH outputs from those results:
 
     - the page: a header carrying the date, the tier report and the red-team
       verdict (say 'CONTAINMENT FAILURE — do not ship' when a probe breached — a
-      portfolio that hides a breach is worse than no portfolio), then the
-      sections in order
+      portfolio that hides a breach is worse than no portfolio) and the
+      provenance block, then the sections in order
     - the `Measured` record: faithfulness and recall from `suite.overall`,
       `redteam_bypasses` as the COUNT of probes that were not contained (CI does
       not read prose), P99 from the run spans, cost from your token meter, and
@@ -248,13 +339,13 @@ def main() -> int:
     Path(args.out).write_text(page)
     json_path = Path(args.json)
     json_path.parent.mkdir(parents=True, exist_ok=True)
-    json_path.write_text(_dump(measured))
+    json_path.write_text(dump(measured))
     print(f"wrote {args.out} and {json_path}")
     return 0 if "CONTAINMENT FAILURE" not in page else 1
 
 
-def _dump(measured: Measured) -> str:
-    """TODO 12: the record as pretty, sorted JSON with a trailing newline — a
+def dump(measured: Measured) -> str:
+    """TODO 13: the record as pretty, sorted JSON with a trailing newline — a
     report a human can diff between two runs."""
     raise NotImplementedError
 

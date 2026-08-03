@@ -48,6 +48,25 @@ def services_without_healthcheck(services: dict) -> list[str]:
     raise NotImplementedError
 
 
+def cold_model_healthchecks(services: dict) -> list[str]:
+    """TODO 9: services that report healthy on a model that is merely DOWNLOADED.
+
+    `ollama list` is satisfied by a file on disk. Loading a 9B into memory on
+    CPU takes minutes and the composer's budget is sixty seconds, so a stack
+    that goes healthy on the download alone times out its own first request and
+    answers it from the fallback — every probe green, the answer degraded. This
+    happened here; it is why the compose file warms the model and touches
+    `/tmp/warm` before the check will pass.
+
+    Flatten the `healthcheck.test` (it comes as a list or a string) and flag any
+    service whose probe mentions `ollama list` without also requiring
+    `/tmp/warm`. Narrow on purpose: reading a compose file cannot tell a warmup
+    sentinel from any other file, and `/ready` on the assistant is what proves
+    the round trip.
+    """
+    raise NotImplementedError
+
+
 def weak_dependencies(services: dict) -> list[str]:
     """TODO 4: every depends_on edge that waits for START instead of HEALTH, as
     "name -> target" strings. The list form (`depends_on: [qdrant]`) is always weak;
@@ -99,6 +118,7 @@ def secure_overlay_problems(base_path: str | Path, overlay_path: str | Path) -> 
 
 def compose_ok(compose_path: str | Path) -> tuple[bool, list[str]]:
     """TODO 6: the whole review at once — (ok, problems). Missing services, unpinned
-    images, missing healthchecks, weak dependencies, any published port that isn't
-    the assistant's, and an assistant that publishes nothing at all."""
+    images, missing healthchecks, weak dependencies, cold-model healthchecks, any
+    published port that isn't the assistant's, and an assistant that publishes
+    nothing at all."""
     raise NotImplementedError

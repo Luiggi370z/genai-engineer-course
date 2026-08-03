@@ -27,12 +27,46 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 
 #: (ok, cleaned_or_reason) — the shape every screen in this codebase speaks, so
 #: a hardened one can be substituted wherever a plain one is expected.
 Screen = Callable[[str], tuple[bool, str]]
 
-PII = [re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), re.compile(r"[\w.+-]+@[\w-]+\.[\w.]+")]
+
+@dataclass(frozen=True)
+class Bounded:
+    """A pattern together with the longest run of text it can match.
+
+    The streaming gate in `output_gate.py` releases a prefix only once no
+    still-forming match could reach back into it. That decision needs a number,
+    and a number that is wrong in the unsafe direction leaks. Keeping the span
+    beside the pattern means the two are edited together; `test_stream.py`
+    checks each declaration against the compiled regex, so a pattern that
+    outgrows its bound fails the suite instead of quietly shrinking the window.
+    """
+
+    pattern: re.Pattern[str]
+    max_span: int
+
+    def search(self, text: str) -> re.Match[str] | None:
+        return self.pattern.search(text)
+
+    def sub(self, repl: str, text: str) -> str:
+        return self.pattern.sub(repl, text)
+
+
+#: Every span here is bounded on purpose: `output_gate.HOLDBACK_CHARS` is derived
+#: from these numbers, so an unbounded quantifier in this list would turn the
+#: window into a guess and the gate's guarantee into a hope. See ADR-0006.
+PII = [
+    Bounded(re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), 11),
+    # RFC 5321 caps the local part at 64 characters and each domain label at 63;
+    # four labels is more than a real address needs. Bounding the repetition
+    # costs no detection: an over-long local part still matches on its last 64
+    # characters, which is enough for the gate to refuse the answer.
+    Bounded(re.compile(r"[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,4}"), 384),
+]
 
 #: Matched against the EXPANDED text, where ordinary spacing still exists.
 INJECTION = [

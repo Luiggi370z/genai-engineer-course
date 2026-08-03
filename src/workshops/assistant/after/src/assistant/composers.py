@@ -28,6 +28,18 @@ StreamComposer = Callable[
 ]
 
 
+class StreamTruncated(Exception):
+    """Raised by a `StreamComposer` that stopped partway through an answer.
+
+    Part of the streaming contract rather than an error to swallow: chunks are
+    already on the wire, so the stream cannot restart, but the fragment left
+    behind is not the answer either. A model that dies mid-sentence tends to
+    leave something grammatical, and grammatical reads as complete — which is
+    how a truncation gets filed as a bad answer instead of a failed request.
+    `output_gate` turns this into an explicit `truncated` terminal event.
+    """
+
+
 def citations_for(contexts: list) -> list[dict]:
     """Structured citations for the response: [c1] is contexts[0] and so on. The
     grounded prompt labels evidence with the same ids, so a model-tier answer can
@@ -75,6 +87,25 @@ def grounded_prompt(
     )
 
 
+def memory_prompt(goal: str, memories: list[str]) -> str:
+    """The prompt for an answer whose only evidence is what the caller said.
+
+    Deliberately not `grounded_prompt` with the documents left out. That prompt
+    demands `[c#]` citations, and a model asked to cite when there is nothing to
+    cite invents an id — which is how a remembered preference gets served
+    wearing a document's authority. This one has no citation slot to fill and
+    asks for the attribution that is actually true: they told us.
+    """
+    recalled = "\n".join(f"- {guardrails.spotlight(m)}" for m in memories)
+    return (
+        "Answer the question using ONLY what this person told you earlier, "
+        "below, in one sentence. Say that they told you. Do NOT cite sources or "
+        "use [c#] markers — there are no documents here. If what they told you "
+        f"does not answer the question, reply exactly: {ABSTAIN}\n\n"
+        f"What they told you earlier:\n{recalled}\n\nQuestion: {goal}"
+    )
+
+
 def _shares_a_content_word(goal: str, context: str) -> bool:
     """Lexical overlap on words long enough to mean something. A goal with no
     content words at all cannot be judged, so its contexts get the benefit of
@@ -84,6 +115,62 @@ def _shares_a_content_word(goal: str, context: str) -> bool:
         return True
     lowered = context.lower()
     return any(w in lowered for w in words)
+
+
+def relevant_contexts(goal: str, contexts: list | None) -> list:
+    """The retrieved contexts that could plausibly answer THIS question.
+
+    The same filter as `relevant_memories`, and it has to be applied in the same
+    places, because "we retrieved something" and "we retrieved an answer" are
+    different facts. BM25 conflates them harmlessly — no overlap, no hit — but a
+    vector store returns the nearest neighbours of any question, so with Qdrant
+    behind it `contexts` is never empty. The deployed stack answered a timezone
+    question with "I don't know [c1][c2]" while the caller's own timezone sat two
+    fields away in the same response: the documents were present, irrelevant, and
+    still counted as the evidence class, which sent the question to the prompt
+    that demands citations instead of the one that can use a memory.
+    """
+    return [ctx for ctx in contexts or [] if _shares_a_content_word(goal, str(ctx))]
+
+
+def relevant_memories(goal: str, memories: list[str] | None) -> list[str]:
+    """The memories that could plausibly answer THIS question.
+
+    The filter is what keeps memory from becoming a licence to answer anything.
+    Recall is cheap and greedy — it returns what it has about the caller — so
+    without a relevance check, knowing someone's timezone would turn every
+    unanswerable question about the refund policy into an answer about Lima.
+    """
+    return [m for m in memories or [] if _shares_a_content_word(goal, m)]
+
+
+def grounding_of(
+    contexts: list[str],
+    state: list[tuple[Step, Any]],
+    memories: list[str] | None,
+    goal: str = "",
+) -> str:
+    """Which class of evidence an answer stands on: documents, tools, memory, or
+    nothing.
+
+    Worth reporting because the three are not interchangeable to a reader. A
+    document-grounded answer is checkable against a citation; a memory-grounded
+    one is only as good as what the caller said about themselves, and has no
+    citation by design (ADR-0008). Collapsing them leaves the caller unable to
+    tell "the handbook says" from "you said".
+
+    Relevance, not presence. `if contexts:` was true of every request the moment
+    the store became a vector index, which made "documents" the answer to a
+    question nobody had asked and made the memory class unreachable in the
+    deployed stack while passing every offline test.
+    """
+    if relevant_contexts(goal, contexts):
+        return "documents"
+    if state:
+        return "tools"
+    if relevant_memories(goal, memories):
+        return "memory"
+    return "none"
 
 
 def offline_compose(
@@ -101,11 +188,13 @@ def offline_compose(
     "relevant". Answering an unrelated snippet would be a fabricated grounding,
     which is the one failure an abstaining assistant exists to prevent.
 
-    Recalled memories are appended, never substituted: knowing the caller's
-    timezone does not answer a question about refunds, and a stitcher that
-    dressed a memory up as an answer would abstain less and lie more."""
+    Recalled memories decorate a document answer and never replace one: knowing
+    the caller's timezone does not answer a question about refunds. But when
+    memory is the ONLY evidence and it does bear on the question, it answers —
+    attributed, uncited. Abstaining there was the older, worse bug: "Lima" sat
+    in the response metadata while the answer said it did not know."""
     fetched = [str(out) for _, out in state]
-    grounded = [ctx for ctx in contexts if _shares_a_content_word(goal, ctx)]
+    grounded = relevant_contexts(goal, contexts)
     if grounded:
         answer = grounded[0]
         if fetched:
@@ -113,6 +202,11 @@ def offline_compose(
         return _with_memories(answer, memories)
     if fetched:
         return _with_memories(" ".join(fetched), memories)
+    recalled = relevant_memories(goal, memories)
+    if recalled:
+        # Phrased as attribution, not as fact. The assistant did not look this
+        # up and must not sound like it did.
+        return "You told me earlier: " + "; ".join(recalled) + "."
     return ABSTAIN
 
 
@@ -133,13 +227,27 @@ def model_composer(host: str, model: str) -> Composer:
         state: list[tuple[Step, Any]],
         memories: list[str] | None = None,
     ) -> str:
-        if not contexts and not state:
+        recalled = relevant_memories(goal, memories)
+        grounded = relevant_contexts(goal, contexts)
+        if not grounded and not state and not recalled:
             return ABSTAIN
         from assistant.adapters import ollama_generate
 
-        return ollama_generate(
-            grounded_prompt(goal, contexts, state, memories), host=host, model=model
+        # Memory-only questions get their own prompt, because the grounded one
+        # asks for [c#] citations and there is nothing here to number.
+        #
+        # Keyed on RELEVANT contexts rather than on any: a vector store hands
+        # back three neighbours for "which timezone should we schedule in", and
+        # the grounded prompt then instructs the model to answer from those and
+        # cite them — so it abstains, correctly, on evidence that was never the
+        # evidence. The memory it needed was in the prompt the whole time, in a
+        # block the instructions did not permit it to use.
+        prompt = (
+            memory_prompt(goal, recalled)
+            if not grounded and not state
+            else grounded_prompt(goal, contexts, state, memories)
         )
+        return ollama_generate(prompt, host=host, model=model)
 
     return compose
 
@@ -172,13 +280,21 @@ def model_stream_composer(host: str, model: str) -> StreamComposer:
         state: list[tuple[Step, Any]],
         memories: list[str] | None = None,
     ) -> Iterator[str]:
-        if not contexts and not state:
+        recalled = relevant_memories(goal, memories)
+        grounded = relevant_contexts(goal, contexts)
+        if not grounded and not state and not recalled:
             yield ABSTAIN
             return
         from assistant.adapters import ollama_stream
 
-        yield from ollama_stream(
-            grounded_prompt(goal, contexts, state, memories), host=host, model=model
+        # Same choice as the batch composer, on the same terms. Streaming and
+        # batch answering the same question differently is a bug a client sees
+        # and nobody can explain.
+        prompt = (
+            memory_prompt(goal, recalled)
+            if not grounded and not state
+            else grounded_prompt(goal, contexts, state, memories)
         )
+        yield from ollama_stream(prompt, host=host, model=model)
 
     return stream

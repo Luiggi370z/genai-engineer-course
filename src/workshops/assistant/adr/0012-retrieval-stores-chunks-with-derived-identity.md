@@ -1,6 +1,7 @@
 # ADR-0012 — Retrieval stores chunks with derived identity, not strings with counters
 
-**Status:** accepted
+**Status:** accepted (amended — see "Amendment: the collection is named after the
+embedder, and the search uses both arms")
 
 ## Context
 
@@ -82,6 +83,48 @@ the source, version and offsets, so a document with an email address in it is
 still attributable and still deletable. The alternative creates an incentive to
 screen less.
 
+## Amendment: the collection is named after the embedder, and the search uses both arms
+
+Three things were wrong with the decision above once it met a deployed stack.
+
+**The injected embedder was never injected.** The compose file pulled
+`nomic-embed-text` and never set `ASSISTANT_EMBED_MODEL`, so the store ran on the
+64-dimension hash vector. Every check passed, because every check asked about
+"refunds" using the word "refunds". A hash vector matches shared vocabulary, so a
+question phrased in the corpus's own words works perfectly and a question phrased
+in anyone else's returns nothing — which reads as a thin corpus, not as a
+misconfiguration. `tier.embed` on `/health` now names the embedder in use and
+says `hash (not semantic)` when that is the truth, and the E2E asks one question
+that shares no vocabulary with its answer's source.
+
+**"A new collection name plus a re-ingest" was advice, and advice does not
+execute.** Qdrant validates the dimension of an incoming vector and nothing else,
+so swapping one 768-wide model for another writes cleanly into the old
+collection, searches cleanly, and returns noise. There is no error at any point.
+The collection name therefore carries the embedder and its width —
+`assistant__nomic-embed-text__768` — so a model swap creates a new, empty
+collection: wrong on the first query, in a way somebody notices, instead of wrong
+forever in a way nobody does.
+
+**The capstone retrieved with one arm.** Phase 2 teaches dense + sparse fused
+with RRF and the capstone shipped dense-only, which is the course contradicting
+itself in the artifact it points at as the answer. `QdrantStore.search` now runs
+both prefetches with a server-side `FusionQuery(Fusion.RRF)` — Qdrant's own
+fusion rather than a Python reimplementation of it — with the tenant filter on
+*both* arms, because a filter applied to one of two prefetches is not a filter.
+Sparse vectors use the collection's IDF modifier, so term weighting is the
+store's job rather than the client's.
+
+**Vector search never abstains.** `ASSISTANT_MIN_SCORE` is a floor on the DENSE
+similarity — not on the fused score, which is a reciprocal rank and means nothing
+as a magnitude. Default 0.0, because the useful cut depends on the embedder and
+the corpus and a wrong one abstains on good answers; the mechanism is what ships,
+tuned per deployment. `ASSISTANT_RERANK_MODEL` adds an optional cross-encoder
+over the fused candidates, which scores query and passage *together* rather than
+comparing two vectors computed apart. It is off by default: a second model on the
+request path, and hybrid already buys most of what it would. A missing
+`fastembed` reports a degradation and retrieval carries on unreranked.
+
 ## Alternatives considered
 
 Hashing the text into the id (turns every edit into a new point and orphans the
@@ -113,6 +156,14 @@ and the in-memory BM25 index is rebuilt on every `add`. Both are fine at worksho
 sizes and both are the first things to change under real volume.
 
 Switching `ASSISTANT_EMBED_MODEL` invalidates an existing collection — different
-vectors, possibly a different dimension. `ASSISTANT_QDRANT_COLLECTION` sits next
-to it in `settings.py` for exactly this reason, and the safe migration is a new
-collection name plus a re-ingest, which is now cheap because ids are stable.
+vectors, possibly a different dimension. Under the amendment this is handled by
+the store rather than by remembering: the new model gets a new collection and the
+old vectors stay where they are, unread. The cost is that a model swap needs a
+re-ingest before the assistant can answer anything, which is the loud version of
+a failure that used to be silent, and cheap because ids are stable.
+
+Hybrid retrieval issues two prefetches per search instead of one query, and
+over-fetches four times `k` per arm so RRF has something to fuse. At workshop
+corpus sizes this is not measurable; it is the first thing to tune under volume.
+The threshold check costs a third query when `ASSISTANT_MIN_SCORE` is set, which
+is why the default leaves it off.

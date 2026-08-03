@@ -22,27 +22,58 @@
  * sub-second loop. It runs in `pnpm verify` and in CI, after the build.
  *
  * A known blind spot, stated rather than hidden: jsdom has no layout engine, so
- * colour contrast and focus-visible cannot be checked here and axe reports them as
- * incomplete. Those need a real browser.
+ * colour contrast, focus-visible and scroll-container reachability cannot be
+ * decided here — axe reports them as *incomplete*, and incomplete results are not
+ * failures. `check-a11y-browser.mjs` covers exactly those rules in Chromium across
+ * both viewports and both themes. This tier stays because it runs in two seconds
+ * with no browser download; that one runs in `pnpm verify-full` and in CI.
  */
 import { readFileSync } from "node:fs";
+import { glob } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { JSDOM, VirtualConsole } from "jsdom";
-import { keyboardFindings, MIN_NAV_LABEL_PX, navLabelFindings } from "./lib/a11y.mjs";
+import {
+  accentContrastFindings,
+  keyboardFindings,
+  MIN_CONTRAST,
+  MIN_NAV_LABEL_PX,
+  navLabelFindings,
+  scrollRegionFindings,
+} from "./lib/a11y.mjs";
+import { loadCourseData } from "./lib/load-data.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = resolve(here, "..");
 const report = process.argv.includes("--report");
 
-/** The files that *are* the navigation, for the label-size floor. */
-const NAV_SOURCES = [
-  "src/App.tsx",
-  "src/components/layout/Sidebar.tsx",
-  "src/components/phase/PhaseToc.tsx",
-  "src/components/phase/SectionBar.tsx",
-];
+/**
+ * The surfaces a phase accent is drawn on, per theme, from `src/styles/index.css`.
+ * `--color-card` is every card and the sidebar; `--color-paper` is the page
+ * behind them.
+ */
+const SURFACES = {
+  light: { card: "#ffffff", paper: "#f6f7f4" },
+  dark: { card: "#1c211f", paper: "#111413" },
+};
+// Both matter: a phase chip on the dashboard sits on a card, and the same chip
+// in the sticky section bar sits on paper. Paper is the tighter of the two in
+// light mode, which is where the first attempt at this palette came up short.
+
+/**
+ * Every rendered component, for the label-size floor.
+ *
+ * This used to be four hand-listed navigation files, on the theory that nav
+ * chrome is the type a reader cannot skip. The round-3 audit then found 9.5px
+ * kickers on exercise cards, callouts and the electives shelf — all outside the
+ * list. A floor with an allowlist is not a floor.
+ */
+async function labelSources() {
+  const files = ["src/App.tsx"];
+  for await (const path of glob("src/components/**/*.tsx", { cwd: app })) files.push(path);
+  return files.sort();
+}
 
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "best-practice"];
 
@@ -174,6 +205,9 @@ if (!phaseButton) {
     fail("journey", "sidebar", "the active phase does not carry aria-current=page");
   }
   collect("phase view", keyboardFindings(doc));
+  // Here rather than at the end: the code blocks and the wide tables only exist
+  // inside a phase, and they are the scroll containers this rule is about.
+  collect("phase view", scrollRegionFindings(doc));
 
   // Both section navigators, and every chip in them, must point at a heading that
   // is actually on the page. A dead entry in a table of contents is a keyboard
@@ -221,14 +255,26 @@ if (dashButton) {
 
 // --- the label-size floor ---------------------------------------------------
 const sources = Object.fromEntries(
-  NAV_SOURCES.map((file) => [file, readFileSync(resolve(app, file), "utf8")]),
+  [...(await labelSources())].map((file) => [file, readFileSync(resolve(app, file), "utf8")]),
 );
-collect("nav labels", navLabelFindings(sources));
+collect("labels", navLabelFindings(sources, MIN_NAV_LABEL_PX, "label-size"));
+
+// --- phase accents, against the surfaces they are drawn on ------------------
+// Data, not DOM: jsdom resolves every custom property to nothing, so the only
+// honest place to check a palette here is the palette. The browser tier measures
+// the rendered pixels.
+const { phases } = await loadCourseData();
+collect("accents", accentContrastFindings(phases, SURFACES));
+
+// --- scroll containers, on the dashboard too --------------------------------
+collect("dashboard", scrollRegionFindings(doc));
 
 // --- report -----------------------------------------------------------------
 console.log(
   `A11y scan · ${doc.querySelectorAll("button, a[href], input").length} controls · ` +
-    `axe ${AXE_TAGS.length} rule sets · nav label floor ${MIN_NAV_LABEL_PX}px`,
+    `axe ${AXE_TAGS.length} rule sets · ${Object.keys(sources).length} components at the ` +
+    `${MIN_NAV_LABEL_PX}px label floor · ${phases.length} accents × ` +
+    `${Object.keys(SURFACES).length} themes at ${MIN_CONTRAST}:1`,
 );
 if (report) {
   const stops = [...doc.querySelectorAll("a[href], button:not([disabled]), input:not([disabled])")];

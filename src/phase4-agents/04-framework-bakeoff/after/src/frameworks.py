@@ -72,8 +72,10 @@ class Run:
     framework: str
     answer: str
     tool_calls: tuple[str, ...]
-    #: Did the framework leave state behind that a second invocation can read?
-    #: Measured by asking it, not by trusting the README.
+    #: Did the framework leave state behind that something OTHER than the object
+    #: that produced it can read back? Measured by asking, not by trusting the
+    #: README — and the "other object" part is what makes the answer mean
+    #: anything. An agent that remembers its own last call is not durable.
     resumable: bool
 
     def used_the_tool(self) -> bool:
@@ -83,21 +85,17 @@ class Run:
 # --- LangGraph -----------------------------------------------------------------
 
 
-def langgraph_run(topic: str = TOPIC, thread: str = "bakeoff") -> Run:
-    """A two-node graph — look up, then answer — compiled with a checkpointer.
+def _langgraph_app(checkpointer, recorder: Recorder):
+    """The two-node graph, compiled against whichever checkpointer it is given.
 
-    The glue is the cost and the durability is the payoff. You declare a state
-    schema, add nodes, wire edges, compile, and pass a `thread_id` on every
-    invoke. In exchange, the run's state is addressable afterwards: `get_state`
-    returns it, and a second invocation on the same thread continues rather than
-    starts over. Nothing else here offers that without a database.
+    Split out from `langgraph_run` so the measurement below can build a SECOND
+    app over the SAME checkpointer. That is the only way to tell the difference
+    between "this object still remembers what it just did" and "the state
+    outlived the object" — and only the second one is checkpointing.
     """
     from typing import TypedDict
 
-    from langgraph.checkpoint.memory import MemorySaver
     from langgraph.graph import END, StateGraph
-
-    recorder = Recorder()
 
     class State(TypedDict, total=False):
         topic: str
@@ -116,13 +114,38 @@ def langgraph_run(topic: str = TOPIC, thread: str = "bakeoff") -> Run:
     graph.set_entry_point("look_up")
     graph.add_edge("look_up", "answer")
     graph.add_edge("answer", END)
-    app = graph.compile(checkpointer=MemorySaver())
+    return graph.compile(checkpointer=checkpointer)
+
+
+def langgraph_run(topic: str = TOPIC, thread: str = "bakeoff", checkpointer=None) -> Run:
+    """A two-node graph — look up, then answer — compiled with a checkpointer.
+
+    The glue is the cost and the durability is the payoff. You declare a state
+    schema, add nodes, wire edges, compile, and pass a `thread_id` on every
+    invoke. In exchange, the run's state is addressable afterwards, by something
+    other than the object that produced it. Nothing else here offers that
+    without a database.
+
+    `checkpointer` is a parameter because the measurement depends on it and the
+    matrix's claim depends on the measurement. Pass a `SqliteSaver` and
+    `resumable` means "survives this process"; the default `MemorySaver` means
+    "survives this object". The earlier version built a fresh `MemorySaver`
+    inside the function and then asked that same app whether it remembered —
+    which it did, always, and which proved nothing at all.
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+
+    saver = checkpointer if checkpointer is not None else MemorySaver()
+    recorder = Recorder()
+    app = _langgraph_app(saver, recorder)
 
     config = {"configurable": {"thread_id": thread}}
     out = app.invoke({"topic": topic}, config)
-    # Not "LangGraph has checkpointing" — a measurement. The state is there, or
-    # the claim in the matrix is not ours to make.
-    resumable = bool(app.get_state(config).values.get("answer"))
+    # Not "LangGraph has checkpointing" — a measurement, and one taken from
+    # outside: a different compiled app, sharing only the checkpointer, has to
+    # be able to read this run's final state back by thread id.
+    observer = _langgraph_app(saver, Recorder())
+    resumable = bool(observer.get_state(config).values.get("answer"))
     return Run("langgraph", out.get("answer", ""), tuple(recorder.calls), resumable)
 
 

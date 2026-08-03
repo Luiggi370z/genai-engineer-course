@@ -1,5 +1,7 @@
 # Workshop · Personal assistant  (ends Phase 4)
 
+**Effort.** ~2.5 h of focused build time · +30 min for the integration tier · ~5 h realistic first pass.
+
 Give the assistant an agent loop and real tools: read email, read news, send a
 Telegram message, schedule an event. Everything is a tool; sends/schedules are
 gated behind human approval.

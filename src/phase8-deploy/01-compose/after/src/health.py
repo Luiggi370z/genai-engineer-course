@@ -76,6 +76,29 @@ def services_without_healthcheck(services: dict) -> list[str]:
     return [name for name, spec in services.items() if "healthcheck" not in (spec or {})]
 
 
+def cold_model_healthchecks(services: dict) -> list[str]:
+    """Services whose healthcheck proves a model is DOWNLOADED but not LOADED.
+
+    `ollama list` is satisfied by a file on disk. Loading a 9B into memory on
+    CPU takes minutes and the composer's budget is sixty seconds, so a stack
+    that goes healthy on the download alone times out its own first request and
+    answers it from the fallback — every probe green, the answer degraded.
+
+    The rule is narrow on purpose: a healthcheck that mentions `ollama list`
+    must also depend on something a completed generation produced. It cannot
+    tell a warmup sentinel from any other file, which is the honest limit of
+    reading a compose file rather than running it; `/ready` on the assistant is
+    what proves the round trip.
+    """
+    offenders = []
+    for name, spec in services.items():
+        test = (spec or {}).get("healthcheck", {}).get("test")
+        probe = " ".join(test) if isinstance(test, list) else str(test or "")
+        if "ollama list" in probe and "/tmp/warm" not in probe:
+            offenders.append(name)
+    return offenders
+
+
 def weak_dependencies(services: dict) -> list[str]:
     """depends_on entries that wait for START instead of HEALTH. The list form
     (`depends_on: [qdrant]`) is always weak; the map form must say
@@ -179,6 +202,10 @@ def compose_ok(compose_path: str | Path) -> tuple[bool, list[str]]:
     problems += [f"unpinned image on: {name}" for name in unpinned_images(services)]
     problems += [f"no healthcheck on: {name}" for name in services_without_healthcheck(services)]
     problems += [f"waits for start, not health: {edge}" for edge in weak_dependencies(services)]
+    problems += [
+        f"healthy on a cold model: {name} — the download is not the readiness"
+        for name in cold_model_healthchecks(services)
+    ]
     ports = published_ports(services)
     problems += [
         f"{name} publishes {ports[name]} — internal services stay internal"

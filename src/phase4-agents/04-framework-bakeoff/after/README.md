@@ -24,11 +24,21 @@ The single assertion allowed to differ is durability, because it *is* the
 finding: `test_only_langgraph_leaves_state_a_second_call_can_resume` reads
 `resumable` back out of `get_state` rather than trusting the docs.
 
+Read back by *something else*, which is the part that took a second pass to get
+right. The first version built a fresh `MemorySaver` inside `langgraph_run` and
+then asked that same compiled app whether it remembered the call it had just
+made. It always said yes. The column measured object identity and printed it as
+durability. Now the checkpointer is a parameter, a second app over the same
+checkpointer takes the reading, and
+`test_the_durability_claim_is_measured_across_processes_not_within_one` does it
+over SQLite with a closed connection in between — which is what "survives a
+crash" has to mean before it goes in a table someone will act on.
+
 ## The six dimensions, and why these six
 
 | dimension | measured by | decides |
 |---|---|---|
-| durability | `Run.resumable`, read back from the store | whether you need a database |
+| durability | `Run.resumable`, read back by a DIFFERENT app over the same store | whether you need a database |
 | recovery | did a killed run resume | whether a crash costs the user their work |
 | complexity | lines of *your* glue | what the next engineer's week looks like |
 | observability | spans the run emitted | whether you can debug it at 2am |
@@ -87,10 +97,16 @@ controls are dependencies; values the model chooses are arguments.
 Python **3.12**, and `qwen3.5:9b` must exist **on the host** (Ollama at
 `localhost:11434`). On a newer interpreter CrewAI dies inside Chroma's Pydantic
 v1 shim (`unable to infer type for attribute "chroma_server_nofile"`) — a
-version bound wearing a library bug's clothes, which `_require_crewai()` skips
-with that message rather than a traceback. A model pulled into a Docker volume
-is likewise unreachable from a host-run test.
+version bound wearing a library bug's clothes.
 
-Both skips are findings: the other two run offline on any supported Python,
-while CrewAI constrains the interpreter and cannot be tested without a live
-model. That is the observability column, measured.
+So the bound is declared where it binds: `requires-python = ">=3.12,<3.13"` in
+this lesson's `pyproject.toml`, which makes `uv sync` fetch a 3.12, and a
+`tests/conftest.py` guard that refuses to collect on anything else and names the
+interpreter in the failure. The rest of the course is 3.11+. Isolating the pin to
+one lesson beats raising the course floor for one framework, and beats a skip
+that quietly turns "cannot run" into "passed".
+
+What is still skipped is the model: one pulled into a Docker volume is
+unreachable from a host-run test. That skip is a finding — the other two run
+offline, while CrewAI constrains the interpreter and cannot be tested without a
+live model. That is the observability column, measured.

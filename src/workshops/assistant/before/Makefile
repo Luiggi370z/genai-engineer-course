@@ -6,6 +6,31 @@ GATE := ../../../phase8-deploy/02-ci/after
 report:           ## run the service on trial: PORTFOLIO.md for humans, evals/report.json for CI
 	PYTHONPATH=src uv run python -m assistant.report
 
+# The same trial against the system that ships. `report` measures an offline
+# proxy in one second and says so; this measures the deployed stack — Qdrant with
+# the semantic embedder, reranking on, a RAGAS judge, all 58 red-team rows with
+# their benign controls — and refuses to run if any component has fallen back.
+#
+# It needs the composed stack up and these five variables pointing at it. There
+# is no default that quietly works: a release number produced against localhost
+# defaults nobody checked is the failure this whole lane exists to prevent.
+#
+#   cd ../../phase8-deploy/01-compose/after && docker compose up -d
+#   make release-evidence
+#
+# Full instructions, and what to do with the output: docs/RELEASE-CHECKLIST.md
+RELEASE_ENV := QDRANT_URL=$${QDRANT_URL:-http://localhost:6333} \
+  OLLAMA_HOST=$${OLLAMA_HOST:-http://localhost:11434} \
+  ASSISTANT_EMBED_MODEL=$${ASSISTANT_EMBED_MODEL:-nomic-embed-text} \
+  ASSISTANT_RERANK_MODEL=$${ASSISTANT_RERANK_MODEL:-BAAI/bge-reranker-base} \
+  ASSISTANT_DB=$${ASSISTANT_DB:-evidence/release.db}
+
+.PHONY: release-evidence
+release-evidence: ## full fidelity: deployed stack, RAGAS judge, the whole red-team dataset
+	@mkdir -p evidence
+	$(RELEASE_ENV) PYTHONPATH=src \
+	  uv run --group integration --group release python -m assistant.release
+
 # The merge gate, over the report THIS code just produced rather than a committed
 # fixture. Same CLI the workflow calls, so a gate that would block in CI blocks on
 # a laptop first — which is the only place a red gate is cheap.
@@ -49,9 +74,9 @@ defect-lab:       ## your regression tests must pass on the fix and fail on ever
 # whole course, folding the capstone numbers together with whatever the earlier
 # phases left behind in evidence/.
 #
-# The stamp above is why the log can be trusted: evidence/defect-lab.json is
+# The stamp above is why this target can be trusted: evidence/defect-lab.json is
 # written by the lab AFTER it passes, never by hand. Every artifact the log reads
-# arrives the same way, which is what separates "proven" from "claimed".
+# is produced the same way, which is what separates "proven" from "claimed".
 .PHONY: evidence
 evidence:         ## EVIDENCE.md + evidence/manifest.json across all nine phases
 	PYTHONPATH=src uv run python -m assistant.evidence

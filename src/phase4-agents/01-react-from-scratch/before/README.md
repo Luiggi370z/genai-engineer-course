@@ -5,7 +5,7 @@ leash (a hard step cap and a wall-clock deadline) living in code, not in a promp
 Once you've written it, no framework loop is magic again.
 **Prerequisite.** 1.1 Universal client (the `decide` brain you'll inject in prod is
 your `complete()` call).
-**Effort.** ~30 min · gentle
+**Effort.** ~30 min to green on the fast tests · no integration tier · ~50 min realistic first pass.
 
 ## Do this
 

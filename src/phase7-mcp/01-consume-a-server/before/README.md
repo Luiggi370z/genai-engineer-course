@@ -2,7 +2,7 @@
 
 **Goal.** Be an MCP client before you build a server — implement the five protocol beats (connect, initialize, discover, call, close) with the v2 SDK (`mcp>=2.0.0`), so when something later breaks you know which side of the wire to blame. `src/demo_server.py` ships complete as the thing to point at.
 **Prerequisite.** 4.2 Tools (what a tool schema is and why the model reads it).
-**Effort.** ~30 min · gentle
+**Effort.** ~30 min to green on the fast tests · no integration tier · ~50 min realistic first pass.
 
 ## Do this
 

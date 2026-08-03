@@ -136,10 +136,21 @@ jobs:
       # a student actually opens, not a component rendered in isolation.
       - run: pnpm check-a11y
         working-directory: app
+      # jsdom has no layout engine, so `color-contrast` and
+      # `scrollable-region-focusable` come back "incomplete" there and the step
+      # above cannot fail on them. This one runs the same rules in Chromium,
+      # across both viewports and both themes, which is where the round-3 audit
+      # found four unreadable phase accents and three unreachable scroll boxes.
+      - run: npx playwright install --with-deps chromium
+        working-directory: app
+      - run: pnpm check-a11y:browser
+        working-directory: app
 
   compose-build:
-    # the capstone image must at least BUILD on every change; booting the full
-    # stack (models included) stays local via src/verify-e2e.sh
+    # the capstone image must at least BUILD on every change. Booting the stack
+    # is not a push-lane job: the scheduled `e2e` workflow runs the whole of
+    # src/verify-e2e.sh against a small model, and the full-fidelity run is a
+    # local release gate.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -149,6 +160,13 @@ jobs:
       - run: ./src/verify-release-build.sh
       - run: docker compose build
         working-directory: src/phase8-deploy/01-compose/after
-      # the observability overlay must stay mergeable even though CI never boots it
+      # the overlays must stay mergeable even though this job never boots them.
+      # The e2e workflow stacks all four; a typo in one is a broken nightly that
+      # nobody sees until the morning, so it fails here instead.
       - run: docker compose -f docker-compose.yml -f docker-compose.observability.yml config --quiet
+        working-directory: src/phase8-deploy/01-compose/after
+      - run: |
+          ASSISTANT_JWT_SECRET=only-for-config-validation-32-bytes! \
+          docker compose -f docker-compose.yml -f docker-compose.secure.yml \
+            -f docker-compose.observability.yml -f docker-compose.ci.yml config --quiet
         working-directory: src/phase8-deploy/01-compose/after
