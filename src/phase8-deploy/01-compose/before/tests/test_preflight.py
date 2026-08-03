@@ -12,6 +12,7 @@ functions that touch a socket, and each takes its URL as an argument.
 """
 
 import json
+import subprocess
 
 import pytest
 
@@ -174,6 +175,36 @@ def test_the_preflight_never_pulls_anything(monkeypatch):
 
     assert not result.ok, "a missing model has to fail rather than be fetched"
     assert not any("pull" in path for path in requested), requested
+
+
+def test_a_docker_that_never_ran_the_probe_is_not_evidence_against_ollama(monkeypatch):
+    """The container check can fail two ways that look identical in a shell and
+    mean opposite things.
+
+    If the probe ran and curl could not reach the host, the daemon's bind address
+    is the suspect and `REACH_REMEDY` is the right sentence. If docker never
+    reached its own socket, the probe never happened — and printing the bind-address
+    remedy sends the reader to reconfigure an Ollama that is answering perfectly,
+    which is precisely the wrong-diagnosis failure this module exists to prevent.
+    """
+    monkeypatch.setattr(preflight.shutil, "which", lambda name: "/usr/bin/docker")
+
+    def docker_says(stderr):
+        monkeypatch.setattr(
+            preflight.subprocess,
+            "run",
+            lambda *a, **k: subprocess.CompletedProcess(a[0], 1, "", stderr),
+        )
+        return preflight.check_container_reachability()
+
+    blocked = docker_says("permission denied while trying to connect to the Docker API")
+    assert blocked.ok, "an unusable docker is a skip; compose will say so more clearly"
+    assert "skipping" in blocked.detail
+    assert not blocked.remedy, "do not hand out a fix for a problem we did not diagnose"
+
+    refused = docker_says("curl: (7) Failed to connect to host.docker.internal port 11434")
+    assert not refused.ok
+    assert refused.remedy == preflight.REACH_REMEDY
 
 
 def _all_checks_for(installed: dict[str, str]) -> list[Check]:

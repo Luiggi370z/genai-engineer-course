@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil  # noqa: F401 — TODO 7: is docker even here?
+import subprocess  # noqa: F401 — TODO 7: the throwaway probe container
 import urllib.request
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -160,8 +162,21 @@ def check_container_reachability(timeout: float = 60.0) -> Check:
     One throwaway `docker run --add-host host.docker.internal:host-gateway`
     answers this in advance. Skip it (passing) when docker is not installed:
     there is nothing to boot, so there is nothing to prove.
+
+    Two failures look alike here and mean opposite things. If the probe ran and
+    could not reach the host, `REACH_REMEDY` is the right sentence. If docker
+    could not reach its own socket, the probe never happened — say so and skip,
+    because printing the bind-address remedy would send the reader to reconfigure
+    a daemon that is answering perfectly. Not knowing is a third answer.
     """
     raise NotImplementedError
+
+
+REACH_REMEDY = (
+    "bind the daemon to every interface so containers can reach it: stop Ollama, "
+    "then `OLLAMA_HOST=0.0.0.0:11434 ollama serve`. On Linux also confirm the "
+    "compose file maps host.docker.internal to host-gateway."
+)
 
 
 def run(chat_model: str = DEFAULT_CHAT_MODEL, *, skip_container: bool = False) -> Preflight:

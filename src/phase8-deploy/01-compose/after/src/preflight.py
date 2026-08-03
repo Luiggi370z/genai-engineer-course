@@ -257,13 +257,34 @@ def check_container_reachability(timeout: float = 60.0) -> Check:
     except (subprocess.TimeoutExpired, OSError) as exc:
         return Check("container->host", False, f"probe container failed: {exc}", REACH_REMEDY)
     if result.returncode != 0:
+        stderr = result.stderr.strip()
+        # "Could not ask" is not "asked and got no". If Docker itself never ran the
+        # probe, blaming Ollama's bind address sends the reader to fix a daemon that
+        # is answering perfectly — the exact misdiagnosis this module exists to stop.
+        # Compose is about to fail on the same wall with a clearer message, so skip.
+        if _docker_is_unreachable(stderr):
+            return Check("container->host", True, f"docker is not usable here; skipping ({stderr})")
         return Check(
             "container->host",
             False,
-            f"a container cannot reach {CONTAINER_URL}: {result.stderr.strip()}",
+            f"a container cannot reach {CONTAINER_URL}: {stderr}",
             REACH_REMEDY,
         )
     return Check("container->host", True, f"a container reaches {CONTAINER_URL}")
+
+
+def _docker_is_unreachable(stderr: str) -> bool:
+    """Did docker fail to talk to its own daemon, rather than report a verdict?"""
+    lowered = stderr.lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "cannot connect to the docker daemon",
+            "error during connect",
+            "docker daemon is not running",
+            "permission denied while trying to connect",
+        )
+    )
 
 
 REACH_REMEDY = (
