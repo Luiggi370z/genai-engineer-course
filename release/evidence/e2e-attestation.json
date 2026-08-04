@@ -1,7 +1,7 @@
 {
-  "source": "c4f72919",
-  "inputs": "f2c91e11",
-  "commit": "f22bee03a4031ef42bdc09491b20bdc21fa71ac1",
+  "source": "2894700b",
+  "inputs": "069f8bbd",
+  "commit": "7cff4eef72340ba0a852820cd629294cfbb79e86",
   "lane": "host ollama via host.docker.internal, model qwen3.5:9b",
   "model": "qwen3.5:9b",
   "ollama_version": "0.32.5",
@@ -11,5 +11,24 @@
   },
   "checks_run": 15,
   "checks_total": 15,
-  "finished_at": "2026-08-03T23:10:34+00:00"
+  "final_tier": {
+    "tier": {
+      "rag": "qdrant",
+      "embed": "nomic-embed-text",
+      "retrieval": "hybrid-rrf",
+      "threshold": 0.58,
+      "rerank": "off",
+      "memory": "sqlite",
+      "brain": "ollama",
+      "tools": "mcp+builtin",
+      "mcp_ungated": 1,
+      "otlp": "on",
+      "auth": "shared-secret",
+      "guard": "regex-only",
+      "connectors": "stubs",
+      "stream": "safe-buffered"
+    },
+    "degraded": {}
+  },
+  "finished_at": "2026-08-04T00:51:40+00:00"
 }
