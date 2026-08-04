@@ -10,11 +10,13 @@ right there); a model completion is worth waiting for.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
+from contextvars import copy_context
 from queue import Empty, Queue
-from threading import Thread
+from threading import Event, Thread
 from typing import Any
 
 from assistant import auth, deadline, usage
+from assistant.adapters import close_stream
 from assistant.agent import Step
 from assistant.composers import (
     Composer,
@@ -155,7 +157,14 @@ def fallback_stream(
     Raising rather than returning is the point of the second case. `return`
     ends the generator normally, and every layer above reads a normal end as
     "that was the whole answer" — so a model that died mid-sentence gets
-    delivered as a complete, cited, confident fragment."""
+    delivered as a complete, cited, confident fragment.
+
+    The worker also has to know when to stop, and it has two ways of finding out —
+    the request's budget, which it can only see because its context is copied in,
+    and this generator ending, which the budget cannot see at all. Both matter, and
+    neither is enough alone: the budget catches a caller who left, the ending catches
+    a response that finished for any other reason. Closing the source is what makes
+    either one actually stop a provider rather than merely stop reading it."""
 
     def stream(
         goal: str,
@@ -165,10 +174,27 @@ def fallback_stream(
     ) -> Iterator[str]:
         frames: Queue = Queue()
         degraded = word_stream(offline_compose)
+        #: Set when this generator is done with the producer for ANY reason —
+        #: disconnect, a truncation this raised, an output gate that ended the
+        #: response, a consumer that simply stopped iterating. The budget covers the
+        #: first of those and nothing else, and "nobody is reading the queue" is
+        #: reason enough to stop filling it.
+        done = Event()
 
         def drain() -> None:
+            # Held in a name so the `finally` can close it. `for chunk in primary(...)`
+            # discards the iterator, and an iterator you cannot reach is an HTTP
+            # response you cannot tear down.
+            source = primary(goal, contexts, state, memories or [])
             try:
-                for chunk in primary(goal, contexts, state, memories or []):
+                for chunk in source:
+                    # Between frames, which is the only place this thread is ever
+                    # idle. `adapters.joined` and the stream helpers check the same
+                    # budget one layer down; this check is what covers a composer
+                    # that checks nothing, and there is always one of those.
+                    deadline.check()
+                    if done.is_set():
+                        return
                     frames.put(("chunk", chunk))
                 # The provider's own token counts ride the terminal frame.
                 #
@@ -180,41 +206,67 @@ def fallback_stream(
                 frames.put(("end", usage.take_reported()))
             except Exception as exc:  # noqa: BLE001 — the seam exists to catch anything
                 frames.put(("error", exc))
+            finally:
+                close_stream(source)
 
-        Thread(target=drain, daemon=True).start()  # abandoned on timeout, like resilient
+        # `copy_context()`, and this is the fix rather than a detail. A new thread
+        # starts with an EMPTY context, so `deadline.current()` in here returned a
+        # fresh unbounded `Budget` whose `cancelled` is `lambda: False` — the request's
+        # budget was not absent, it was invisible. Every cancellation seam below this
+        # point was therefore asleep on the only path that ships: the round-8 audit
+        # watched a provider run from 4 chunks to 41 after the socket closed, still
+        # generating, while the request itself had already returned.
+        #
+        # The copy shares the `Budget` OBJECT, so the flag the disconnect watcher flips
+        # is the flag this thread reads. Writes stay in the copy, which is exactly what
+        # the `("end", ...)` handover above and `usage.adopt` are built around — a
+        # streaming producer cannot copy its context back, because it is still running
+        # when the first chunk is consumed. Same seam, same reason, as
+        # `resilience.timed`: it has submitted `ctx.run` since the day the token counts
+        # went missing down this identical hole.
+        #
+        # Abandoned on timeout, like `resilient`.
+        Thread(target=copy_context().run, args=(drain,), daemon=True).start()
         yielded = False
-        while True:
-            try:
-                # Shrunk to what the request has left, the way `resilient` bounds
-                # the batch composer. A 60-second per-chunk budget inside a request
-                # with four seconds left is a four-second budget; waiting the full
-                # 60 means the caller is long gone before this notices, and the
-                # per-chunk timeout was never meant to outlive the request it
-                # serves.
-                kind, payload = frames.get(timeout=deadline.capped(timeout))
-            except Empty:
-                report("brain", f"stream produced no chunk within {timeout}s")
-                if yielded:
-                    raise StreamTruncated(f"no chunk within {timeout}s") from None
-                yield from degraded(goal, contexts, state, memories or [])
-                return
-            if kind == "chunk":
-                yielded = True
-                yield payload
-            elif kind == "error":
-                # Same rule as the batch path, and reachable for the same reason:
-                # the adapters now raise `Expired` from inside a stream. The
-                # streaming gate in `output_gate` already ends the response as
-                # `truncated` when it sees one, which is the correct handling — what
-                # must not happen is a brain-degradation report on the way past.
-                not_a_fallback(payload)
-                report("brain", f"stream fell back to offline: {payload}")
-                if yielded:
-                    raise StreamTruncated(str(payload)) from payload
-                yield from degraded(goal, contexts, state, memories or [])
-                return
-            else:
-                usage.adopt(payload)
-                return
+        try:
+            while True:
+                try:
+                    # Shrunk to what the request has left, the way `resilient` bounds
+                    # the batch composer. A 60-second per-chunk budget inside a request
+                    # with four seconds left is a four-second budget; waiting the full
+                    # 60 means the caller is long gone before this notices, and the
+                    # per-chunk timeout was never meant to outlive the request it
+                    # serves.
+                    kind, payload = frames.get(timeout=deadline.capped(timeout))
+                except Empty:
+                    report("brain", f"stream produced no chunk within {timeout}s")
+                    if yielded:
+                        raise StreamTruncated(f"no chunk within {timeout}s") from None
+                    yield from degraded(goal, contexts, state, memories or [])
+                    return
+                if kind == "chunk":
+                    yielded = True
+                    yield payload
+                elif kind == "error":
+                    # Same rule as the batch path, and reachable for the same reason:
+                    # the adapters now raise `Expired` from inside a stream. The
+                    # streaming gate in `output_gate` already ends the response as
+                    # `truncated` when it sees one, which is the correct handling — what
+                    # must not happen is a brain-degradation report on the way past.
+                    not_a_fallback(payload)
+                    report("brain", f"stream fell back to offline: {payload}")
+                    if yielded:
+                        raise StreamTruncated(str(payload)) from payload
+                    yield from degraded(goal, contexts, state, memories or [])
+                    return
+                else:
+                    usage.adopt(payload)
+                    return
+        finally:
+            # Whatever ended this generator — a return above, a `StreamTruncated`, or
+            # the `GeneratorExit` a closed connection delivers — the producer is done
+            # being useful. This is what covers the endings a budget cannot see, and it
+            # does not wait for a poll interval to do it.
+            done.set()
 
     return stream

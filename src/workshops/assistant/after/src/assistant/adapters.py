@@ -500,11 +500,15 @@ COMPLETION_TOKEN_CAP = 512
 BOUNDED = {"think": False, "options": {"num_predict": COMPLETION_TOKEN_CAP}}
 
 
-def _close(parts: Any) -> None:
+def close_stream(parts: Any) -> None:
     """Release a provider's stream. Best-effort by design: the SDKs model a stream
     as a generator, a context-managed object or a plain iterator depending on the
     provider and the version, and a missing `close` is not a reason to fail a
-    request that already has its answer."""
+    request that already has its answer.
+
+    Public, and named for what it is, because `fallbacks.fallback_stream` needs the
+    same three lines: it drains a composer on a worker thread, and a drain that stops
+    without closing leaves the provider generating into a queue nobody reads."""
     closing = getattr(parts, "close", None)
     if callable(closing):
         closing()
@@ -541,7 +545,7 @@ def joined(parts: Iterator[str]) -> str:
             deadline.check()
             collected.append(part)
     finally:
-        _close(parts)
+        close_stream(parts)
     return "".join(collected).strip()
 
 
@@ -612,7 +616,7 @@ def ollama_stream(
             if chunk:
                 yield chunk
     finally:
-        _close(parts)
+        close_stream(parts)
 
 
 # --- the hosted brains: same two shapes, someone else's hardware ----------------
@@ -672,7 +676,7 @@ def openai_stream(
         # A hosted stream is an open HTTP response and a running generation on
         # somebody's meter. Closing it is the difference between stopping the work
         # and merely stopping reading it.
-        _close(chunks)
+        close_stream(chunks)
 
 
 def _report_openai_usage(block: Any) -> None:
@@ -702,11 +706,20 @@ def anthropic_stream(
     The `with` block is the cancellation seam here: closing this generator raises
     `GeneratorExit` inside it, which exits the context manager, which tears the
     connection down. Nothing extra to do — but it only works because the helper is
-    entered here rather than by the caller."""
+    entered here rather than by the caller.
+
+    The timeout is branched rather than passed, because omitting a keyword and
+    passing None mean different things to this SDK: the default is a `NOT_GIVEN`
+    sentinel standing in for its own 600-second bound, and an explicit None means no
+    timeout at all. It was a `**kwargs` dict for exactly one call — the shape that
+    reads as clever and type-checks as nothing, since a `dict[str, float]` splatted
+    into a constructor invites the checker to compare a float against all fourteen
+    keywords it might have been. Two constructors and no dict is one line longer and
+    is the version a type checker can read."""
     from anthropic import Anthropic  # lazy
 
-    kwargs = {"timeout": timeout} if timeout is not None else {}
-    with Anthropic(**kwargs).messages.stream(
+    client = Anthropic() if timeout is None else Anthropic(timeout=timeout)
+    with client.messages.stream(
         model=model,
         max_tokens=COMPLETION_TOKEN_CAP,
         messages=[{"role": "user", "content": prompt}],

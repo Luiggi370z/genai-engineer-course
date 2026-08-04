@@ -6,6 +6,7 @@ mid-flight leaves a question rather than silence."""
 import json
 import sqlite3
 import sys
+import time
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -520,6 +521,75 @@ def test_a_buffered_completion_stops_generating_when_the_caller_is_gone(monkeypa
         "the model keeps generating, which is the cost this change exists to stop"
     )
     assert watched["parts"] < 10, "the answer kept being drained after the hangup"
+
+
+def test_a_streamed_answer_stops_being_produced_when_the_caller_is_gone():
+    """The same claim one layer up, where the seam above was quietly missing.
+
+    `fallback_stream` drains the composer on a worker thread, and a thread starts with
+    an EMPTY context. So the budget installed below was invisible in the only place
+    that was actually pulling the model: `deadline.current()` inside the drain handed
+    back a fresh unbounded `Budget` whose `cancelled` is `lambda: False`, every seam
+    the adapters gained answered "nobody has left", and generation ran on. The
+    round-8 audit measured it over a socket — 4 chunks at disconnect, 41 and counting
+    afterwards.
+
+    Three assertions, because three separate things had to be true and only the first
+    is about giving up:
+
+      * the consumer sees `Expired`, so the request ends as a hangup rather than as an
+        answer or a fallback;
+      * the source was CLOSED, which is what stops a provider rather than stopping
+        our reading of one;
+      * nothing was reported as brain degradation. A client closing a tab that shows
+        up on /health as a model outage would fail the release lane's own no-fallback
+        assertion, and page somebody for it.
+
+    The socket version lives in `tests/test_disconnect.py`, and this is the version
+    that localises a break: if both fail, cancellation stopped working; if only that
+    one fails, the HTTP layer stopped delivering the signal.
+
+    The composer sleeps between chunks, and without that this test passes on the
+    broken code. The queue between the two threads is unbounded, so a source with no
+    delay produces all five hundred chunks before the consumer has read three and
+    there is no window left to cancel in — the property under test only exists while
+    the model is still generating, which is the entire duration of a real one.
+    """
+    from assistant import deadline
+    from assistant.fallbacks import fallback_stream
+
+    LENGTH = 500
+    PACE = 0.002  # a token is not free; see the docstring
+    pulled = {"chunks": 0, "closed": False}
+    gone = {"yet": False}
+    degraded: dict[str, str] = {}
+
+    def endless(goal, contexts, state, memories=None):
+        """A composer that cooperates in nothing — no deadline check of its own."""
+        try:
+            for i in range(LENGTH):
+                pulled["chunks"] += 1
+                yield f"word{i} "
+                time.sleep(PACE)
+        finally:
+            pulled["closed"] = True
+
+    streamed = fallback_stream(endless, lambda part, why: degraded.update({part: why}))
+
+    with deadline.budget(None, cancelled=lambda: gone["yet"]):
+        frames = streamed("tell me everything", [], [], [])
+        with pytest.raises(deadline.Expired) as raised:
+            for seen, _ in enumerate(frames, start=1):
+                if seen == 3:
+                    gone["yet"] = True  # the caller leaves mid-answer
+
+    assert raised.value.reason == "caller disconnected"
+    assert pulled["chunks"] < LENGTH // 2, (
+        f"{pulled['chunks']} of {LENGTH} chunks were produced for a caller who left — "
+        "the drain thread cannot see a budget it was never given"
+    )
+    assert pulled["closed"], "the composer was abandoned rather than closed"
+    assert degraded == {}, f"a hangup was recorded as degradation: {degraded}"
 
 
 def test_an_upgrade_over_an_older_table_still_replays(tmp_path):

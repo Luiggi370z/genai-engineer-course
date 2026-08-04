@@ -230,7 +230,9 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anthropic" },
     { name = "httpx" },
+    { name = "openai" },
     { name = "pyright" },
     { name = "ruff" },
 ]
@@ -264,7 +266,9 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anthropic", specifier = ">=0.40,<1" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "openai", specifier = ">=1.60,<3" },
     { name = "pyright", specifier = ">=1.1.380,<2" },
     { name = "ruff", specifier = ">=0.6,<1" },
 ]

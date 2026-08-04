@@ -256,6 +256,34 @@ Token counts survive the change because all three providers report them on the s
 — per-part for Ollama, a final usage frame for OpenAI, `get_final_message` for
 Anthropic — so buffered cost is still the provider's number and not an estimate.
 
+### And the streaming path was carrying the signal to a thread that could not see it (2026-08-04)
+
+Both entries above end at the same place: the seam reads `deadline`, and `deadline`
+lives in a `ContextVar`. `fallback_stream` drains the composer on a worker thread so it
+can put a per-chunk timeout around a generator, and **a new thread starts with an empty
+context**. `deadline.current()` in there returned a fresh unbounded `Budget` whose
+`cancelled` is `lambda: False`, so on the only wiring the deployed service uses, every
+one of those seams answered "nobody has left" for a caller who had. Measured over a
+socket: 4 chunks delivered at disconnect, 41 and still climbing afterwards.
+
+Nothing above was wrong, and that is the lesson worth keeping. The checks were right,
+the exception types were right, the tests were green — and the signal never arrived,
+because the fix and the code it protects ran in different contexts. `resilience.timed`
+had already learned this once, from the opposite direction: token counts written by an
+adapter into a worker's context died with the thread, and the release page reported
+estimates while exact numbers sat unread. Same hole, same `copy_context()`, three
+months apart.
+
+The drain now runs inside a copied context (the copy shares the `Budget` **object**, so
+the flag the watcher flips is the flag the worker reads), checks the deadline between
+frames, and closes the source in a `finally`. It also stops when the response generator
+ends for any other reason — a truncation, a gate that ended the response, a consumer
+that simply stopped — because a budget cannot see "nobody is reading the queue".
+
+The test that would have caught it did not exist: `tests/test_disconnect.py` assigned
+`stream_compose` directly, which is the one composition production never uses. It now
+covers both wirings.
+
 The observability layer is deliberately vendor-free: no Langfuse or Phoenix SDK is
 imported anywhere. Both read OTLP, so the backend is an environment variable and there
 is no vendor dependency to pin or to break.

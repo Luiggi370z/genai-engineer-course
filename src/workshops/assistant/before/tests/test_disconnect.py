@@ -48,7 +48,7 @@ import uvicorn
 
 from assistant import deadline
 from assistant.api import create_app
-from assistant.fallbacks import fallback_composer
+from assistant.fallbacks import fallback_composer, fallback_stream
 from assistant.settings import Settings
 
 #: Chunks the fake model emits if nobody stops it.
@@ -111,6 +111,15 @@ def served():
         # Off by default: the other buffered test in this module wants a prompt 200,
         # and one fixture serving both is better than two servers on two ports.
         "hostile": False,
+        #: Whether the source runs through the real `fallback_stream` wrapper, which is
+        #: what `service.build_assistant` composes and therefore what production
+        #: streams through. Off by default so the two tests above keep measuring the
+        #: middleware alone — assigning `stream_compose` directly is what let a
+        #: disconnect bug live under the wrapper for a whole round.
+        "wrapped": False,
+        #: Set by the source's own `finally`. A generator that is closed stops a
+        #: provider; one that is merely abandoned does not.
+        "closed": False,
         #: Whatever `fallback_composer` decided to call a degradation. Must stay empty
         #: for a disconnect — a hangup is not a model outage.
         "degraded": {},
@@ -119,14 +128,17 @@ def served():
     app = create_app(Settings())
 
     def endless(goal, contexts, state, memories=None):
-        for i in range(SOURCE_LENGTH):
-            watched["chunks"] += 1
-            if watched["noticed"] is None:
-                watched["noticed"] = deadline.expired()
-            # A space every token: the outbound gate releases on word boundaries, so
-            # an unbroken blob would be buffered and prove something else.
-            yield f"word{i} "
-            time.sleep(CHUNK_DELAY)
+        try:
+            for i in range(SOURCE_LENGTH):
+                watched["chunks"] += 1
+                if watched["noticed"] is None:
+                    watched["noticed"] = deadline.expired()
+                # A space every token: the outbound gate releases on word boundaries,
+                # so an unbroken blob would be buffered and prove something else.
+                yield f"word{i} "
+                time.sleep(CHUNK_DELAY)
+        finally:
+            watched["closed"] = True
 
     def oblivious(goal, contexts, state, memories=None):
         """A model call that takes far too long and cooperates in nothing."""
@@ -155,7 +167,16 @@ def served():
         finally:
             watched["waited"] = time.monotonic() - started
 
-    app.state.assistant.stream_compose = endless
+    # Both wirings of the same source, chosen per test at call time. `wrapped` is the
+    # composition production actually gets: the source drained on a worker thread by
+    # `fallback_stream`, which is a different cancellation problem from the source
+    # running in the request's own context.
+    through_fallback = fallback_stream(endless, degrade)
+
+    def picked(*args, **kwargs):
+        return (through_fallback if watched["wrapped"] else endless)(*args, **kwargs)
+
+    app.state.assistant.stream_compose = picked
     app.state.assistant.compose = timed_compose
 
     # Bound here rather than by Uvicorn so the port is known before the server
@@ -226,6 +247,60 @@ def test_a_client_that_hangs_up_is_noticed_by_the_model_it_left(served):
     )
     time.sleep(0.5)
     assert watched["chunks"] == settled, "the source was still being pulled"
+
+
+def test_the_hangup_reaches_the_thread_the_model_is_generating_on(served):
+    """The same disconnect, through the wrapper production composes.
+
+    The test above assigns `stream_compose` directly, so the source runs in the
+    request's own context and reads the request's own budget. `service.build_assistant`
+    does not do that: it wraps the composer in `fallback_stream`, which drains it on a
+    worker thread to put a per-chunk timeout around a generator. A new thread starts
+    with an EMPTY context, so `deadline.expired()` in there answered `None` for a
+    caller who had gone — the budget was not missing, it was in a context nobody
+    copied. Every seam the adapters gained in round 7 sat below this line and none of
+    them could fire. Measured over a socket by the round-8 audit: 4 chunks delivered
+    at disconnect, 41 and rising afterwards, the provider still generating for a
+    request that had already returned.
+
+    `closed` is the assertion that separates "we stopped reading" from "it stopped
+    producing". Closing the generator is what raises `GeneratorExit` in a provider's
+    stream helper, which exits the SDK's context manager, which tears the HTTP
+    response down. Without it a torn-down consumer leaves a happily generating model
+    on somebody's GPU — the 395% CPU in `phase8-deploy/VERIFIED.md`.
+    """
+    port, watched = served
+    watched["wrapped"] = True
+
+    client = socket.create_connection(("127.0.0.1", port), timeout=20)
+    try:
+        client.sendall(ASK_STREAM)
+        client.recv(4096)  # let generation get going, then walk away
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    finally:
+        client.close()
+
+    time.sleep(2.0)
+
+    assert watched["noticed"] == GONE, (
+        f"the drain thread was told {watched['noticed']!r} after the caller hung up. "
+        "A worker thread that cannot see the request's budget cannot stop for it, and "
+        "this is the only wiring the deployed service uses"
+    )
+    settled = watched["chunks"]
+    time.sleep(0.5)
+    assert watched["chunks"] == settled, (
+        f"the model produced {watched['chunks'] - settled} more chunks after the "
+        "request was over — the drain is still pulling it"
+    )
+    assert watched["closed"], (
+        "the source was abandoned rather than closed: the request ends, the queue is "
+        "collected, and the provider keeps generating into it"
+    )
+    assert watched["degraded"] == {}, (
+        f"a client hangup was recorded as {watched['degraded']} — /health would report "
+        "a model outage that never happened"
+    )
 
 
 def test_a_client_that_stays_is_never_told_its_caller_left(served):

@@ -26,7 +26,18 @@ typeCheckingMode = "basic"
 reportMissingImports = "none"  # integration-only libs (qdrant/ollama/mcp/otlp) aren't installed in the fast tier
 
 [dependency-groups]
-dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1", "httpx>=0.27,<1"]
+# `providers` is in here for the type checker, not for the tests. `make check` used
+# to be a different command depending on which groups happened to be in `.venv`:
+# with the hosted SDKs absent, `reportMissingImports = "none"` makes `Anthropic` and
+# `OpenAI` resolve to Unknown, every call on them type-checks vacuously, and the lane
+# reports zero errors over two adapters it never looked at. Install the release
+# groups once — `make release-evidence` does — and the same command finds fourteen.
+#
+# A quality gate whose verdict depends on the state of a directory it does not
+# manage is not a gate, so the two SDKs the image ships are now in the tier that
+# checks the code. They cost seconds: both are thin wrappers over the `httpx` and
+# `pydantic` trees FastAPI already brings.
+dev = ["pyright>=1.1.380,<2", "ruff>=0.6,<1", "httpx>=0.27,<1", {include-group = "providers"}]
 # The real tier. Installed with `uv sync --group integration`; never by the fast gate.
 integration = [
   "qdrant-client>=1.10,<2",
