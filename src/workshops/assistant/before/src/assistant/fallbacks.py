@@ -29,6 +29,28 @@ RAG_POLICY = Policy(attempts=3, base_delay=0.2, timeout=10.0)
 COMPOSE_POLICY = Policy(attempts=2, base_delay=0.2, timeout=60.0)
 
 
+def not_a_fallback(exc: BaseException) -> None:
+    """Re-raise the failures that are not degradation. Called first in every
+    `except Exception` in this module.
+
+    `deadline.Expired` means the request is over — the clock ran out, or the client
+    hung up. Neither says anything about the dependency, and both used to arrive here
+    and be treated as a dependency failure. That produced the worst possible output
+    of a resilience layer: a caller who had already left got a full offline answer
+    composed for them, and /health reported that the *brain tier was degraded*
+    because of it. An operator would then see a model outage that never happened, and
+    the release lane's `require_no_fallback_during` would fail the run over a client
+    that pressed stop.
+
+    It became reachable when `resilience.waited` gained the cancellation poll: before
+    that, a hangup could not interrupt a call in progress, so this was a latent bug
+    with no path to it. Adding the seam upstream is what made this line necessary,
+    which is the usual shape — a fix one layer down turns a dead branch live.
+    """
+    if isinstance(exc, deadline.Expired):
+        raise exc
+
+
 class FallbackRag:
     """Primary RAG with retries, offline BM25 as the warm standby. Ingest is
     MIRRORED into the standby up front — a fallback with an empty corpus at
@@ -52,6 +74,7 @@ class FallbackRag:
         try:
             return self._add(docs, tenant=tenant)
         except Exception as exc:
+            not_a_fallback(exc)
             self._report("rag", f"ingest fell back to in-memory: {exc}")
             # the standby's count, not len(docs): both stores chunk the same way,
             # so this is the real number of retrievable units either way
@@ -61,6 +84,7 @@ class FallbackRag:
         try:
             return self._search(query, k, tenant=tenant)
         except Exception as exc:
+            not_a_fallback(exc)
             self._report("rag", f"search fell back to in-memory: {exc}")
             return self.fallback.search(query, k, tenant=tenant)
 
@@ -73,6 +97,7 @@ class FallbackRag:
         try:
             return self.primary.delete(source, tenant=tenant)
         except Exception as exc:
+            not_a_fallback(exc)
             self._report("rag", f"delete fell back to in-memory: {exc}")
             return removed
 
@@ -80,6 +105,7 @@ class FallbackRag:
         try:
             return self.primary.get(chunk_id, tenant=tenant)
         except Exception as exc:
+            not_a_fallback(exc)
             self._report("rag", f"citation lookup fell back to in-memory: {exc}")
             return self.fallback.get(chunk_id, tenant=tenant)
 
@@ -102,6 +128,7 @@ def fallback_composer(
         try:
             return guarded(goal, contexts, state, memories)
         except Exception as exc:
+            not_a_fallback(exc)
             report("brain", f"composition fell back to offline: {exc}")
             return offline_compose(goal, contexts, state, memories)
 
@@ -175,6 +202,12 @@ def fallback_stream(
                 yielded = True
                 yield payload
             elif kind == "error":
+                # Same rule as the batch path, and reachable for the same reason:
+                # the adapters now raise `Expired` from inside a stream. The
+                # streaming gate in `output_gate` already ends the response as
+                # `truncated` when it sees one, which is the correct handling — what
+                # must not happen is a brain-degradation report on the way past.
+                not_a_fallback(payload)
                 report("brain", f"stream fell back to offline: {payload}")
                 if yielded:
                     raise StreamTruncated(str(payload)) from payload

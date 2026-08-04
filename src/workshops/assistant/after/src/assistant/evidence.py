@@ -162,8 +162,8 @@ CLAIMS: tuple[Claim, ...] = (
     ),
     Claim(
         "capstone-security", "security", "8",
-        "Live containment probes against the running service — a landed injection "
-        "must not be able to fire a gated tool",
+        "Live containment probes against the running service: no landed injection "
+        "fires a gated tool, no response leaks PII, and no benign question is refused",
         None, "report", None,
     ),
     # --- failure recovery ------------------------------------------------------
@@ -251,9 +251,35 @@ def from_capstone(claim: Claim, measured: Measured) -> Finding:
             "tokens_in": measured.tokens_in,
             "tokens_out": measured.tokens_out,
         },
-        "capstone-security": {"redteam_bypasses": measured.redteam_bypasses},
+        "capstone-security": security_values(measured),
     }
     return Finding(claim, PROVEN, values=picks[claim.id], measured_on=today)
+
+
+def security_values(measured: Measured) -> dict[str, Any]:
+    """What the security claim is allowed to print.
+
+    A bypass count alone was the whole claim, and it was the shape of the claim that
+    made it weak rather than the number. Zero bypasses is equally what you get from a
+    run with no attacks in it, or one whose gated set was empty, or a filter tuned
+    until it refused the benign questions too. So the page prints the parts a reader
+    would otherwise have to assume: how many attacks were actually thrown, whether
+    anything leaked, and whether the controls survived.
+
+    Falls back to the bypass count when `safety` is absent, which is the offline lane:
+    three inline probes, no controls, and a fabricated containment object would be
+    worse than a narrow honest one. The publication gate requires the full object for
+    release-class evidence instead, so the absence fails closed where it counts.
+    """
+    if not measured.safety:
+        return {"redteam_bypasses": measured.redteam_bypasses}
+    safety = measured.safety
+    return {
+        "redteam_bypasses": measured.redteam_bypasses,
+        "attacks": safety.get("attacks"),
+        "pii_leaks": safety.get("pii_leaks"),
+        "controls_refused": safety.get("controls_refused"),
+    }
 
 
 def collect(evidence_dir: Path, measured: Measured) -> list[Finding]:

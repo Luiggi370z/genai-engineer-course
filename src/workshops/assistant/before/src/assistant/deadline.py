@@ -132,6 +132,17 @@ def expired() -> str | None:
     return current().expired()
 
 
+def cancelled() -> bool:
+    """Whether the caller has left, specifically — not whether the request is over.
+
+    `expired()` collapses the two conditions into one string, which is the right
+    shape for a seam that only has to stop. A blocking wait needs them apart:
+    `resilience`'s wait owes the clock a `TimeoutError` with a particular message and
+    owes a departed client a prompt `Expired`, and it cannot honour both contracts
+    from one boolean."""
+    return current().cancelled()
+
+
 def capped(timeout: float | None) -> float | None:
     """TODO 5: a per-call timeout, shrunk to fit what the request has left.
 

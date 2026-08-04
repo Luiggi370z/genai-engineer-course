@@ -40,6 +40,14 @@ TODO 3 — `from_capstone`. The four capstone claims have no artifact. They are
   measured live, in the same pass as `report.py`, so the evidence log and
   PORTFOLIO.md cannot end up describing two different systems.
 
+  The security claim is the one to be careful with. A lone bypass count reads as
+  proof and is not: zero bypasses is equally what a run with no attacks reports, or
+  one whose gated-tool set was empty, or a filter tuned until it refused the benign
+  questions too. Print the attacks thrown, the PII leaks and the refused controls
+  beside it when `measured.safety` carries them, and fall back to the bare count
+  when it does not — the offline tier has three inline probes and no controls, and a
+  fabricated containment object would be worse than a narrow honest one.
+
 TODO 4 — `render`. Six sections. Print unproven rows WITH the command that closes
   them: an unproven claim without its command is a complaint, not a next step.
   Show each artifact's `measured_on` date, and flag anything older than

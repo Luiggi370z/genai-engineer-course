@@ -182,7 +182,7 @@ export const designDefend: PhaseContent = {
             "**Human-in-the-loop** (from Phase 4) is the backstop for anything irreversible — it holds even when a payload beats every filter.",
             '**Dual-LLM / CaMeL pattern** — the architectural version: a privileged model that never sees raw untrusted data, and a quarantined model that processes untrusted content with **no tool access**. Data from untrusted sources carries a "taint" that gates what actions are allowed.',
             "**Sanitize vs block:** redact PII and continue; block outright injection and refuse. Different threats, different responses.",
-            "**Red-team in CI:** a growing `redteam.jsonl` of the attacks above; gate on zero bypasses, exactly like the quality golden set. Tools: NVIDIA garak, Microsoft PyRIT, Promptfoo.",
+            "**Red-team in CI:** a growing `redteam.jsonl` of the attacks above, gated exactly like the quality golden set — and gate the whole property, not the headline number. Zero bypasses is also what an empty suite reports, and what a filter that refuses everything reports. So block on: a gated fire, a PII leak on **any** part of the response (the contexts you hand back are the response too), a benign control wrongly refused, a payload that never reached the boundary it was aimed at, and any attack family whose contained count is short of its rows. Tools: NVIDIA garak, Microsoft PyRIT, Promptfoo.",
           ],
         },
         {

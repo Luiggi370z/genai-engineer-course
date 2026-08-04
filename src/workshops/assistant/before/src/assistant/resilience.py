@@ -117,6 +117,28 @@ def resilient(
         backoff sleep when it would run past the deadline — sleeping through the
         rest of the budget in order to attempt a call that cannot finish is the
         most expensive possible way to fail.
+
+    Then the harder half of the same idea, and the one a green test suite hid for
+    two rounds: `future.result(timeout=...)` answers exactly one question, *has the
+    clock run out*, and a thread parked in it can answer no other. It cannot notice
+    that the caller hung up, because noticing requires looking, and this looks once.
+    A buffered `/ask` whose client disappeared kept a model generating for the full
+    budget and threw the answer away.
+
+    So wait in slices instead — `POLL_SECONDS` at a time up to `limit` — and between
+    slices ask `deadline.cancelled()`. If it is true, raise
+    `deadline.Expired("caller disconnected")` and abandon the worker exactly as the
+    timeout path does. Two details are load bearing:
+
+      - `cancelled()`, not `expired()`. Clock exhaustion must still raise
+        `TimeoutError` with the message it has now, because "too slow" is an alert
+        and "they left" is not — `api.expired` turns that into 504 versus 499;
+      - subtract the SLICE you waited, not `POLL_SECONDS`. Otherwise a 0.05s timeout
+        is charged a 0.25s tick and the tight guard-model bound stops being a bound.
+
+    A seam here only pays off if the work itself stops: `adapters.joined` closes the
+    provider's stream, and `fallbacks.not_a_fallback` keeps the `Expired` from being
+    laundered into a fake model outage. All three, or none.
     """
 
     def timed(*args: Any, **kwargs: Any) -> Any:

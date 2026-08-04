@@ -459,6 +459,69 @@ def test_the_stream_is_bounded_the_same_way(monkeypatch):
     assert seen["options"]["num_predict"] == COMPLETION_TOKEN_CAP
 
 
+def test_a_buffered_completion_stops_generating_when_the_caller_is_gone(monkeypatch):
+    """The buffered path is its own stream joined, and this is the reason.
+
+    A blocking `Client.generate()` is a black box: the request budget says the caller
+    left, and there is nowhere between "asked" and "answered" to notice. The model
+    generated to the last token for a closed socket, on hardware somebody pays for —
+    `tests/test_disconnect.py` proves that the request stops waiting, and stopping
+    the *work* is the other half.
+
+    Two assertions, and the second is the one that matters. Raising `Expired` only
+    proves this thread gave up. `closed` proves the provider's iterator was released,
+    which is what tears down the HTTP response and makes Ollama stop. An abandoned
+    iterator would satisfy the first assertion and keep the GPU busy — measured in
+    `phase8-deploy/VERIFIED.md` at 395% CPU with every later request queued behind it.
+
+    No socket, no model, no server: the seam is a boolean the budget already carries.
+    """
+    from assistant import deadline
+    from assistant.adapters import ollama_generate
+
+    watched = {"parts": 0, "closed": False}
+    gone = {"yet": False}
+
+    class Stream:
+        """A provider stream that never ends, and knows whether it was closed."""
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            watched["parts"] += 1
+            # The caller leaves after the answer is under way, which is the only
+            # interesting moment: before the first part there is nothing to stop.
+            if watched["parts"] == 3:
+                gone["yet"] = True
+            return {"response": f"token{watched['parts']} "}
+
+        def close(self):
+            watched["closed"] = True
+
+    class FakeClient:
+        def __init__(self, host, timeout=None):
+            pass
+
+        def generate(self, **kwargs):
+            return Stream()
+
+    monkeypatch.setitem(sys.modules, "ollama", SimpleNamespace(Client=FakeClient))
+
+    with deadline.budget(None, cancelled=lambda: gone["yet"]):
+        with pytest.raises(deadline.Expired) as raised:
+            ollama_generate("q", host="http://ollama:11434", model="m")
+
+    assert raised.value.reason == "caller disconnected", (
+        "a 504 for a client that hung up pages somebody for a request nobody wanted"
+    )
+    assert watched["closed"], (
+        "the provider's stream was abandoned, not closed — the request returns and "
+        "the model keeps generating, which is the cost this change exists to stop"
+    )
+    assert watched["parts"] < 10, "the answer kept being drained after the hangup"
+
+
 def test_an_upgrade_over_an_older_table_still_replays(tmp_path):
     """The bug this closes cost an end-to-end run: `CREATE TABLE IF NOT EXISTS`
     does nothing when the table exists, including when it exists with the wrong

@@ -117,6 +117,11 @@
 #      and /health says "degraded" instead of pretending
 #  15. durability: a restarted assistant still answers from ingested knowledge, and
 #      the audit log + memories are still in the SQLite volume
+#
+# Then, on a complete run only and outside the numbered fifteen: one more question
+# and one more /health read, because checks 2 and 4 are where the tier is asserted
+# and eleven checks happen after them — two of which break the stack on purpose. The
+# closing snapshot is what `--attest` records as `final_tier`.
 set -euo pipefail
 
 # Resolved BEFORE the cd below, because `--help` reads this file's own header and a
@@ -1186,11 +1191,55 @@ EOF
 
 # ---------------------------------------------------------------------------
 
+# The tier, re-proved at the end of the run. Written to /tmp/e2e-final-tier.json,
+# which the attestation folds in as `final_tier`.
+#
+# Check 2 wires the tier and check 4 proves the model composed — both at the top of
+# a run whose last eleven checks include one that stops Qdrant (14) and one that
+# restarts the assistant (15). A composer that died at check 9 was therefore
+# attested 15/15 with a `brain: ollama` reading eleven checks old, and the release
+# gate's whole argument is that the attestation describes the stack the numbers came
+# from. Eleven checks of drift is not a description.
+#
+# A `/health` read alone would not close it. The restart in check 15 rebuilds the
+# service and clears the degradation map, so an empty map after it proves the map is
+# new, not that the model is answering. So this asks a question first, on the batch
+# path, and reads the tier the answer came from.
+final_tier_check() {
+  say "final tier: the model is still the one answering"
+  ask "how long do refunds take" || die "the closing question was refused"
+  answer_says "five business days" "the closing answer lost the corpus"
+  curl -sf "$BASE/health" -o /tmp/e2e-final-tier.json || die "/health stopped answering"
+  local degraded
+  degraded="$(python3 -c "import json;print(json.dumps(json.load(open('/tmp/e2e-final-tier.json'))['degraded']))")"
+  [[ "$degraded" == "{}" ]] && degraded=""
+  # Batch fallback fails every lane, `--ci` included — check 4 already says so at
+  # line 650 — so there is no lane-specific allowance to make here.
+  [[ -z "$degraded" ]] || die "a component was degraded at the end of the run: $degraded
+
+The suite passed, and it passed on a stack that is no longer the one it started on.
+Whatever fell back above did so after the check that would have caught it, which is
+the failure this closing assertion exists for. Fix the stack and run it again."
+  local tier
+  for tier in brain:ollama rag:qdrant retrieval:hybrid-rrf embed:nomic-embed-text \
+    stream:safe-buffered; do
+    [[ "$(jget /tmp/e2e-final-tier.json "tier.${tier%%:*}")" == "${tier#*:}" ]] ||
+      die "tier.${tier%%:*} is not ${tier#*:} at the end of the run — the stack changed under the suite"
+  done
+  echo "closing tier: brain ollama, rag qdrant, hybrid-rrf over nomic-embed-text, nothing degraded"
+}
+
 require_isolated_state
 boot
 for n in $(seq 2 $TOTAL); do
   check "$n"
 done
+
+# Not a numbered check: it asserts nothing new about the system, it re-asserts the
+# tier the numbered checks were measured on. A partial run has nothing to re-assert.
+if ((SKIPPED == 0)); then
+  final_tier_check
+fi
 
 if ((SKIPPED)); then
   printf '\nE2E: %s checks passed, %s skipped — a partial run. `./verify-e2e.sh` is the claim.\n' \
@@ -1243,7 +1292,7 @@ if [[ -n "$ATTEST" ]]; then
   ATTEST_SOURCE="$attest_source" ATTEST_MODEL="$attest_model" ATTEST_COMMIT="$GIT_SHA" \
   ATTEST_INPUTS="$attest_inputs" \
   ATTEST_LANE="$MODEL_LANE" ATTEST_RAN="$RAN" ATTEST_TOTAL="$TOTAL" \
-  ATTEST_FACTS="$PREFLIGHT_FACTS" \
+  ATTEST_FACTS="$PREFLIGHT_FACTS" ATTEST_FINAL_TIER=/tmp/e2e-final-tier.json \
     python3 - "$ATTEST" <<'EOF'
 import datetime as dt, json, os, sys
 
@@ -1253,6 +1302,18 @@ try:
         facts = json.load(handle)
 except (OSError, ValueError):
     pass
+
+
+def final_tier() -> dict:
+    """The closing `/health` read, reduced to the two things a gate can check.
+
+    Fails the run rather than writing a placeholder: an attestation with an empty
+    `final_tier` would satisfy a reader's eye and the schema, and mean that the one
+    assertion this field exists to carry did not happen.
+    """
+    with open(os.environ["ATTEST_FINAL_TIER"]) as handle:
+        health = json.load(handle)
+    return {"tier": health["tier"], "degraded": health["degraded"]}
 
 record = {
     "source": os.environ["ATTEST_SOURCE"].strip(),
@@ -1272,6 +1333,14 @@ record = {
     },
     "checks_run": int(os.environ["ATTEST_RAN"]),
     "checks_total": int(os.environ["ATTEST_TOTAL"]),
+    # What the stack was at the END, from the read `final_tier_check` just took
+    # after asking one more question. The tier assertions live at checks 2 and 4,
+    # eleven checks before this file is written, and two of those eleven deliberately
+    # break the stack — so "15/15" used to be compatible with a composer that had
+    # been serving the offline fallback since check 9. The release gate reads this
+    # field, which is the point: an attestation that cannot say what the stack was
+    # when it finished is not evidence about the stack the numbers came from.
+    "final_tier": final_tier(),
     "finished_at": dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat(),
 }
 json.dump(record, open(sys.argv[1], "w"), indent=2)

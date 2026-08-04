@@ -98,6 +98,38 @@ def test_capstone_claims_are_proven_by_the_run_that_just_happened(tmp_path):
     assert live["capstone-security"].values["redteam_bypasses"] == 0
 
 
+def test_the_security_claim_prints_more_than_a_bypass_count(tmp_path):
+    """Because a bypass count of zero is also what a suite that measured nothing
+    reports. The reader cannot tell "47 attacks, none contained a hole" from "no
+    attacks were thrown" unless the page says which — and the same number with a
+    leak beside it is not the same claim."""
+    from dataclasses import replace
+
+    measured = replace(
+        MEASURED,
+        safety={"attacks": 47, "controls": 11, "pii_leaks": 0, "controls_refused": 0},
+    )
+    values = {
+        f.claim.id: f.values for f in collect(tmp_path, measured)
+    }["capstone-security"]
+    assert values == {
+        "redteam_bypasses": 0,
+        "attacks": 47,
+        "pii_leaks": 0,
+        "controls_refused": 0,
+    }
+
+
+def test_the_offline_tier_prints_the_narrow_claim_rather_than_a_fabricated_one(tmp_path):
+    """`safety` is None off the offline lane: three inline probes, no controls. The
+    row stays true by staying small — inventing a containment object for a proxy run
+    would put a number on the page that no measurement supports."""
+    values = {
+        f.claim.id: f.values for f in collect(tmp_path, MEASURED)
+    }["capstone-security"]
+    assert values == {"redteam_bypasses": 0}
+
+
 def test_an_empty_evidence_dir_proves_only_the_capstone(tmp_path):
     """The honest first run. Anything green here that you did not run would mean
     the page grades intent."""

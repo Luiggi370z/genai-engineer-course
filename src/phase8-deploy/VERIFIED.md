@@ -203,6 +203,59 @@ substitution check on the lane that carries the release claim is measuring a tie
 nobody ships, which is the failure the whole attestation exists to prevent. `--ci`
 measures wiring and may miss a budget; a lane that reports a result may not.
 
+### The tier assertion was eleven checks stale (2026-08-03)
+
+Same substitution, one layer out. Checks 2 and 4 prove the tier and prove the model
+composed; checks 5 through 15 then run, and two of them break the stack on purpose —
+14 stops Qdrant, 15 restarts the assistant. The attestation was written after all of
+them with no further reading of `/health`, so a composer that started falling back at
+check 9 was recorded as `15/15` on the shipped tier, and every number in
+`RELEASE-EVIDENCE.md` inherited that claim.
+
+A complete run now ends with `final_tier_check`: one fresh batch question, then
+`/health`, and the run dies unless the degradation map is empty and `brain`, `rag`,
+`retrieval`, `embed` and `tier.stream` are still the real tiers. The question is not
+decoration — the restart in check 15 rebuilds the service and clears the degradation
+map, so an empty map on its own proves the map is new rather than that the model is
+answering. The snapshot goes into the attestation as `final_tier`, and
+`check-release-evidence.py` refuses a release whose attestation cannot produce it:
+before this field existed the file simply could not answer the question, and "cannot
+answer" is exactly the state that needed to become visible.
+
+Lane consequence: a batch fallback already fails every lane, `--ci` included, so this
+adds no new policy — it moves the existing one to the end of the run, where drift can
+actually be seen. A partial run (`--from`, `--only`) skips the closing check for the
+same reason it cannot attest: there is no complete run to re-assert.
+
+### The buffered path had the cancellation flag and never read it (2026-08-03)
+
+The 395% CPU above is the cost of an abandoned generation, and for the streaming path
+the fix landed a round earlier: the outbound gate asks `deadline.check()` before it
+pulls each chunk, so a client that leaves stops the source. Buffered `/ask` had the
+same signal and no reader. `Budget.cancelled` did flip — the route is synchronous, so
+it runs in the threadpool and the disconnect watcher keeps polling — but
+`future.result(timeout=limit)` answers one question and cannot be asked another, and
+`deadline.check()` only ran *between* retry attempts. A client that hung up two
+seconds in was still charged sixty seconds of model.
+
+Three seams, and any two without the third change nothing:
+
+* the provider adapters became their own stream joined (`adapters.joined`), which
+  checks the deadline between parts and, in a `finally`, **closes** the provider's
+  iterator. Closing is the part that stops the work: an abandoned iterator leaves
+  Ollama generating, which is how the measurement above happened;
+* the wait polls in `POLL_SECONDS` slices and raises `Expired("caller disconnected")`
+  when the flag flips. Clock exhaustion still raises `TimeoutError` with the message
+  it always had, because 504 and 499 are different pages;
+* `fallbacks.not_a_fallback` re-raises `Expired` instead of composing an offline
+  answer. Without it the fix is worse than the bug: a hangup would be recorded as a
+  degraded brain tier on `/health`, and the release lane's own no-fallback assertion
+  would fail a run because somebody closed a tab.
+
+Token counts survive the change because all three providers report them on the stream
+— per-part for Ollama, a final usage frame for OpenAI, `get_final_message` for
+Anthropic — so buffered cost is still the provider's number and not an estimate.
+
 The observability layer is deliberately vendor-free: no Langfuse or Phoenix SDK is
 imported anywhere. Both read OTLP, so the backend is an environment variable and there
 is no vendor dependency to pin or to break.

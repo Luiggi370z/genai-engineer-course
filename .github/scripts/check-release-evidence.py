@@ -12,13 +12,16 @@ checks that it describes *this* source, so this does, in six ways:
   1. the report is bound to the source being published, and that binding is a real
      one — `dirty-` and `unbound` are refusals, not values, and they compare equal
      to each other, so they are rejected before any comparison — and it was measured
-     from empty state rather than on top of an earlier run's writes;
+     from empty state rather than on top of an earlier run's writes, and it carries
+     the containment property rather than one integer summarising it;
   2. `gate.py`'s four thresholds — quality, safety, latency, cost — reapplied over
      the committed numbers. Imported from the lesson rather than restated here: a
      second copy of a threshold is a threshold that will disagree with itself;
   3. the page is stapled to the JSON by digest, so a page quoting an older run
      cannot ride along with fresher numbers;
-  4. the end-to-end suite ran to completion — every check, none skipped;
+  4. the end-to-end suite ran to completion — every check, none skipped — and it
+     FINISHED on the tier it claims, which is a different question: the tier checks
+     run at the top and two later checks deliberately break the stack;
   5. it ran on the lane the release claims, not the fast CI overlay;
   6. it ran over the same release INPUTS being published — the workbook and the
      compose stack as well as the measured capstone.
@@ -58,6 +61,20 @@ GATE_PATH = REPO / "src" / "phase8-deploy" / "02-ci" / "after" / "src" / "gate.p
 # fallback with a fifteen-minute timeout hiding it. A lane whose numbers describe
 # a tier the release does not ship cannot carry the release claim.
 RELEASE_LANES = ("host ollama",)
+
+#: What the stack has to still be when the suite finishes, not only when it starts.
+#: Same five values `verify-e2e.sh` asserts in its closing check, restated here
+#: because this script is what a release runs and it must not depend on the verifier
+#: having been the current one. Five rather than all of them: these are the tiers a
+#: release claim is about — which brain composed, which store retrieved, how, over
+#: which embedder, and whether the outbound gate screened before releasing.
+REQUIRED_FINAL_TIERS = {
+    "brain": "ollama",
+    "rag": "qdrant",
+    "retrieval": "hybrid-rrf",
+    "embed": "nomic-embed-text",
+    "stream": "safe-buffered",
+}
 
 #: What the attestation has to say about the model beyond its tag. A tag is a
 #: mutable pointer: `qwen3.5:9b` a year from now may not be the bytes these
@@ -143,6 +160,18 @@ def problems(source: str, inputs: str | None, evidence: Path = EVIDENCE) -> list
     print(f"evidence class: {data.get('evidence_class', '<none>')} "
           "(see 'What this does not prove' on the page)")
 
+    # 1d. and the containment property is IN the file. `gate.py` skips its
+    # containment rules when `safety` is absent, because the offline lane cannot
+    # measure them — three inline probes, no benign controls. That absence is fine on
+    # a push and not fine here: release-class evidence claims a red team ran, and a
+    # release whose report carries one integer would let every rule below it pass by
+    # having nothing to check. So the requirement lives where the claim is made.
+    if data.get("safety") is None:
+        found.append(
+            "the committed numbers carry no `safety` object, so the containment rules "
+            "have nothing to check — re-measure with a current `make release-evidence`"
+        )
+
     # 2. the thresholds, reapplied
     gate = load_gate()
     allowed, reasons = gate.should_merge(gate._load(json_path))
@@ -176,6 +205,36 @@ def problems(source: str, inputs: str | None, evidence: Path = EVIDENCE) -> list
             f"the e2e suite ran on a lane that cannot carry a release claim: "
             f"{lane or '<none>'} (expected one of {', '.join(RELEASE_LANES)})"
         )
+
+    # 4b. and the stack it finished on is the stack it claims. `checks_run == total`
+    # says every check passed; it does not say they passed against one tier. Checks 2
+    # and 4 are the tier assertions and they run eleven checks before the file is
+    # written, two of those eleven deliberately break the stack, and one restarts the
+    # service — which clears the degradation map. So the closing read is required
+    # here, and a missing field is a refusal rather than a skip: an attestation from
+    # before this existed cannot answer the question, and "cannot answer" is the
+    # state the field was added to make visible.
+    final = attestation.get("final_tier")
+    if not isinstance(final, dict) or not final.get("tier"):
+        found.append(
+            "the e2e attestation carries no closing tier snapshot (final_tier) — "
+            "re-attest with a current verify-e2e.sh"
+        )
+    else:
+        tiers, degraded = final["tier"], final.get("degraded") or {}
+        print(f"the tier it finished on: {tiers.get('brain')} brain, "
+              f"{tiers.get('rag')} rag, degraded: {degraded or 'nothing'}")
+        if degraded:
+            found.append(
+                f"the e2e run finished with components degraded: {sorted(degraded)} — "
+                "the suite passed on a stack it did not start on"
+            )
+        for key, expected in REQUIRED_FINAL_TIERS.items():
+            if tiers.get(key) != expected:
+                found.append(
+                    f"the e2e run finished with tier.{key}={tiers.get(key)!r}, "
+                    f"not {expected!r} — those numbers are not about the shipped tier"
+                )
 
     # Which Ollama, and which bytes behind each tag. The models run on the
     # releaser's own machine now, so "it passed against qwen3.5:9b" is a claim

@@ -19,6 +19,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import replace
 from typing import Any
 
+from assistant import deadline
 from assistant.rag import Chunk, RagStore
 
 # --- RAG: offline default and the Qdrant tier, one interface --------------------
@@ -491,21 +492,62 @@ COMPLETION_TOKEN_CAP = 512
 BOUNDED = {"think": False, "options": {"num_predict": COMPLETION_TOKEN_CAP}}
 
 
+def _close(parts: Any) -> None:
+    """Release a provider's stream. Best-effort by design: the SDKs model a stream
+    as a generator, a context-managed object or a plain iterator depending on the
+    provider and the version, and a missing `close` is not a reason to fail a
+    request that already has its answer."""
+    closing = getattr(parts, "close", None)
+    if callable(closing):
+        closing()
+
+
+def joined(parts: Iterator[str]) -> str:
+    """Drain a provider's stream into one answer, and stop if nobody is waiting.
+
+    Every buffered completion in this module is this function over that provider's
+    stream, and the reason is cancellation. A single blocking `generate` call is a
+    black box with no seam: the request budget is in this thread's context, the
+    client may have hung up two minutes ago, and there is nowhere to look. The
+    generation runs to completion, on hardware somebody is paying for, to produce an
+    answer that goes nowhere.
+
+    Two things make this a real fix rather than a faster failure:
+
+    * `deadline.check()` between parts, which raises `Expired` in the worker where a
+      caller can see it (`resilience`'s wait is watching, and `fallbacks` re-raises
+      rather than degrading — a hangup is not a model outage);
+    * `close()` in a `finally`, which is what actually stops the work. Abandoning an
+      iterator leaves the provider generating; closing it tears the HTTP response
+      down, and Ollama stops. The measurement is in `phase8-deploy/VERIFIED.md`: an
+      abandoned completion kept burning 395% CPU and every later request queued
+      behind it.
+
+    The token counts survive because they ride the stream — Ollama reports them on
+    each part, OpenAI on a final usage frame, Anthropic on `get_final_message` — so
+    the buffered path is still billed from the provider's own numbers.
+    """
+    collected: list[str] = []
+    try:
+        for part in parts:
+            deadline.check()
+            collected.append(part)
+    finally:
+        _close(parts)
+    return "".join(collected).strip()
+
+
 def ollama_generate(
     prompt: str, *, host: str, model: str, timeout: float | None = None
 ) -> str:
-    """One non-streaming completion against a local Ollama model.
+    """One buffered completion against a local Ollama model.
+
+    Its own stream, joined — see `joined` for why a blocking call was the problem.
 
     `timeout` is optional because the composer is allowed to take as long as a
     good answer takes, while the guard model in `guard.py` sits on the request
     path in front of it and is not."""
-    from ollama import Client  # lazy
-
-    response = Client(host=host, timeout=timeout).generate(
-        model=model, prompt=prompt, **BOUNDED
-    )
-    _report_usage(response)
-    return response["response"].strip()
+    return joined(ollama_stream(prompt, host=host, model=model, timeout=timeout))
 
 
 def _report_usage(part: Any) -> None:
@@ -531,23 +573,38 @@ def _int_or_none(part: Any, key: str) -> int | None:
     return int(value) if isinstance(value, int) else None
 
 
-def ollama_stream(prompt: str, *, host: str, model: str) -> Iterator[str]:
+def ollama_stream(
+    prompt: str, *, host: str, model: str, timeout: float | None = None
+) -> Iterator[str]:
     """The same completion, yielded token-by-token as Ollama produces it — what
-    the /ask/stream endpoint forwards as server-sent events.
+    the /ask/stream endpoint forwards as server-sent events, and what
+    `ollama_generate` joins.
 
     Bounded the same way, for a sharper reason: a client watching an SSE stream
     would sit through hundreds of tokens of deliberation before the first word of
-    the answer, and a stream whose first chunk is minutes away is not a stream."""
+    the answer, and a stream whose first chunk is minutes away is not a stream.
+
+    `timeout` exists for the buffered caller — the guard model in `guard.py` sits on
+    the request path and gets a tight one. The `finally` is for both: closing the
+    provider's iterator is what tells Ollama to stop generating when the consumer
+    walks away, and an abandoned generation is a machine still working for nobody.
+    """
     from ollama import Client  # lazy
 
-    for part in Client(host=host).generate(model=model, prompt=prompt, stream=True, **BOUNDED):
-        # The counts ride on the final object, after the last text chunk. Reading
-        # every part rather than only the one flagged `done` costs nothing and
-        # survives a provider that moves them.
-        _report_usage(part)
-        chunk = part["response"]
-        if chunk:
-            yield chunk
+    parts = Client(host=host, timeout=timeout).generate(
+        model=model, prompt=prompt, stream=True, **BOUNDED
+    )
+    try:
+        for part in parts:
+            # The counts ride on the final object, after the last text chunk. Reading
+            # every part rather than only the one flagged `done` costs nothing and
+            # survives a provider that moves them.
+            _report_usage(part)
+            chunk = part["response"]
+            if chunk:
+                yield chunk
+    finally:
+        _close(parts)
 
 
 # --- the hosted brains: same two shapes, someone else's hardware ----------------
@@ -568,47 +625,46 @@ def openai_generate(
 ) -> str:
     """One completion from OpenAI (or anything speaking its wire format).
 
-    The key is read by the SDK from `OPENAI_API_KEY`; it is deliberately not a
-    parameter, so there is no call site that could pass one in from a config file
-    and no traceback that could print it.
+    Its own stream, joined, for the cancellation seam `joined` explains. The key is
+    read by the SDK from `OPENAI_API_KEY`; it is deliberately not a parameter, so
+    there is no call site that could pass one in from a config file and no traceback
+    that could print it.
     """
-    from openai import OpenAI  # lazy: the offline tier never imports it
-
-    response = OpenAI(base_url=base_url, timeout=timeout).chat.completions.create(
-        model=model,
-        max_tokens=COMPLETION_TOKEN_CAP,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    if usage_block := getattr(response, "usage", None):
-        _report_openai_usage(usage_block)
-    return (response.choices[0].message.content or "").strip()
+    return joined(openai_stream(prompt, model=model, base_url=base_url, timeout=timeout))
 
 
 def openai_stream(
-    prompt: str, *, model: str, base_url: str | None = None
+    prompt: str, *, model: str, base_url: str | None = None, timeout: float | None = None
 ) -> Iterator[str]:
     """The same completion as deltas.
 
-    `include_usage` asks for the token counts the batch path gets for free. A
-    stream without it is billed by estimate — see `usage.measure`, which labels
-    the difference rather than hiding it.
+    `include_usage` asks for the token counts the buffered path used to get for free
+    from a non-streaming call. It is not a nicety now that `openai_generate` is this
+    function joined: without it the buffered path would be billed by estimate — see
+    `usage.measure`, which labels the difference rather than hiding it.
     """
     from openai import OpenAI  # lazy
 
-    chunks = OpenAI(base_url=base_url).chat.completions.create(
+    chunks = OpenAI(base_url=base_url, timeout=timeout).chat.completions.create(
         model=model,
         max_tokens=COMPLETION_TOKEN_CAP,
         messages=[{"role": "user", "content": prompt}],
         stream=True,
         stream_options={"include_usage": True},
     )
-    for chunk in chunks:
-        # Usage rides on a final frame that carries no choices, and some deltas
-        # are None even when choices are present.
-        if usage_block := getattr(chunk, "usage", None):
-            _report_openai_usage(usage_block)
-        if chunk.choices and chunk.choices[0].delta.content:
-            yield chunk.choices[0].delta.content
+    try:
+        for chunk in chunks:
+            # Usage rides on a final frame that carries no choices, and some deltas
+            # are None even when choices are present.
+            if usage_block := getattr(chunk, "usage", None):
+                _report_openai_usage(usage_block)
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+    finally:
+        # A hosted stream is an open HTTP response and a running generation on
+        # somebody's meter. Closing it is the difference between stopping the work
+        # and merely stopping reading it.
+        _close(chunks)
 
 
 def _report_openai_usage(block: Any) -> None:
@@ -623,25 +679,26 @@ def _report_openai_usage(block: Any) -> None:
 def anthropic_generate(
     prompt: str, *, model: str, timeout: float | None = None
 ) -> str:
-    """One completion from Anthropic. Key from `ANTHROPIC_API_KEY`, same rule."""
+    """One completion from Anthropic. Key from `ANTHROPIC_API_KEY`, same rule.
+
+    Its own stream, joined — and joining the text blocks is what the buffered call
+    did anyway, so this loses nothing but the blocking wait."""
+    return joined(anthropic_stream(prompt, model=model, timeout=timeout))
+
+
+def anthropic_stream(
+    prompt: str, *, model: str, timeout: float | None = None
+) -> Iterator[str]:
+    """The same completion as deltas, through the SDK's streaming helper.
+
+    The `with` block is the cancellation seam here: closing this generator raises
+    `GeneratorExit` inside it, which exits the context manager, which tears the
+    connection down. Nothing extra to do — but it only works because the helper is
+    entered here rather than by the caller."""
     from anthropic import Anthropic  # lazy
 
     kwargs = {"timeout": timeout} if timeout is not None else {}
-    response = Anthropic(**kwargs).messages.create(
-        model=model,
-        max_tokens=COMPLETION_TOKEN_CAP,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    _report_anthropic_usage(getattr(response, "usage", None))
-    # A response is a list of content blocks; only the text ones are the answer.
-    return "".join(b.text for b in response.content if b.type == "text").strip()
-
-
-def anthropic_stream(prompt: str, *, model: str) -> Iterator[str]:
-    """The same completion as deltas, through the SDK's streaming helper."""
-    from anthropic import Anthropic  # lazy
-
-    with Anthropic().messages.stream(
+    with Anthropic(**kwargs).messages.stream(
         model=model,
         max_tokens=COMPLETION_TOKEN_CAP,
         messages=[{"role": "user", "content": prompt}],

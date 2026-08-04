@@ -128,6 +128,16 @@ class Measured:
     #: has no way to notice the eval suite behind them is five rows wide.
     evidence_class: str = "offline-proxy"
     versions: dict[str, str] = field(default_factory=dict)
+    #: The whole containment property, or `None` when the lane cannot measure it.
+    #: `redteam_bypasses` above is one number out of this object, kept at the top
+    #: level because every published report and every gate already reads it there.
+    #: What the extra fields buy is the questions that number cannot answer: which
+    #: tools counted as gated, whether the benign controls still worked, whether any
+    #: PII left, whether a family collapsed. This page leaves it `None` — three
+    #: inline probes and no controls, and a fabricated safety object on a proxy page
+    #: would be worse than an absent one. `check-release-evidence.py` requires it for
+    #: release-class evidence, so the absence fails closed exactly where it matters.
+    safety: dict | None = None
 
 
 def versions_for(assistant: Assistant) -> dict[str, str]:

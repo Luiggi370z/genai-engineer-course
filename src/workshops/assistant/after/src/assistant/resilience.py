@@ -39,7 +39,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from contextvars import copy_context
 from dataclasses import dataclass, field
@@ -93,6 +93,57 @@ DEFAULT_POLICY = Policy()
 ONCE = Policy(attempts=1)
 
 
+#: How often a blocked wait looks up from the clock to ask whether the caller is
+#: still there. Short enough that a 499 is prompt, long enough that a request
+#: waiting a minute for a model wakes about 240 times and not 60,000.
+POLL_SECONDS = 0.25
+
+
+def waited(future: Future, limit: float, name: str) -> Any:
+    """Wait for a worker, watching two clocks and one door.
+
+    `future.result(timeout=limit)` was one line and answered one question — has the
+    time run out. It could not answer the other one, because a thread parked in
+    `result()` reads nothing: **has the caller left.** A buffered `/ask` whose client
+    hangs up flips `Budget.cancelled` immediately (the watcher task is running, and a
+    sync route does not block the loop), and this wait carried right on to the end of
+    a 60-second budget generating an answer for a closed socket.
+
+    So the wait happens in slices, and between slices cancellation gets a look. The
+    exception is `deadline.Expired`, not `TimeoutError`, and the difference is load
+    bearing in two places: `fallbacks` re-raises `Expired` instead of composing an
+    offline answer (a hangup is not a model outage and must not be recorded as one),
+    and the API maps it to 499.
+
+    Clock exhaustion still raises `TimeoutError` with the message it always had.
+    That is why the loop asks `Budget.cancelled()` specifically rather than
+    `deadline.expired()` — the two conditions look identical from inside a `Budget`
+    and mean opposite things: one is our failure to be fast enough, the other is not
+    our failure at all.
+
+    The abandoned worker is abandoned the same way the timeout path already
+    abandons it: Python cannot kill a thread, so the caller stops waiting and
+    `pool.shutdown(wait=False)` lets it die on its own. What makes that cheap rather
+    than merely tidy is the seam at the other end — `adapters.joined` checks the
+    deadline between stream parts and closes the provider's iterator, so the work
+    itself stops instead of running on unread.
+    """
+    left = limit
+    while left > 0:
+        # The slice is subtracted, not `POLL_SECONDS`: a 0.05s timeout must still
+        # give up after 0.05s, and a poll interval that ate a whole slice out of a
+        # budget smaller than itself would turn every tight timeout into a lie in the
+        # other direction.
+        span = min(POLL_SECONDS, left)
+        try:
+            return future.result(timeout=span)
+        except FutureTimeout:
+            left -= span
+            if deadline.cancelled():
+                raise deadline.Expired("caller disconnected") from None
+    raise TimeoutError(f"{name} exceeded {limit:.3g}s")
+
+
 def resilient(
     fn: Callable[..., Any],
     policy: Policy = DEFAULT_POLICY,
@@ -139,12 +190,7 @@ def resilient(
         ctx = copy_context()
         try:
             future = pool.submit(ctx.run, fn, *args, **kwargs)
-            try:
-                result = future.result(timeout=limit)
-            except FutureTimeout:
-                raise TimeoutError(
-                    f"{getattr(fn, '__name__', 'call')} exceeded {limit:.3g}s"
-                ) from None
+            result = waited(future, limit, getattr(fn, "__name__", "call"))
             # Only on success, and only after the result is in hand: an
             # abandoned call is still running on that thread, still writing to
             # that context, and adopting its half-finished state would be worse

@@ -145,6 +145,10 @@ services:
         },
         {
           kind: "p",
+          text: "Safety is the one that tempts you to gate on a single integer. `bypasses: 0` is also what a suite that measured nothing reports: no attacks thrown, an empty gated-tool set, every benign question refused. So publish the containment property whole — attacks, controls, leaks, wrong refusals, undelivered payloads, the gated set the count was scored against, rows-versus-contained **per family** — and gate all of it.",
+        },
+        {
+          kind: "p",
           text: 'The report is **version-stamped** (model, prompt, corpus, dataset) — an unstamped report blocks every gate, because numbers without provenance are not evidence. This is what "eval-first" looks like in production: the tests you already wrote, wired to the branch protection.',
         },
         {
@@ -161,7 +165,7 @@ services:
       - run: docker run --rm -v "$PWD/evidence:/out" capstone:ci \\
                python -m assistant.report --json /out/report.json
       - run: gate.py --quality  evidence/report.json  # faithfulness/recall bars
-      - run: gate.py --safety   evidence/report.json  # zero unapproved tool fires
+      - run: gate.py --safety   evidence/report.json  # the whole containment object
       - run: gate.py --latency  evidence/report.json  # P99 — the tail, not the mean
       - run: gate.py --cost     evidence/report.json  # fail here, not on the invoice
   gates:                            # and prove the gates can fail at all
@@ -660,12 +664,13 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       effort: { fast: 35, integration: null, realistic: 60 },
       rung: "faded",
       proves: "operate",
-      task: "Build the four independently failing merge gates — quality (faithfulness/recall), safety (zero red-team bypasses), P99 latency and cost — over a version-stamped report, wire them into the make targets a GitHub Actions workflow calls, and prove each gate can actually block with the seeded regressions (`make prove-gates`).",
+      task: "Build the four independently failing merge gates — quality (faithfulness/recall), safety (the containment object, not just a bypass count), P99 latency and cost — over a version-stamped report, wire them into the make targets a GitHub Actions workflow calls, and prove each gate can actually block with the seeded regressions (`make prove-gates`).",
       assesses: ["p6-o2"],
       needs: ["p-evals-o5", "p4-o4"],
       solution: [
         "Smoke subset per PR, full evals nightly; pin and cache the judge.",
         "Branch protection is the point — an eval regression or a red-team bypass must actually block the merge, not just warn.",
+        "The safety gate has more ways to be vacuous than the other three. Block a report that disagrees with itself, that declares no gated tools, that ran no controls, that leaked PII, that refused a benign question, or whose payloads never reached a boundary — and check rows against contained per family, because an aggregate hides the family that collapsed. Every one of those is a seeded fixture: a rule you have not seen fail is a comment.",
       ],
     },
     {
@@ -936,7 +941,7 @@ def is_cacheable(result, gated_tools_fired) -> bool:
     {
       id: "p6-q3",
       q: "What belongs in the CI gate for a GenAI app, beyond normal tests?",
-      a: "The eval suite (RAGAS quality gate), the red-team suite (safety gate), and the two budget gates — P99 latency and cost per eval run — all as required checks over a version-stamped report. A merge that regresses faithfulness, lets a landed injection fire a gated tool, or blows the tail-latency or spend budget should be blocked, not merged with a warning.",
+      a: "The eval suite (RAGAS quality gate), the red-team suite (safety gate), and the two budget gates — P99 latency and cost per eval run — all as required checks over a version-stamped report. A merge that regresses faithfulness, lets a landed injection fire a gated tool, or blows the tail-latency or spend budget should be blocked, not merged with a warning. Make the safety gate read the containment property and not one integer: a bypass count of zero is also what you get from a suite with no attacks, no declared gated tools, or a filter so tight it refused every benign question — so gate PII leaks, refused controls and per-family containment beside the bypasses.",
       demands: ["constraints", "evidence", "failure-modes"],
     },
     {

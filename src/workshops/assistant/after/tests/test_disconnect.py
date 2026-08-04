@@ -48,6 +48,7 @@ import uvicorn
 
 from assistant import deadline
 from assistant.api import create_app
+from assistant.fallbacks import fallback_composer
 from assistant.settings import Settings
 
 #: Chunks the fake model emits if nobody stops it.
@@ -74,15 +75,46 @@ class Server(uvicorn.Server):
         return None
 
 
+#: The hostile buffered composer's total runtime if nobody interrupts it, and the
+#: bar the buffered test measures against. Longer than the wait a passing run
+#: needs, shorter than the suite's patience.
+HOSTILE_SECONDS = 20.0
+
+#: What the buffered request must not exceed. Generous — the disconnect watcher
+#: polls every `DISCONNECT_POLL_SECONDS` and so does the wait — and still an order
+#: of magnitude under `HOSTILE_SECONDS`, so a pass cannot be a slow machine.
+ABANDON_BUDGET = 5.0
+
+
 @pytest.fixture
 def served():
-    """An app on a real port, plus what its fake model saw while generating.
+    """An app on a real port, plus what its fake models saw while generating.
 
-    `noticed` is the interesting field: the model asks `deadline.expired()` on every
-    chunk, which is exactly what `output_gate.gated_chunks` and every tool wrapper
-    ask. Recording the answer turns "did the disconnect arrive" into an assertion.
+    `noticed` is the interesting field for the streaming tests: the model asks
+    `deadline.expired()` on every chunk, which is exactly what
+    `output_gate.gated_chunks` and every tool wrapper ask. Recording the answer turns
+    "did the disconnect arrive" into an assertion.
+
+    `outcome` and `waited` are the buffered half. The buffered composer is
+    deliberately hostile — it sleeps in slices and asks nothing — because a composer
+    that checks the deadline itself proves the wrong thing: the claim is that a
+    *blocking* call is abandoned by the layer waiting on it, which is where the bug
+    was. So the assistant's composer is wrapped in the real `fallback_composer`, the
+    same as `service.build_assistant` does, and what the request thread ends up
+    seeing is recorded.
     """
-    watched = {"chunks": 0, "noticed": None}
+    watched = {
+        "chunks": 0,
+        "noticed": None,
+        "outcome": None,
+        "waited": None,
+        # Off by default: the other buffered test in this module wants a prompt 200,
+        # and one fixture serving both is better than two servers on two ports.
+        "hostile": False,
+        #: Whatever `fallback_composer` decided to call a degradation. Must stay empty
+        #: for a disconnect — a hangup is not a model outage.
+        "degraded": {},
+    }
 
     app = create_app(Settings())
 
@@ -96,7 +128,35 @@ def served():
             yield f"word{i} "
             time.sleep(CHUNK_DELAY)
 
+    def oblivious(goal, contexts, state, memories=None):
+        """A model call that takes far too long and cooperates in nothing."""
+        if not watched["hostile"]:
+            return "prompt enough"
+        for _ in range(int(HOSTILE_SECONDS / CHUNK_DELAY)):
+            time.sleep(CHUNK_DELAY)
+        return "an answer nobody is waiting for"
+
+    def degrade(component: str, reason: str) -> None:
+        watched["degraded"][component] = reason
+        app.state.assistant.degraded[component] = reason
+
+    composed = fallback_composer(oblivious, degrade)
+
+    def timed_compose(*args, **kwargs):
+        started = time.monotonic()
+        try:
+            answer = composed(*args, **kwargs)
+        except BaseException as exc:
+            watched["outcome"] = getattr(exc, "reason", None) or repr(exc)
+            raise
+        else:
+            watched["outcome"] = "answered"
+            return answer
+        finally:
+            watched["waited"] = time.monotonic() - started
+
     app.state.assistant.stream_compose = endless
+    app.state.assistant.compose = timed_compose
 
     # Bound here rather than by Uvicorn so the port is known before the server
     # starts — reading it back off `server.servers[0]` is a race this does not need.
@@ -223,6 +283,68 @@ def test_a_buffered_response_still_tears_the_watcher_down(served):
 
     assert b"200 OK" in received.split(b"\r\n")[0], received[:200]
     assert threading.active_count() < 50, "something is accumulating per request"
+
+
+ASK = (
+    b"POST /ask HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+    b"Content-Type: application/json\r\nContent-Length: 34\r\n"
+    b"Connection: close\r\n\r\n"
+    b'{"question": "tell me everything"}'
+)
+
+
+def test_a_buffered_request_stops_waiting_for_a_caller_who_left(served):
+    """The buffered path, which had the flag and never read it.
+
+    `/ask` is a sync route, so it runs in the threadpool and the watcher polls
+    normally — the disconnect *did* arrive, and `Budget.cancelled` *did* flip. Nobody
+    asked. `resilience.timed` sat in `future.result(timeout=limit)`, which answers
+    one question (has the clock run out) and cannot answer the other one, and
+    `deadline.check()` only ran between attempts. A client that hung up two seconds
+    in got a full 60 seconds of model generation billed to it and thrown away.
+
+    The composer here asks nothing on purpose. Every other cancellation test in this
+    repo uses a cooperative one, and a cooperative composer proves the seam it
+    contains rather than the seam above it — which is precisely why this bug survived
+    twenty green tests. What must hold is that the layer *waiting* gives up.
+
+    Asserted on `outcome`, not on a duration alone: an abandoned worker keeps
+    sleeping (Python cannot kill a thread), so wall-clock alone cannot distinguish
+    "gave up on the caller's behalf" from "crashed for some other reason". The
+    reason string is also the one thing that must not be `deadline exceeded` — see
+    `GONE` above, and `api.expired`, which turns the distinction into 499 vs 504.
+    """
+    port, watched = served
+    watched["hostile"] = True
+
+    client = socket.create_connection(("127.0.0.1", port), timeout=20)
+    try:
+        client.sendall(ASK)
+        # Long enough that the composer is definitely inside its sleep loop and the
+        # request is definitely parked in the wait, which is the state under test.
+        time.sleep(0.5)
+        client.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    finally:
+        client.close()
+
+    until = time.monotonic() + ABANDON_BUDGET
+    while watched["outcome"] is None and time.monotonic() < until:
+        time.sleep(0.05)
+
+    assert watched["outcome"] == GONE, (
+        f"the buffered request ended as {watched['outcome']!r} after "
+        f"{ABANDON_BUDGET}s. A composer that never checks anything can only be "
+        "stopped by the layer waiting on it — if this is None the wait is still "
+        f"running and will be for {HOSTILE_SECONDS}s"
+    )
+    assert watched["waited"] < ABANDON_BUDGET, (
+        f"waited {watched['waited']:.1f}s for a caller who had already gone"
+    )
+    assert watched["degraded"] == {}, (
+        f"a client hangup was recorded as {watched['degraded']}: /health would show a "
+        "brain tier that never failed, and the release lane's no-fallback assertion "
+        "would fail over somebody closing a tab"
+    )
 
 
 def test_the_hand_injected_signal_is_still_the_unit_level_contract():

@@ -1,7 +1,8 @@
 # 8.2 CI
 
 **Goal.** Build the merge gate as four independently failing checks — quality
-(faithfulness and recall above their bars), safety (zero red-team bypasses),
+(faithfulness and recall above their bars), safety (the whole containment
+property: no bypass, no leak, no refused control, no undelivered payload),
 latency (P99 within budget), and cost (spend within budget) — over a
 version-stamped report, and wire them into the `make eval` / `make redteam` /
 `make latency` / `make cost` targets the repo-root workflow calls on every PR.
@@ -13,7 +14,7 @@ this gate reads.
 
 ```bash
 make setup && make test     # failing tests — read them, they are the spec
-$EDITOR src/gate.py         # fill TODOs 1-5: the four gates + should_merge
+$EDITOR src/gate.py         # fill TODOs 1-5: four gates, containment, should_merge
 make check                  # green: ruff + pyright + pytest, all offline
 make eval && make redteam && make latency && make cost   # what CI runs
 make prove-gates            # every seeded regression must BLOCK
@@ -38,6 +39,9 @@ of `gate.py` is given; once your five functions work, all four make targets work
 - [ ] A faithfulness or recall regression blocks with a reason naming the metric
       and the bar (the tests grep for it).
 - [ ] One red-team bypass blocks the merge even with faithfulness 0.95.
+- [ ] So does a PII leak, a wrongly refused benign control, an undelivered
+      payload, an empty gated-tool set, and one family whose rows are not all
+      contained — the four numbers the page prints, all enforced.
 - [ ] A P99 or cost blowout blocks on its own gate and no other.
 - [ ] An unstamped report blocks every gate.
 - [ ] `make eval`, `make redteam`, `make latency`, `make cost` all exit 0 on the
@@ -61,6 +65,10 @@ against the fix and fail against each defect. Do it after this lesson —
    reason "p99", the cost reason "cost" — the tests match on substrings.
 3. `should_merge` concatenates all four gates' reasons but should not repeat the
    version-stamp reason four times — dedupe as you extend.
+4. `report.safety` is `None` on the offline lane, which has no benign controls to
+   refuse. Absent means "not measured here", not "measured as zero", so skip the
+   containment rules rather than defaulting them — the publication gate in
+   `.github/scripts/check-release-evidence.py` is where absence is refused.
 
 No integration lane: the gate is pure logic over a report dataclass.
 

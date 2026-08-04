@@ -45,7 +45,7 @@ from assistant.composers import (
 from assistant.guardrails import Screen
 from assistant.idempotency import IdempotencyStore
 from assistant.outbox import Outbox
-from assistant.output_gate import gated_chunks
+from assistant.output_gate import REDACTION, gated_chunks
 from assistant.settings import Settings
 from assistant.tools import Tool
 from assistant.usage import Usage
@@ -469,7 +469,11 @@ class Assistant:
                 released = guardrails.output_ok(answer)
                 gate_span.set_attribute(observe.SCREEN_BLOCKED, not released)
             if not released:
-                answer = "[redacted: output failed the safety gate]"
+                # The same string the streaming gate substitutes, not a copy of it:
+                # the release lane scores a control as refused when its answer IS
+                # this text, and a check bound to a duplicated literal stops being
+                # true the first time one of the two is edited.
+                answer = REDACTION
             return {"answer": answer, "contexts": contexts, "citations": citations,
                     "request_id": request_id,
                     # Which class of evidence this answer stands on. A caller can
