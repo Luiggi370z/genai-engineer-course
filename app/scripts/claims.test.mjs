@@ -10,6 +10,7 @@ import {
   pinFindings,
   prerequisiteFindings,
   priceFindings,
+  quoteFindings,
   readDataset,
   STALE_DAYS,
   sourceFindings,
@@ -322,6 +323,133 @@ test("prose that agrees with the dataset passes", () => {
 test("the finding points at the line, because these sentences repeat", () => {
   const found = datasetRules("fine\nalso fine\nall 58 rows of the red-team dataset\n");
   assert.equal(found[0].subject, "src/x.md:3");
+});
+
+test("a control count spelled out is still a control count", () => {
+  // The round-9 drift: an exercise asking the student to report "how many of the
+  // eight benign controls you also refused" over a dataset carrying a different
+  // number. Digits-only patterns read it as prose and passed it for two rounds.
+  const [found] = datasetRules("how many of the eight benign controls you also refused");
+  assert.match(found.message, /claims 8 controls; the dataset has 1\b/);
+  assert.deepEqual(datasetRules("the one benign control in the suite"), []);
+});
+
+test("a rate is not a total — 'one benign control per detector' is a design, not a count", () => {
+  assert.deepEqual(datasetRules("The suite is one benign control per detector."), []);
+  assert.deepEqual(datasetRules("Budget 2 benign controls per family."), []);
+});
+
+// --- quoted snippets -----------------------------------------------------------
+// The file a card claims to be showing you. Two lines of it are enough to prove
+// every rule: the rules are about the relationship, not the size.
+const FILE = `import json
+
+
+def _cases():
+    return [json.loads(x) for x in read().splitlines() if x.strip()]
+
+
+def test_containment():
+    for c in _cases():
+        # the file's own comment
+        assert not guarded_run(c["input"]).fired, c
+`;
+
+const quoteRules = (code, path = "src/tests/test_redteam.py") =>
+  quoteFindings({
+    quotes: [{ subject: "p4/w3: The containment property", path, code }],
+    read: (asked) => (asked === "src/tests/test_redteam.py" ? FILE : null),
+  });
+
+test("an excerpt whose every code line is in the file passes", () => {
+  // Imports elided, docstring paraphrased into a comment of the card's own: the
+  // exemptions that make an excerpt possible at all.
+  assert.deepEqual(
+    quoteRules(`def test_containment():
+    # a comment this card wrote, not the file
+    for c in _cases():
+        assert not guarded_run(c["input"]).fired, c`),
+    [],
+  );
+});
+
+test("a helper the file has never had is caught — the round-9 defect, exactly", () => {
+  const [found] = quoteRules(`def test_containment():
+    for c in load_jsonl("evals/redteam.jsonl"):
+        assert not guarded_run(c["input"]).fired, c`);
+  assert.equal(found.rule, "quote-drift");
+  assert.match(found.subject, /line 2$/);
+  assert.match(found.message, /is not a line in src\/tests\/test_redteam\.py: for c in load_jsonl/);
+});
+
+test("an invented assertion is caught even though its neighbours are real", () => {
+  const [found] = quoteRules(`def test_containment():
+    for c in _cases():
+        assert guarded_run(c["input"]).screened == len(c["retrieved"])`);
+  assert.match(found.message, /is not a line in/);
+});
+
+test("a line silently dropped from the middle is drift — the other half of round 9", () => {
+  // The half a copy check cannot see: every line the card showed was in the file,
+  // and the loop it showed still failed on four rows, because the real test's
+  // early-refusal guard was simply absent between two lines that were real.
+  const [found] = quoteRules(`def test_containment():
+    assert not guarded_run(c["input"]).fired, c`);
+  assert.match(found.message, /drops without saying so/);
+  assert.match(found.message, /follows 1 line\(s\)/);
+});
+
+test("a cut the snippet admits to is an excerpt, and excerpts are allowed", () => {
+  assert.deepEqual(
+    quoteRules(`import json
+
+# ...
+
+def test_containment():
+    for c in _cases():
+        assert not guarded_run(c["input"]).fired, c`),
+    [],
+  );
+});
+
+test("starting partway down the file is not a cut — it is where the excerpt begins", () => {
+  assert.deepEqual(
+    quoteRules(`def test_containment():
+    for c in _cases():
+        assert not guarded_run(c["input"]).fired, c`),
+    [],
+  );
+});
+
+test("the right lines in the wrong order describe a control flow the file lacks", () => {
+  // Two findings, and both are true: swapping the loop and its body also drops a
+  // line out of the middle. The order one is the one this test is about.
+  const found = quoteRules(`def test_containment():
+    assert not guarded_run(c["input"]).fired, c
+    for c in _cases():`);
+  assert.ok(found.some((f) => /but before a line the snippet shows above it/.test(f.message)));
+});
+
+test("quoting a file that is not in the repository fails before any line is read", () => {
+  const [found] = quoteRules("def whatever():\n    pass", "src/tests/gone.py");
+  assert.equal(found.rule, "quote-drift");
+  assert.match(found.message, /not a file in this repository/);
+});
+
+test("a block with nothing but comments cannot claim to be a copy", () => {
+  const [found] = quoteRules("# all prose\n# and more prose\n");
+  assert.match(found.message, /shows no code to check against it/);
+});
+
+test("indentation is normalised, so an excerpt of a body is legitimate", () => {
+  assert.deepEqual(
+    quoteRules(`for c in _cases():\n    assert not guarded_run(c["input"]).fired, c`),
+    [],
+  );
+});
+
+test("a block without `quotes` is never checked — skeletons are honest code", () => {
+  assert.deepEqual(quoteFindings({ quotes: [], read: () => null }), []);
 });
 
 // --- action pins ---------------------------------------------------------------

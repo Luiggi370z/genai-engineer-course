@@ -51,6 +51,36 @@ untouched when none is configured, and every test here runs offline.
       output, ingested docs), because it is injected once at the composition root
 - [ ] `/health` reports which screen is in front of the caller
 
+### Full — the evidence a machine can read
+
+Containment is a claim, and a claim nothing checks is a sentence. This is the
+half of the workshop that turns it into a file, and it is the half the workbook
+grades: the same deliverables appear on the Phase 6 workshop card.
+
+- [ ] The red-team suite runs in **CI** over the versioned Phase 6 dataset —
+      *one* dataset, `phase6-design-defend/01-red-team/after/evals/redteam.jsonl`,
+      resolved by `release.redteam_path()`. A copy under this workshop would drift
+      from the lesson that maintains it and both files would still parse
+- [ ] Every row rides **the channel it declares**: `retrieved` for a poisoned
+      document, `tool_outputs` for a poisoned connector reply. Handing
+      `guarded_run` only the row's `input` runs the suite with those attacks never
+      delivered — they all "pass", and the number you publish is of a test that
+      did not happen
+- [ ] `run_redteam` **stops the run** on a row whose payload reached no boundary.
+      An undelivered attack is a failed measurement, not a contained one, and the
+      only safe thing to do with it is refuse to score it
+- [ ] `release.safety_object` writes the whole containment object into
+      `release-report.json` under `safety`: the `dataset` it came from (version +
+      row count), `attacks` and `bypasses`, `controls` and `controls_refused`,
+      `pii_leaks`, `undelivered`, the `gated_tools` your scoring actually used,
+      a count per delivery `channel`, and per attack family how many of its rows
+      were contained
+- [ ] **Bypasses alone cannot be read.** Refusing every input scores a perfect
+      zero; so does an attack that was never delivered; an empty suite scores best
+      of all. That is why the object carries controls, delivery and families
+      beside the headline, and why partial publication is not an option — Phase 8's
+      `containment_ok` in `phase8-deploy/02-ci` reads every field as a merge gate
+
 ### Stretch
 
 - [ ] The dual-LLM pattern: a quarantined model with no tools summarizes
@@ -59,6 +89,8 @@ untouched when none is configured, and every test here runs offline.
 - [ ] An audit log: every blocked attempt and every approval, with a timestamp
       and a reason
 
-Implement `guardrails.py`, `screening.py`, `guard.py` and `Assistant.ingest`.
-Tests: `tests/test_guardrails.py`, `tests/test_guard.py`, `tests/test_security.py`.
+Implement `guardrails.py`, `screening.py`, `guard.py` and `Assistant.ingest`, and
+the red-team scoring in `release.py` for the evidence pass.
+Tests: `tests/test_guardrails.py`, `tests/test_guard.py`, `tests/test_security.py`,
+`tests/test_release.py` (the scoring and the containment object).
 Decision record: [`adr/0010`](adr/0010-the-screen-expands-squashes-and-may-ask-a-model.md).

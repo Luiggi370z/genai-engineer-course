@@ -349,6 +349,49 @@ export function modelFindings({ files, roles }) {
  * So the dataset is the claim and the prose is a copy. `dataset` carries the
  * totals read off the file; anything restating them has to agree.
  */
+/**
+ * Counts written as words, because prose writes them that way.
+ *
+ * The round-9 drift was an exercise asking a student to report "how many of the
+ * eight benign controls you also refused" over a dataset carrying eleven. The
+ * digit-only patterns below could not see it, so a number this gate exists to
+ * police sat wrong in the material for two rounds. Prose gets to say "eleven";
+ * it does not get to say a different eleven than the file.
+ */
+const WORD_COUNTS = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+};
+
+/**
+ * `<digits><tail>`, with an optional lead-in, and words only where asked for.
+ *
+ * Words are opt-in per pattern rather than global: this repository legitimately
+ * says "the eval suite is five rows wide" one clause away from the words
+ * "red-team dataset", and a rule that reads that as a claim about the red-team
+ * row count is a rule authors learn to work around.
+ */
+const count = (tail, { lead = "", words = false } = {}) =>
+  new RegExp(`${lead}(\\d+${words ? `|${Object.keys(WORD_COUNTS).join("|")}` : ""})${tail}`, "i");
+
+const countOf = (found) => WORD_COUNTS[found.toLowerCase()] ?? Number(found);
+
+/**
+ * "One benign control per detector" states a rate, not a total, and the suite
+ * having eleven of them does not contradict it. A total is what this gate checks.
+ */
+const RATE = /^\s*(?:per|each|of every)\b/i;
+
 export function datasetFindings({ files, dataset }) {
   const expected = {
     rows: dataset.rows,
@@ -359,13 +402,15 @@ export function datasetFindings({ files, dataset }) {
   // Each pattern names the quantity it is reading, so the failure can say which
   // number is wrong rather than that some number is.
   const patterns = [
-    [/(\d+)\s+rows\b/i, "rows", /red.?team|redteam|phase 6 (?:versioned )?dataset/i],
+    [count(String.raw`\s+rows\b`), "rows", /red.?team|redteam|phase 6 (?:versioned )?dataset/i],
     // The exact shape of the stale claim the round-3 audit found: "45-case".
-    [/(\d+)-case\b/i, "rows", /red.?team|redteam|dataset|suite/i],
-    [/suite of (?:\*\*)?(\d+) rows/i, "rows", null],
-    [/(\d+)\s+benign controls?\b/i, "controls", null],
-    [/(\d+)\s+attacks?\s+(?:across|rows)/i, "attacks", null],
-    [/(\d+)\s+attack families\b/i, "families", null],
+    [count(String.raw`-case\b`), "rows", /red.?team|redteam|dataset|suite/i],
+    [count(" rows", { lead: String.raw`suite of (?:\*\*)?` }), "rows", null],
+    // Words here, and only here: this is the count the round-9 audit found spelled
+    // out and wrong, in the one phrase that can only be about this dataset.
+    [count(String.raw`\s+benign controls?\b`, { words: true }), "controls", null],
+    [count(String.raw`\s+attacks?\s+(?:across|rows)`), "attacks", null],
+    [count(String.raw`\s+attack families\b`), "families", null],
   ];
   const out = [];
   for (const { file, source } of files) {
@@ -374,7 +419,8 @@ export function datasetFindings({ files, dataset }) {
         if (context && !context.test(text)) continue;
         const found = text.match(pattern);
         if (!found) continue;
-        const claimed = Number(found[1]);
+        if (RATE.test(text.slice(found.index + found[0].length))) continue;
+        const claimed = countOf(found[1]);
         if (claimed === expected[quantity]) continue;
         out.push({
           rule: "dataset-drift",
@@ -386,6 +432,91 @@ export function datasetFindings({ files, dataset }) {
         });
       }
     });
+  }
+  return out;
+}
+
+/**
+ * "I cut something here": a comment line that is nothing but an ellipsis.
+ *
+ * The other half of the round-9 defect, and the half a copy check cannot see. The
+ * card asserted a screening count with the real test's early-refusal guard simply
+ * absent — every line it showed was in the file, and the loop it showed still
+ * failed on four rows. So a snippet may skip lines, but not silently: an
+ * unmarked gap between two lines it shows is a control flow it invented.
+ */
+const ELISION = /^#\s*(\.\.\.|…)\s*$/;
+
+/**
+ * A snippet that says it came out of a file came out of that file.
+ *
+ * The bug it exists for: a Phase 6 card titled "the test that must pass
+ * (after/tests/test_redteam.py)" called `load_jsonl()` and `bypass_rate()`, which
+ * no version of that file has ever defined, named a path that did not exist under
+ * that card's repository at all, and asserted a screening count unconditionally
+ * where the real test first checks whether the input was refused at the door. Two
+ * audits in a row read it. Nothing failed, because nothing connected the snippet
+ * to the file it named — the card was prose as far as every gate was concerned.
+ *
+ * Opt-in via `quotes`, and deliberately so. Most code blocks in this workbook are
+ * skeletons and TODO shapes: they name a file whose helpers the student has not
+ * written yet, and holding *those* to this rule would make the honest ones worse.
+ * The claim being checked here is narrower — "this is copied" — and only a card
+ * that makes it gets checked.
+ *
+ * Comment-only lines are exempt, which is what makes an excerpt possible: a card
+ * paraphrases a nine-line docstring into two lines of teaching prose and elides
+ * the imports. Indentation is normalised for the same reason, since an excerpt of
+ * a method body is legitimately dedented. Everything executable has to match, in
+ * order, and every cut has to say it is one — see `ELISION`, which is the rule for
+ * the half of the same defect that copying alone cannot catch.
+ */
+export function quoteFindings({ quotes, read }) {
+  const out = [];
+  const fail = (subject, message) => out.push({ rule: "quote-drift", subject, message });
+  const runs = (line) => line && !line.startsWith("#");
+  for (const { subject, path, code } of quotes) {
+    const source = read(path);
+    if (source === null || source === undefined) {
+      fail(subject, `quotes ${path}, which is not a file in this repository`);
+      continue;
+    }
+    const lines = source.split("\n").map((line) => line.trim());
+    // Where the last matched line was found. Monotonic, so a snippet that shows
+    // the right lines in the wrong order fails: read top to bottom, it would be a
+    // control flow the file does not have.
+    let cursor = 0;
+    let checked = 0;
+    let cut = false;
+    for (const [index, raw] of code.split("\n").entries()) {
+      const line = raw.trim();
+      if (!runs(line)) {
+        if (ELISION.test(line)) cut = true;
+        continue;
+      }
+      checked += 1;
+      const at = lines.indexOf(line, cursor);
+      const where = `${subject} line ${index + 1}`;
+      if (at === -1) {
+        if (lines.includes(line)) {
+          fail(where, `is in ${path}, but before a line the snippet shows above it: ${line}`);
+        } else {
+          fail(where, `is not a line in ${path}: ${line}`);
+        }
+        continue;
+      }
+      const skipped = lines.slice(cursor, at).filter(runs).length;
+      if (skipped && !cut && cursor > 0) {
+        fail(
+          where,
+          `follows ${skipped} line(s) of ${path} the snippet drops without saying so — ` +
+            "mark the cut with a `# ...` line or show them",
+        );
+      }
+      cursor = at + 1;
+      cut = false;
+    }
+    if (!checked) fail(subject, `quotes ${path} but shows no code to check against it`);
   }
   return out;
 }

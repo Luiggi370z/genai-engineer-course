@@ -31,6 +31,7 @@ import {
   pinFindings,
   prerequisiteFindings,
   priceFindings,
+  quoteFindings,
   readDataset,
   STALE_DAYS,
   sourceFindings,
@@ -108,7 +109,7 @@ push(errors);
 
 // --- 2. the README tables still match the canonical rows --------------------
 const summary = hardwareSummaryMarkdown();
-const { prerequisiteSummaryMarkdown } = await loadCourseData();
+const { electives, phases, prerequisiteSummaryMarkdown } = await loadCourseData();
 const prereqs = prerequisiteSummaryMarkdown();
 for (const file of ["README.md", "release/README.md"]) {
   const markdown = readFileSync(resolve(repo, file), "utf8");
@@ -169,11 +170,46 @@ for await (const path of glob(".github/workflows/*.yml", { cwd: repo })) {
 }
 push(actionPinFindings({ workflows }));
 
+// --- 8. every snippet presented as copied out of a file is a copy of it ------
+// The other seven rules police numbers. This one polices code, and for the same
+// reason: a card that shows you a test you cannot run has told you something
+// false about the repository, and only the repository can settle it.
+const quoted = [];
+const collect = (blocks, subject) => {
+  for (const block of blocks ?? []) {
+    if (block.kind === "code" && block.quotes)
+      quoted.push({
+        subject: `${subject}: ${block.title ?? "code"}`,
+        path: block.quotes,
+        code: block.code,
+      });
+    if (block.kind === "deepdive") collect(block.blocks, subject);
+  }
+};
+for (const phase of phases) {
+  for (const card of phase.concepts ?? []) collect(card.blocks, `${phase.id}/${card.id}`);
+  if (phase.workshop) collect(phase.workshop.blocks, `${phase.id}/${phase.workshop.id}`);
+}
+for (const elective of electives ?? []) collect(elective.blocks, elective.id);
+push(
+  quoteFindings({
+    quotes: quoted,
+    read: (path) => {
+      try {
+        return readFileSync(resolve(repo, path), "utf8");
+      } catch {
+        return null;
+      }
+    },
+  }),
+);
+
 // --- report -----------------------------------------------------------------
 console.log(
   `Claims scan · ${sourced.length} sourced claim(s) · ${HARDWARE.length} hardware tiers · ` +
     `${Object.keys(TOKEN_PRICES).length} priced models · ${pythonFiles.length} python files · ` +
-    `${manifests.length} manifests · ${workflows.length} workflows`,
+    `${manifests.length} manifests · ${workflows.length} workflows · ` +
+    `${quoted.length} quoted snippet(s)`,
 );
 if (stale.length) {
   console.log(
@@ -199,5 +235,6 @@ if (findings.length) {
 }
 console.log(
   "\nClaims OK — one hardware table, one prerequisite list, one price list, one model per " +
-    "role, one pin per library, and every CI action on a commit.",
+    "role, one pin per library, every CI action on a commit, and every quoted snippet a " +
+    "line-for-line copy of the file it names.",
 );

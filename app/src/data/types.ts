@@ -9,7 +9,19 @@
 export type Block =
   | { kind: "p"; text: string }
   | { kind: "list"; items: string[] }
-  | { kind: "code"; title?: string; code: string }
+  /**
+   * `quotes` is a claim, not chrome: the path of a repository file this snippet
+   * is copied out of, checked line by line by the claims gate.
+   *
+   * The bug it exists for: a card titled as the red-team test that must pass
+   * called two helpers — `load_jsonl`, `bypass_rate` — that no version of that
+   * file has ever had, and asserted a screening count that the real test only
+   * asserts once it knows the input was not refused at the door. Two audits in a
+   * row read a snippet nobody could run. Set it on anything presented as
+   * existing code; leave it off skeletons and TODO shapes, which are honestly
+   * *not* copies of anything yet.
+   */
+  | { kind: "code"; title?: string; code: string; quotes?: string }
   | { kind: "callout"; tone: CalloutTone; title: string; text: string }
   | { kind: "table"; headers: string[]; rows: string[][] }
   /**
