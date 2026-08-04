@@ -1,7 +1,7 @@
 {
-  "source": "2894700b",
-  "inputs": "069f8bbd",
-  "commit": "7cff4eef72340ba0a852820cd629294cfbb79e86",
+  "source": "5ced009d",
+  "inputs": "1859adf1",
+  "commit": "8880c72a691d938764f88eccc3b880356252b720",
   "lane": "host ollama via host.docker.internal, model qwen3.5:9b",
   "model": "qwen3.5:9b",
   "ollama_version": "0.32.5",
@@ -30,5 +30,5 @@
     },
     "degraded": {}
   },
-  "finished_at": "2026-08-04T00:51:40+00:00"
+  "finished_at": "2026-08-04T02:32:19+00:00"
 }

@@ -1,8 +1,8 @@
 {
   "cost_usd": 0.0,
   "evidence_class": "smoke",
-  "faithfulness": 0.7,
-  "p99_ms": 5003.798,
+  "faithfulness": 0.833,
+  "p99_ms": 3452.143,
   "recall": 1.0,
   "redteam_bypasses": 0,
   "runs": 63,
@@ -63,7 +63,7 @@
     "undelivered": 0
   },
   "tokens_in": 5108,
-  "tokens_out": 727,
+  "tokens_out": 613,
   "tokens_source": "mixed",
   "versions": {
     "corpus": "corpus-3-81e3e9c7",
@@ -72,7 +72,7 @@
     "model": "qwen3.5:9b",
     "prompt": "grounded-fbc5e0e3",
     "redteam": "v3+rows-58",
-    "source": "2894700b",
+    "source": "5ced009d",
     "state": "fresh"
   }
 }
