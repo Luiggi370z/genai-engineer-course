@@ -35,7 +35,7 @@ export function App() {
   // Where the reader was last time, offered rather than restored: the app opens
   // on the dashboard, and a Resume card takes them back. Jumping straight into
   // the middle of Phase 5 on a cold open would be a surprise, and the dashboard
-  // is also where the prerequisites and the manifest live.
+  // is also where the prerequisites live.
   const [place, setPlace] = useState<Place | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const navDialogRef = useRef<HTMLDivElement>(null);
@@ -127,6 +127,11 @@ export function App() {
       savePlace(next);
       return next;
     });
+  }, []);
+
+  const openWorkshopGuide = useCallback(() => {
+    setView("dash");
+    requestAnimationFrame(() => requestAnimationFrame(() => goToSection("how-workshops")));
   }, []);
 
   const resume = useCallback(() => {
@@ -316,6 +321,7 @@ export function App() {
                 progress={progress}
                 onToggle={toggle}
                 onNav={navigate}
+                onWorkshopGuide={openWorkshopGuide}
                 onSection={rememberSection}
                 nextPhase={nextPhase}
               />

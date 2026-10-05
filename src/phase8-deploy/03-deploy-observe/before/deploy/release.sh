@@ -7,6 +7,10 @@
 # this repo. It is gated off exactly the way the OAuth and guard-model lanes are,
 # so the default `make check` never touches a network.
 #
+# This script does not call `release.py decide()`. The rollback below deploys
+# the previous image when one was captured. The halt decision in `decide()` is
+# not what runs here.
+#
 # The shape worth stealing, whatever your provider: this script owns four `fly`
 # commands and NO judgement. Every decision — is the tag safe, did the smoke
 # pass, what do we roll back to — lives in `src/release.py`, where it is unit

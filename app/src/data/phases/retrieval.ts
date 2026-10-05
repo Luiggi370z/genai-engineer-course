@@ -338,6 +338,23 @@ def recall_nonllm(contexts: list[str], ground_truth: str) -> float:
       ],
     },
     {
+      id: "p2-c4b",
+      title: "When a pipeline is the wrong tool",
+      teaches: ["p2-o1"],
+      blocks: [
+        {
+          kind: "p",
+          text: "Chunk, embed, retrieve, answer is the right shape when the answer is a passage in a corpus you trust. It is the wrong shape when the user asked you to do something, when one search is not enough and the next query depends on the first, or when the honest result is “that is not in the documents.” Searching harder does not create a source that was never there.",
+        },
+        {
+          kind: "callout",
+          tone: "warn",
+          title: "Abstain is a result",
+          text: "This workshop builds the pipeline. A later one adds an agent that can choose another search. If you cannot say when you would refuse the pipeline, you cannot tell whether the agent is an improvement or a way to hide a miss.",
+        },
+      ],
+    },
+    {
       id: "p2-c5",
       title: "The fix-it playbook",
       tag: "interview gold",
@@ -639,9 +656,9 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
   workshop: {
     id: "w1",
     title: "Workshop · Ship a real RAG service",
-    subtitle: "Everything from Phases 1–2, wired into one running system you can curl.",
+    subtitle: "The retrieval core: hybrid search over chunks, and an abstain path when the corpus does not have the answer.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-RAG-SERVICE.md",
+    doc: "phases/02-rag/WORKSHOP-RAG-SERVICE.md",
     effort: { fast: 120, integration: 60, realistic: 210 },
     proves: "integrate",
     assesses: ["p2-o1", "p2-o2", "p2-o3", "p2-o4"],
@@ -649,75 +666,59 @@ contextual = [contextualize(doc, c) for c in chunks]   # embarrassingly parallel
     blocks: [
       {
         kind: "p",
-        text: "Time to stop reading and build. This is the first checkpoint where the pieces become a **system**: a small FastAPI service that ingests a real corpus, retrieves with hybrid + rerank, answers with citations, refuses when it should, and proves its own quality with an eval gate. Nothing here is new — it is Phases 1 and 2 assembled and made to run.",
+        text: "You are building the assistant's retrieval core. The HTTP service and the eval gate come in later workshops. Do these steps in order, with this page open beside the editor.",
       },
       {
-        kind: "p",
-        text: "The `before/` folder is a skeleton with `TODO`s and passing-but-empty tests; `after/` is the finished reference. Resist opening `after/` until your own version is stuck.",
+        kind: "list",
+        items: [
+          "Open `src/workshops/assistant/phases/02-rag/before`. That is the only folder for this workshop.",
+          "Open `src/assistant/rag.py`. That is the only file you change. `provenance.py` in the same folder is already finished.",
+          "Give each chunk an id from the tenant, the source, and the chunk number. Saving the same document again must keep that id and change the version.",
+          "Split a document into overlapping slices, and remember the character start and end of each slice.",
+          "In `RagStore._rank`, fuse the keyword ranking and the dense ranking with reciprocal rank fusion. Both rankings already exist. Nothing joins them yet.",
+          "From that `before/` folder, run `make setup` once, then `make test`. `make test` runs only this folder.",
+          "The first failure is `test_semantic_search`, inside `_rank`. That is the fusion you have not written.",
+          "When `make test` is green, or you are stuck, diff `rag.py` against `../after/src/assistant/rag.py`.",
+        ],
       },
       {
         kind: "callout",
         tone: "tip",
-        title: "Why Qdrant for this build",
-        text: "We use **Qdrant** as the vector store: one `docker run` to start, and it does **native hybrid search** (dense + sparse in one query) so the Phase-2 lesson stays first-class instead of bolted on. Everything you write stays behind your own `Store` interface, so swapping in pgvector later is a two-function change — exactly the adapter habit from Phase 1.",
-      },
-      {
-        kind: "code",
-        title: "Ollama on the host, everything else in one command",
-        code: `# Ollama runs on YOUR machine (embeddings + a small generator = $0, and
-# it gets the GPU — a container on Docker Desktop would not):
-#   ollama serve  &&  ollama pull nomic-embed-text
-
-# docker-compose.yml — Qdrant + the service, zero cloud accounts
-services:
-  qdrant:
-    image: qdrant/qdrant:latest
-    ports: ["6333:6333"]
-  api:
-    build: .
-    ports: ["8000:8000"]
-    depends_on: [qdrant]
-    extra_hosts: ["host.docker.internal:host-gateway"]
-    environment:
-      QDRANT_URL: http://qdrant:6333
-      OLLAMA_HOST: http://host.docker.internal:11434   # out of the VM, to the host
-
-# then:  make ingest  &&  make eval  &&  curl localhost:8000/ask -d '{"q": "..."}'`,
+        title: "Leave these for later",
+        text: "Qdrant, Docker, and `POST /ask` are Workshop 8. The eval gate is Workshop 3. A failure in `guard.py` means you are in a different folder.",
       },
       {
         kind: "flow",
-        title: "What you’re building",
+        title: "What this workshop actually is",
         nodes: [
-          { label: "Ingest", sub: "chunk → contextualize → embed → upsert" },
-          { label: "/ask endpoint", sub: "FastAPI" },
-          { label: "Hybrid + rerank", sub: "Qdrant native, top-20 → 5" },
-          { label: "Grounded answer", sub: "citations + abstain path" },
-          { label: "Eval gate", sub: "RAGAS in CI" },
+          { label: "rag.py", sub: "the only file you edit" },
+          { label: "Chunk.id", sub: "stable across a re-ingest" },
+          { label: "chunk_document", sub: "overlap, and remember the span" },
+          { label: "RagStore._rank", sub: "fuse keyword + dense with RRF" },
+          { label: "test_rag.py", sub: "the command that proves it" },
         ],
       },
       {
         kind: "code",
-        title: "The seam you implement (before/store.py)",
-        code: `class Store(Protocol):
-    def upsert(self, chunks: list[Chunk]) -> None: ...
-    def hybrid_search(self, query: str, k: int = 20) -> list[Chunk]: ...
+        title: "What you are writing in rag.py",
+        code: `# src/workshops/assistant/phases/02-rag/before/src/assistant/rag.py
+# Chunk.id          — stable for the same slice, distinct per tenant
+# chunk_document    — overlapping slices that remember start and end
+# RagStore._rank    — fuse the BM25 ranking and the dense ranking with RRF
 
-class QdrantStore:                       # <- your job in the workshop
-    def hybrid_search(self, query, k=20):
-        # TODO: dense vector + sparse (BM25) in ONE Qdrant query,
-        #       fuse server-side, return top-k. Then rerank to 5 upstream.
-        ...`,
+# From that before/ folder:
+#   make test`,
       },
     ],
     deliverables: [
       {
         id: "w1-d1",
-        text: "`docker compose up` brings the stack online with **no API keys**, against the Ollama on your own machine (embeddings + generation)",
+        text: "`RagStore.search` returns a relevant chunk for a paraphrase, proved by `tests/test_rag.py::test_semantic_search`",
         tier: "minimum",
       },
       {
         id: "w1-d2",
-        text: "`POST /ask` returns a grounded answer **with citations**, and abstains (“not in the docs”) on unanswerable questions",
+        text: "An exact id such as `INV-88231` is found by the keyword arm, not only by a semantic match",
         tier: "minimum",
       },
       {
@@ -732,19 +733,18 @@ class QdrantStore:                       # <- your job in the workshop
       },
       {
         id: "w1-d4",
-        text: "`make eval` runs the fast lexical gate over the golden slices and **CI fails** on a regression, with the judged tier available opt-in beside it — Phase 3 calibrates that judge and earns it a threshold",
+        text: "The store runs offline. You can say what would change to put Qdrant behind the same search call in Workshop 8",
         tier: "full",
       },
       {
         id: "w1-d5",
-        text: "The vector store lives behind a `Store` interface — you can articulate exactly what changes to move to pgvector",
+        text: "Unanswerable questions abstain instead of inventing an answer — that proof lives in `tests/test_retrieval.py`, which still calls later modules on the shared tree",
         tier: "full",
       },
     ],
     stretch: [
-      "Add contextual retrieval (the Phase-2 local-model batch job) and measure the recall delta.",
-      "Swap QdrantStore for a PgVectorStore behind the same interface; confirm the eval still passes.",
-      "Add a `/ask` streaming variant (SSE) so answers render token-by-token.",
+      "Add contextual retrieval from the Phase-2 lesson on the weakest slice, and write down the before and after number.",
+      "`docker compose up` with Qdrant, answering from your machine's Ollama. Workshop 8 requires this; it is not the minimum here.",
     ],
   },
   resources: [

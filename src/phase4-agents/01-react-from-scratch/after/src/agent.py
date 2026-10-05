@@ -33,7 +33,13 @@ def run_agent(
     max_steps: int = 8,
     deadline_s: float = 60.0,
 ) -> str:
-    """Loop until the model says it's done — or a HARD cap stops it. Rule #1."""
+    """Loop until the model says it's done — or a HARD cap stops it. Rule #1.
+
+    The deadline is checked at the start of each step, before `decide` and
+    before the tool call. It does not interrupt a call that is already running.
+    A tool that blocks can return after `deadline_s` has passed. The next step
+    is the one that sees the timeout.
+    """
     state: list[tuple[Decision, Any]] = []
     start = time.monotonic()
     for _ in range(max_steps):  # hard cap: physics, not a prompt request

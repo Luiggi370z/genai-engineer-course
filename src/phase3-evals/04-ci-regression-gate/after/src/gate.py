@@ -55,11 +55,20 @@ class Run:
 
 
 def check_bars(run: Run, bars: dict[str, float] = BARS) -> list[str]:
-    return [
-        f"{metric} {run.overall[metric]:.3f} is below the bar of {bar:.2f}"
-        for metric, bar in bars.items()
-        if metric in run.overall and run.overall[metric] < bar
-    ]
+    """A missing metric is a failure, not a metric that happened to be fine.
+
+    An empty report used to return no problems: every check skipped a key that
+    was not there, and the merge was allowed. Zero scored rows is the same hole.
+    """
+    problems: list[str] = []
+    if not run.overall:
+        problems.append("the report scored zero rows")
+    for metric, bar in bars.items():
+        if metric not in run.overall:
+            problems.append(f"overall is missing {metric}")
+        elif run.overall[metric] < bar:
+            problems.append(f"{metric} {run.overall[metric]:.3f} is below the bar of {bar:.2f}")
+    return problems
 
 
 def check_instrument(run: Run, baseline: Run) -> list[str]:
@@ -88,6 +97,9 @@ def check_regressions(
         and run.overall[metric] < baseline.overall[metric] - tolerance
     ]
 
+    required = set(baseline.by_slice)
+    if required and not run.by_slice:
+        problems.append("the report is missing every required slice")
     for name, base_scores in sorted(baseline.by_slice.items()):
         if name not in run.by_slice:
             problems.append(f"slice '{name}' disappeared from the results")

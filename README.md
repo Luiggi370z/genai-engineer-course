@@ -147,11 +147,6 @@ small JSON file, **Import** reads one back on another machine, and **Reset** cle
 everything after a confirmation. Export before you clear a cache, change laptops, or try
 a different browser; nothing else in the workbook can recover a wiped `localStorage`.
 
-The dashboard also has a **completion manifest**: it reconciles what you have ticked with
-`evidence/manifest.json` from `make evidence`, and writes a `COMPLETION.md` that says
-which of the two it is. Ticked boxes alone come out as *self-reported* — deliberately, and
-no amount of ticking changes that.
-
 ---
 
 ## How the lessons work

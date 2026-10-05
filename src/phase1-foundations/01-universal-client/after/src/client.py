@@ -52,7 +52,7 @@ PROVIDERS: dict[str, Provider] = {
     "gemini": Provider(
         "https://generativelanguage.googleapis.com/v1beta/openai/",
         _env("GOOGLE_API_KEY"),
-        "gemini-2.5-flash",
+        "gemini-3.5-flash",
     ),
     "local": Provider("http://localhost:11434/v1", "ollama", "qwen3.5:9b"),
     "mlx": Provider("http://localhost:8080/v1", "mlx", "mlx-community/Qwen3.5-9B-4bit"),

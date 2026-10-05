@@ -122,5 +122,18 @@ def test_main_exits_one_and_prints_reasons_on_a_failing_run(tmp_path: Path, caps
     assert "unanswerable" in out
 
 
+def test_an_empty_report_does_not_pass():
+    """Every check used to skip a key that was absent, so nothing was left to fail."""
+    empty = Run(overall={}, by_slice={}, instrument={})
+    assert gate(empty, empty) != []
+    assert any("zero rows" in problem for problem in gate(empty, empty))
+
+
+def test_a_missing_overall_metric_fails():
+    partial = replace(run(), overall={"faithfulness": run().overall["faithfulness"]})
+    problems = gate(partial, baseline())
+    assert any("context_recall" in problem and "missing" in problem for problem in problems)
+
+
 def test_main_rejects_wrong_usage():
     assert main([]) == 2

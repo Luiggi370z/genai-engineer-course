@@ -631,7 +631,7 @@ class LangMemStore:                    # langmem over a LangGraph store
     subtitle:
       "Give the assistant a memory it can invalidate, a context budget it respects, and a research crew it delegates to — with the cost written down.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-MEMORY-CREW.md",
+    doc: "phases/05-memory/WORKSHOP-MEMORY-CREW.md",
     effort: { fast: 210, integration: 30, realistic: 330 },
     proves: "integrate",
     assesses: ["p-memory-o1", "p-memory-o2", "p-memory-o3", "p-memory-o4"],
@@ -639,7 +639,19 @@ class LangMemStore:                    # langmem over a LangGraph store
     blocks: [
       {
         kind: "p",
-        text: "The assistant currently starts every session as a stranger and does every job on the frontier model. This workshop adds the two capabilities that make it feel like software rather than a demo: **memory with an expiry date**, and **delegation with a receipt**. Both plug into the eval layer you built in Phase 3 — recall becomes golden-set rows, and the cost comparison sits next to the quality score instead of replacing it.",
+        text: "The assistant currently starts every session as a stranger. This workshop adds memory with an expiry, and delegation with a receipt. Do these steps in order.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Open `src/workshops/assistant/phases/05-memory/before`.",
+          "Edit `src/assistant/memory.py`, `src/assistant/tenancy.py`, and `src/assistant/crew.py`. `sqlite_memory.py` is already finished.",
+          "`remember` stores a fact with a source. `forget` makes that fact unrecallable. Write both before you move on.",
+          "`delegate` takes `Job` objects, not a bare task string. A cheaper crew that scores worse is not a win. Quote cost and the quality score together.",
+          "From that `before/` folder, run `make setup` once, then `make test`.",
+          "The first failure is often an ERROR in `write()`, on `test_a_remembered_fact_comes_back_with_its_source`. The fixture called your stub. The harness is fine.",
+          "When `make test` is green, or you are stuck, diff those three files against the same paths under `../after`.",
+        ],
       },
       {
         kind: "callout",
@@ -660,29 +672,32 @@ class LangMemStore:                    # langmem over a LangGraph store
       },
       {
         kind: "code",
-        title: "The seam you implement",
-        code: `# before/src/assistant/memory.py
-def remember(store: MemoryStore, turn: str) -> list[str]:
-    # TODO: decide what in this turn is worth keeping AT ALL
-    # TODO: classify it (working | episodic | semantic | procedural)
-    # TODO: write with source + ttl; return the ids you created
-    ...
-
-def context_for(store: MemoryStore, task: str, budget_tokens: int) -> Context:
-    # TODO: pin the constraints, recall per kind, fill to the budget, never exceed it
-    ...
-
-# before/src/assistant/crew.py
-def delegate(task: str, workers: dict[str, Worker], route: Router) -> CrewRun:
-    # TODO: supervisor plans, workers execute on their tier, results merge
-    # TODO: record cost per node — the receipt IS the deliverable
-    ...`,
+        title: "Sketch — edit memory.py, tenancy.py, and crew.py",
+        code: `# src/workshops/assistant/phases/05-memory/before/src/assistant/memory.py
+# AssistantMemory.remember(turn, *, source) -> str | None
+# forget makes that fact unrecallable. Write and forget land together.
+#
+# src/workshops/assistant/phases/05-memory/before/src/assistant/crew.py
+# delegate(jobs, ...) — jobs are Job objects, not a bare task string.
+#
+# Prove the store first, from src/workshops/assistant/phases/05-memory/before:
+#   uv run pytest -q tests/test_memory.py
+# An ERROR in write() means the fixture called your stub. The harness is fine.
+# Tenancy tests that build the whole service still call later modules.`,
       },
       {
         kind: "callout",
         tone: "warn",
         title: "Prove the savings on your own suite",
-        text: "A tiered crew that is 40% cheaper and two points worse on your Phase-3 gate is not a win, it is an undeclared quality cut. Run the eval suite both ways and report cost **and** score together. If the cheap tier holds up, you have a number you can defend in an interview — and it is yours, measured on your task mix.",
+        text: "There is no `make eval` target in this workshop.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Run `tests/test_crew.py` both ways.",
+          "Quote cost and the quality score together.",
+          "A tiered crew that is cheaper and worse on the Phase-3 suite is an undeclared quality cut, not a win.",
+        ],
       },
     ],
     deliverables: [
@@ -713,7 +728,7 @@ def delegate(task: str, workers: dict[str, Worker], route: Router) -> CrewRun:
       },
       {
         id: "w-memory-d6",
-        text: "`make eval` reports **cost per run alongside the quality score**, single-tier vs. tiered, on the Phase-3 suite",
+        text: "`tests/test_crew.py` records cost per run next to the quality score, single-tier versus tiered. Quote both numbers. Do not look for a `make eval` target.",
         tier: "full",
       },
     ],

@@ -256,6 +256,34 @@ def test_asking_the_verifier_which_commit_it_expects_does_not_need_a_model():
     assert re.fullmatch(r"[0-9a-f]{40}|dev", lines[0]), lines[0]
 
 
+def test_the_verifier_reproves_the_tier_before_it_writes_an_attestation():
+    """Order, asserted structurally, because the wrong order still passes.
+
+    The tier assertions are checks 2 and 4. Eleven checks then run — one stops
+    Qdrant, one restarts the assistant — and the attestation used to be written with
+    no further reading of `/health`, so a composer that fell back at check 9 was
+    recorded as a complete pass on the shipped tier. The fix is a closing check, and
+    the only thing that makes it a fix is that it happens BEFORE the file is written.
+
+    Read off the source rather than run, because running it costs a GPU and
+    twenty-five minutes. What can go wrong here is somebody moving the attestation
+    block or the call, and a source read catches exactly that.
+    """
+    script = SRC / "verify-e2e.sh"
+    if not script.is_file():  # pragma: no cover - a lesson extracted on its own
+        pytest.skip(f"{script} is not beside this lesson")
+    body = script.read_text()
+
+    called = body.index("\n  final_tier_check\n")
+    writes = body.index('if [[ -n "$ATTEST" ]]; then')
+    assert called < writes, "the attestation is written before the tier is re-proved"
+    assert '"final_tier": final_tier()' in body, "the snapshot never reaches the file"
+    # And the closing check has to be a fresh question, not a re-read of a cached
+    # /health: check 15 restarts the service, which empties the degradation map.
+    closing = body[body.index("final_tier_check() {"):called]
+    assert "ask " in closing, "a /health read after a restart proves the map is new"
+
+
 def _all_checks_for(installed: dict[str, str]) -> list[Check]:
     """The checks `run` would perform, without a daemon to perform them against."""
     from unittest import mock

@@ -1,30 +1,27 @@
 # Workshops · the evolving assistant
 
+Read [How to work with workshops](../README.md) first.
+
 Workshops 2 through 8 build **one** personal assistant that grows across the course.
 The two bookends live elsewhere: Workshop 1, the model bench, in `../model-bench/`,
 and Workshop 9, the interview loop, in `../interview-loop/` (markdown only — the
 artifact is a habit, not a repo).
-`before/` is your scaffold (TODOs); `after/` is the working reference.
+Open one folder in [`phases/`](phases/README.md). That README is the list of
+what you edit. `generator/` writes those folders. It is not where you work.
+`after/` is the finished assistant, and it is the tree
+`phase8-deploy/01-compose` builds. Do not rename it.
 
-| Workshop | Ends phase | Adds | Files | Brief |
-|----------|-----------|------|-------|-------|
-| RAG service | 2 | hybrid-retrieval core over chunks that know their source, revision and character span | `rag.py` | `WORKSHOP-RAG-SERVICE.md` |
-| Eval suite + CI gate | 3 | golden set, injectable judge, calibration, gate | `evals.py` | `WORKSHOP-EVAL-SUITE.md` |
-| Personal assistant | 4 | agent loop, tools, HITL | `tools.py`, `agent.py` | `WORKSHOP-ASSISTANT.md` |
-| Memory + research crew | 5 | memory with TTL + provenance, one store per subject, budgeted context, tiered delegation | `memory.py`, `tenancy.py`, `crew.py` | `WORKSHOP-MEMORY-CREW.md` |
-| Hardened assistant | 6 | guardrails that expand and squash before they scan, spotlighting, output gate, an optional model in the loop | `guardrails.py`, `guard.py` | `WORKSHOP-HARDENED.md` |
-| Your own MCP | 7 | consume an MCP server by discovery, and a planner that can actually choose what was discovered | `mcp_client.py`, `planner.py` | `WORKSHOP-MCP.md` |
-| Deployed stack | 8 | one OTel trace per request — a root and a child per stage, tools wrapped at the seam, model/prompt/corpus stamps derived rather than typed, tokens and cost on the compose span — a corpus that can be updated, deleted and cited back to its text, one time budget every layer shares, effects that survive a retry, and an answer cache with refusal rules | `observe.py`, `provenance.py`, `usage.py`, `rag.py`, `adapters.py`, `deadline.py`, `resilience.py`, `idempotency.py`, `outbox.py`, `cache.py` | `WORKSHOP-DEPLOYED-STACK.md` |
-| Capstone: the composed service | 8 | One module per concern: composition root, HTTP surface, request pipeline, composers, trust-boundary screening at ingest and retrieval, degraded fallbacks; real adapters (Qdrant + real embeddings, Ollama, MCP SDK, OTLP) behind env vars; a corpus keyed by derived chunk ids so re-ingest updates and citations resolve; one deadline per request that every layer's timeout fits inside, idempotency on every mutation and an outbox that records irreversible intent before it happens; SQLite memory; a JWT gate with a pluggable issuer and the OAuth 2.1 + PKCE flow that feeds it; an MCP server; a Docker image; one traced request end to end | `service.py`, `api.py`, `core.py`, `planner.py`, `composers.py`, `screening.py`, `guard.py`, `fallbacks.py`, `settings.py`, `rag.py`, `adapters.py`, `deadline.py`, `resilience.py`, `idempotency.py`, `outbox.py`, `connectors.py`, `sqlite_memory.py`, `tenancy.py`, `auth.py`, `oauth.py`, `provenance.py`, `usage.py`, `mcp_server.py` | `WORKSHOP-DEPLOYED-STACK.md` |
+The file list lives in [`phases/README.md`](phases/README.md). One row per folder,
+the files you edit, and the test that fails first. Do them in order. From the
+eval phase on, `make test` still runs the earlier workshops' tests, and those
+stay green.
 
-Do them in order — each builds on the last, and from the eval layer onwards every
-later layer is measured by the one before it. Then finish with the **defect lab**
-(`WORKSHOP-DEFECT-LAB.md`, `make defect-lab`): three vulnerabilities this code
-actually shipped, kept as running variants, and the regression tests you write to
-catch them — proved by going red on each seeded defect before going green.
+Then finish with the **defect lab**
+([`phases/09-defect-lab/WORKSHOP-DEFECT-LAB.md`](phases/09-defect-lab/WORKSHOP-DEFECT-LAB.md)).
+It runs in `after/`, because that is the tree the image builds. The first run is not green.
 
 ```bash
-cd after && make check     # the reference passes; your job is to make before/ pass
+cd phases/02-rag/before && make test
 ```
 
 The capstone runs offline and deterministic by default (that is what `make test`
@@ -59,7 +56,7 @@ The strongest evidence that this is a teaching artifact is `after/defects/`:
 three vulnerabilities that were in this code, reviewed and green, until an audit
 found them. They are kept as running code. `make defect-lab` runs your
 regression tests against the fix (must pass) and against each defect seeded back
-in (must fail) — see [`WORKSHOP-DEFECT-LAB.md`](WORKSHOP-DEFECT-LAB.md). A
+in (must fail) — see [`phases/09-defect-lab/WORKSHOP-DEFECT-LAB.md`](phases/09-defect-lab/WORKSHOP-DEFECT-LAB.md). A
 codebase that ships its own vulnerabilities as coursework is not claiming to be
 an authority; it is showing you what review actually catches, and when.
 

@@ -26,6 +26,8 @@ interface PhaseViewProps {
   progress: Progress;
   onToggle: (id: string) => void;
   onNav: (view: string) => void;
+  /** Opens the dashboard section that explains the workshop folders. */
+  onWorkshopGuide: () => void;
   /** Reports the section being read, so the app can remember the place. */
   onSection: (sectionId: string) => void;
   nextPhase?: Phase | undefined;
@@ -65,6 +67,7 @@ export function PhaseView({
   progress,
   onToggle,
   onNav,
+  onWorkshopGuide,
   onSection,
   nextPhase,
 }: PhaseViewProps) {
@@ -302,6 +305,7 @@ export function PhaseView({
                 workshop={phase.workshop}
                 progress={progress}
                 onToggle={onToggle}
+                onGuide={onWorkshopGuide}
                 accent={accent}
               />
             </CollapsibleSection>

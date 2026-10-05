@@ -265,7 +265,7 @@ if (!phaseButton) {
 window.eval(readFileSync(resolve(app, "node_modules/axe-core/axe.min.js"), "utf8"));
 const axeResults = [];
 // The phase view first, because that is where the DOM currently is and it carries
-// the most chrome; then back to the dashboard, which owns the manifest panel.
+// the most chrome; then back to the dashboard.
 await runAxe("phase view");
 const dashButton = [...doc.querySelectorAll("nav button")].find((el) =>
   /^Dashboard/.test((el.textContent ?? "").trim()),

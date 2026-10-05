@@ -22,6 +22,10 @@ class Usage:
     input_tokens: int
     output_tokens: int
     cache_read_input_tokens: int = 0
+    # OpenAI's input_tokens includes the cached read. Anthropic's does not.
+    # TODO 2 has to bill those two shapes differently, and must not rewrite
+    # this object — the original counts are the diagnosis.
+    input_includes_cache: bool = True
 
 
 def count_openai(text: str, model: str = "gpt-5.5") -> int:

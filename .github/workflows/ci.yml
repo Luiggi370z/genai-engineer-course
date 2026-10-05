@@ -64,6 +64,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - run: python3 src/verify-parity.py
+      - run: python3 src/workshops/assistant/generator/verify_layers.py
 
   gates:
     # the phase 8.2 merge gates as a LESSON: the policy runs over the committed

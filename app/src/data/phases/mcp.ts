@@ -89,7 +89,7 @@ export const mcp: PhaseContent = {
     },
     {
       id: "p5-c2",
-      title: "Host, client, server, and the five-beat handshake",
+      title: "Host, client, server, and the request lifecycle",
       tag: "how it works",
       teaches: ["p5-o1", "p5-o2"],
       blocks: [
@@ -99,10 +99,10 @@ export const mcp: PhaseContent = {
         },
         {
           kind: "flow",
-          title: "Every client, same five beats",
+          title: "What a client does, in order",
           nodes: [
             { label: "Connect", sub: "open the transport" },
-            { label: "initialize", sub: "capability handshake" },
+            { label: "server/discover", sub: "optional — only if you need capabilities first" },
             { label: "list_tools / resources", sub: "runtime discovery" },
             { label: "call_tool / read_resource", sub: "actually use it" },
             { label: "Close", sub: "tear down" },
@@ -123,8 +123,8 @@ export const mcp: PhaseContent = {
         {
           kind: "callout",
           tone: "fix",
-          title: "2026: the beats stayed, the session went away",
-          text: "The 2026-07-28 spec moved MCP from a **stateful, bidirectional** protocol to **stateless request/response**. In the old world a client opened a long-lived session and held it open. Now that is a compatibility path only. The five beats still describe exactly what a client *does* — they simply no longer have to happen inside one held-open connection. Practical upshot: never assume the server remembers you between calls.",
+          title: "2026-07-28 retired the initialize handshake",
+          text: "The spec dropped `initialize` / `initialized` and the session id. Each request carries the protocol version, client identity, and capabilities in `_meta`. `server/discover` exists if you want the server’s capabilities before you call anything else, and it is optional. A client that still speaks `initialize` is on the compatibility path for a server from 2025-11-25 or earlier. Do not assume the server remembers you between calls.",
         },
         {
           kind: "code",
@@ -277,7 +277,7 @@ if __name__ == "__main__":
       assesses: ["p5-o2"],
       needs: ["p3-o2"],
       solution: [
-        "The lifecycle never changes: connect → initialize → list → call → close. Internalize that order.",
+        "On 2026-07-28 the lifecycle is connect → (optional server/discover) → list → call → close. initialize is retired; a client sends version and capabilities on each request.",
         "Using a server you didn’t write means zero server code to debug — anything that breaks is your client. That’s why we go consumer-first.",
         "In-memory is not a mock. It is the real protocol with the transport removed, which is why the same test passes unchanged once you point the client at a URL.",
       ],
@@ -335,7 +335,7 @@ if __name__ == "__main__":
     subtitle:
       "Build an MCP server for a service you care about — then let your Phase-4 assistant consume it as a tool.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-MCP.md",
+    doc: "phases/07-mcp/WORKSHOP-MCP.md",
     effort: { fast: 120, integration: 60, realistic: 210 },
     proves: "integrate",
     assesses: ["p5-o2", "p5-o3", "p5-o4"],
@@ -343,7 +343,20 @@ if __name__ == "__main__":
     blocks: [
       {
         kind: "p",
-        text: "The payoff workshop: build a real MCP server exposing a service of your choice — your notes, a habit tracker, a home API, anything with a few operations — verify it in the Inspector, secure it appropriately, then wire it into your Workshop-4 assistant so it discovers and calls the server like any other tool.",
+        text: "Wire the assistant to an MCP server so a new tool shows up by discovery. Do these steps in order.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Open `src/workshops/assistant/phases/07-mcp/before`.",
+          "Edit `src/assistant/mcp_client.py` and `src/assistant/planner.py`. `mcp_server.py` is already finished. You built that shape in the Phase 7 lessons.",
+          "`extend_assistant` merges the tools the server lists. You do not hand-code each one.",
+          "`planner.choose` selects from the registry. Discovery alone is not enough: a planner that only knows two names will never pick the new tool.",
+          "A hint from the server does not grant approval. Local policy does.",
+          "From that `before/` folder, run `make setup` once, then `make test`.",
+          "The first failure is `test_discovered_tools_are_added_by_discovery_not_hardcoding`. Then `tests/test_planner.py`. There is no file named `wire_mcp.py`.",
+          "When `make test` is green, or you are stuck, diff those two files against the same paths under `../after`.",
+        ],
       },
       {
         kind: "p",
@@ -368,24 +381,26 @@ if __name__ == "__main__":
       },
       {
         kind: "code",
-        title: "The assistant gains your server (before/wire_mcp.py)",
-        code: `# In your Workshop-4 assistant -- add an MCP client, don't hand-code tools
-from mcp import Client
-
-async def load_mcp_tools(target):
-    async with Client(target) as client:
-        discovered = await client.list_tools()       # <- discovery, not hard-coding
-        return [as_agent_tool(t) for t in discovered.tools]   # TODO: adapt
-
-# Now the assistant can call your notes/tracker/home tools alongside email, news,
-# telegram and calendar -- all through one uniform interface. Add a tool to the
-# server, restart, and the assistant can use it with NO assistant code change.`,
+        title: "Sketch — edit mcp_client.py and planner.py",
+        code: `# src/workshops/assistant/phases/07-mcp/before/src/assistant/mcp_client.py
+# extend_assistant() merges tools the server lists. You do not hand-code each one.
+#
+# src/workshops/assistant/phases/07-mcp/before/src/assistant/planner.py
+# planner.choose selects from the REGISTRY. Discovery alone is not enough:
+# a planner that only knows two tool names will never pick the new one.
+#
+# The MCP server itself is already complete (mcp_server.py). You built that
+# shape in phase7-mcp/02-rest-to-mcp. This workshop wires the assistant to it.
+#
+# Prove discovery first, from src/workshops/assistant/phases/07-mcp/before:
+#   uv run pytest -q tests/test_mcp.py::test_discovered_tools_are_added_by_discovery_not_hardcoding
+# Then tests/test_planner.py. There is no file named wire_mcp.py.`,
       },
     ],
     deliverables: [
       {
         id: "w4-d1",
-        text: "An MCP server exposing at least **3 tools, 1 resource, and 1 prompt** over a real service",
+        text: "`extend_assistant` merges discovered tools into the toolbox, proved by `tests/test_mcp.py`",
         tier: "minimum",
       },
       {
@@ -400,7 +415,7 @@ async def load_mcp_tools(target):
       },
       {
         id: "w4-d4",
-        text: "Your **Workshop-4 assistant consumes it via discovery** — tools are listed at runtime, not hard-coded",
+        text: "`planner.choose` selects from the registry, so a newly discovered tool can run with no change to the agent loop. Prove it in `tests/test_planner.py`",
         tier: "minimum",
       },
       {
@@ -425,7 +440,7 @@ async def load_mcp_tools(target):
     {
       id: "p5-q2",
       q: "Walk the five beats a client performs — and say what the 2026 spec changed about them.",
-      a: "Connect (open the transport) → initialize (capability handshake) → list_tools/list_resources (runtime discovery) → call_tool/read_resource (use it) → close (tear down). Every client you ever write repeats exactly this. What 2026-07-28 changed is not the beats but where they live: the protocol went stateless, so they no longer have to happen inside one held-open connection, and you must never assume the server remembers you between calls. Say what each beat costs you when you skip it, because that is the half an interviewer is listening for: skip `initialize` and you are calling a server whose capabilities you assumed; skip discovery and you have hard-coded a tool list that goes stale the next time the server ships; skip `close` and you leak a subprocess per session until the box runs out of file descriptors. The ordering is a constraint, not a convention — discovery cannot precede the handshake that tells you what there is to discover.",
+      a: "Connect (open the transport) → optionally server/discover → list_tools/list_resources → call_tool/read_resource → close. The 2026-07-28 spec retired initialize and the session id. Version, client identity, and capabilities travel in `_meta` on every request, so a call does not need a handshake first, and any server instance can answer it. server/discover is how you ask for capabilities up front, and skipping it is legal. Skipping list and hard-coding the tool list is how the client goes stale the next time the server ships. Skipping close leaks a subprocess. Do not assume the server remembers you between calls.",
       demands: ["constraints", "failure-modes"],
     },
     {

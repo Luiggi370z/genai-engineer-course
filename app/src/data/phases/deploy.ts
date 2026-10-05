@@ -734,7 +734,7 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
     subtitle:
       "See the assistant before you optimize it: OpenTelemetry spans around the loop and every tool, then an answer cache that knows what it must refuse to store.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-DEPLOYED-STACK.md",
+    doc: "phases/WORKSHOP-DEPLOYED-STACK.md",
     effort: { fast: 480, integration: 120, realistic: 900 },
     proves: "operate",
     assesses: ["p6-o1", "p6-o2", "p6-o3", "p6-o4", "p6-o5"],
@@ -742,23 +742,35 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
     blocks: [
       {
         kind: "p",
-        text: "The assistant works, it is hardened, and it speaks MCP. It is also a black box that costs an amount nobody has measured and takes a length of time nobody has bounded. This workshop closes that gap in the only order that is safe: **see it, then make it cheaper without making it worse.**",
+        text: "The assistant works, it is hardened, and it speaks MCP. This workshop is six folders. Finish one before you open the next. In each folder, run `make setup` once, then `make test`, and diff only the files that step names.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Trace: open `src/workshops/assistant/phases/08-trace/before`. Edit `observe.py`, `cache.py`, and `usage.py`. First failure: `test_wrapping_the_registry_traces_every_tool_without_editing_any_tool`. An ERROR in the `rec` fixture means `observe.recorder()` is still yours to write.",
+          "Corpus: open `src/workshops/assistant/phases/08-corpus/before`. Edit `adapters.py`. First failure: `test_reingesting_the_same_source_updates_instead_of_accumulating`. Re-ingesting a source updates it instead of adding a second copy.",
+          "Reliability: open `src/workshops/assistant/phases/08-reliability/before`. Edit `deadline.py`, `resilience.py`, `idempotency.py`, `outbox.py`, and `approvals.py`. First failure: `test_a_bug_is_not_retried_three_times`. A bug is not a transient failure.",
+          "Service: open `src/workshops/assistant/phases/08-service/before`. Edit `service.py`, `api.py`, `core.py`, `composers.py`, `connectors.py`, `output_gate.py`, and `audit_log.py`. First failure: `test_health_reports_the_offline_tier`.",
+          "Auth: open `src/workshops/assistant/phases/08-auth/before`. Edit `auth.py` and `oauth.py`. First failure: `test_without_a_key_source_the_zero_key_demo_path_stays_open`.",
+          "Evidence: open `src/workshops/assistant/phases/08-evidence/before`. Edit `report.py`. `release.py` and `evidence.py` are already finished. First failure: `test_build_portfolio_is_still_the_page`.",
+          "Defect lab, last, in `src/workshops/assistant/after`. Move `defects/test_regressions.py` aside, copy in `src/workshops/assistant/phases/09-defect-lab/test_regressions.py`, and run `make defect-lab`. The first run is not green. Do not edit `variants.py`.",
+        ],
       },
       {
         kind: "flow",
-        title: "Two modules, and why the second needs the first",
+        title: "Six checkpoints, in this order",
         nodes: [
-          { label: "assistant.request", sub: "one root · request id · service.name" },
-          { label: "A child per stage", sub: "auth · screen · rag · model · output" },
-          { label: "traced_registry", sub: "every tool wrapped at the seam" },
-          { label: "Read the tree", sub: "time_by_tool · gated_tool_calls" },
-          { label: "AnswerCache", sub: "offer(), not put()" },
-          { label: "Refusals", sub: "side effects · paused · step cap" },
+          { label: "Trace", sub: "observe.py, usage.py, cache.py" },
+          { label: "Corpus", sub: "provenance stamps, adapters store" },
+          { label: "Reliability", sub: "deadline, retry, outbox, approvals" },
+          { label: "Service", sub: "api.py, core.py, the HTTP surface" },
+          { label: "Auth", sub: "auth.py, oauth.py" },
+          { label: "Evidence", sub: "report.py; release.py is supplied" },
         ],
       },
       {
         kind: "p",
-        text: "**Why the tools are wrapped rather than edited.** Tracing is a cross-cutting concern, and cross-cutting concerns rot when they live inside every implementation: somebody adds a tool, forgets the decorator, and six weeks later there is a hole in the trace nobody can explain. Wrapping the registry makes instrumentation a property of the *seam*, so a new tool is traced whether its author thought about it or not.",
+        text: "Do not start with Docker. The compose lesson builds `workshops/assistant/after`, the finished reference, until your own tree is the one you mean to ship.",
       },
       {
         kind: "callout",
@@ -768,25 +780,18 @@ def safe_to_promote(new_p99_ms: float, prev_p99_ms: float, budget_ms: float) -> 
       },
       {
         kind: "code",
-        title: "The seam you implement",
-        code: `# before/src/assistant/observe.py
-def traced_registry(registry: dict[str, Tool], tracer) -> dict[str, Tool]:
-    # TODO: wrap every tool's body in a span — mark ERROR, then RE-RAISE
-    # TODO: an observability layer that swallows an exception has turned a
-    #       visible failure into a silent wrong answer
-    ...
-
-def gated_tool_calls(spans) -> list[str]:
-    # TODO: which irreversible tools actually fired. A safety report, and the
-    #       input the cache reads before it stores anything.
-    ...
-
-# before/src/assistant/cache.py
-def is_cacheable(result, gated_tools_fired) -> bool:
-    # TODO: refuse a paused run, a side-effecting run, a step-cap run, an empty
-    #       answer. Be conservative: a miss costs money you can graph, a wrong
-    #       hit costs trust you cannot.
-    ...`,
+        title: "Sketch of the first checkpoint only",
+        code: `# Checkpoint 1 of 6. Edit these, and nothing else yet:
+#   src/workshops/assistant/phases/08-trace/before/src/assistant/observe.py
+#   src/workshops/assistant/phases/08-trace/before/src/assistant/usage.py
+#   src/workshops/assistant/phases/08-trace/before/src/assistant/cache.py
+#
+# observe.recorder() is the in-memory exporter. Build that before any span test.
+# traced_registry wraps tools at the registry. Do not edit each tool.
+# cache.offer refuses a paused run, a side effect, and a step-cap run.
+#
+#   cd src/workshops/assistant/phases/08-trace/before
+#   uv run pytest -q tests/test_observe.py tests/test_cache.py`,
       },
       {
         kind: "callout",
@@ -798,7 +803,15 @@ def is_cacheable(result, gated_tools_fired) -> bool:
         kind: "callout",
         tone: "warn",
         title: "A teaching reference, not a production authority",
-        text: "The `after/` tree is written to be **understood** — every trade-off argued in a docstring, every unsafe alternative kept beside the safe one, the whole thing offline on a laptop. Production code is written to be **operated**, and the two goals disagree: one SQLite file backs memory, audit, approvals and the outbox, and the atomic `DELETE ... RETURNING` that makes approvals safe is a SQLite guarantee, not a distributed one — a second replica reopens every question. The proof that this is coursework is `after/defects/`: three vulnerabilities that were in this code, reviewed and green, until an audit found them. They are kept **running**. Finish with `make defect-lab` — write each regression test before reading the reference, and watch it go red on the seeded bug before it goes green on the fix.",
+        text: "The `after/` tree is written to be **understood** — every trade-off argued in a docstring, every unsafe alternative kept beside the safe one, the whole thing offline on a laptop. Production code is written to be **operated**, and the two goals disagree: one SQLite file backs memory, audit, approvals and the outbox, and the atomic `DELETE ... RETURNING` that makes approvals safe is a SQLite guarantee, not a distributed one — a second replica reopens every question. The proof that this is coursework is `after/defects/`: three vulnerabilities that were in this code, reviewed and green, until an audit found them. They are kept **running**.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Finish with `make defect-lab`.",
+          "Write each regression test before reading the reference.",
+          "Watch it go red on the seeded bug before it goes green on the fix.",
+        ],
       },
     ],
     deliverables: [

@@ -115,7 +115,8 @@ export const WORKSHOPS = {
   w1: {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-RAG-SERVICE.md",
+    scaffold: "generator/before",
+    brief: "phases/02-rag/WORKSHOP-RAG-SERVICE.md",
     modules: ["rag"],
     // Both, because the brief names both. It used to name only `test_rag.py`, whose
     // two tests are the walking skeleton — grounding, abstention and citations are
@@ -128,7 +129,8 @@ export const WORKSHOPS = {
   "w-evals": {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-EVAL-SUITE.md",
+    scaffold: "generator/before",
+    brief: "phases/03-evals/WORKSHOP-EVAL-SUITE.md",
     modules: ["evals"],
     suites: ["test_evals"],
     integrationMin: 30,
@@ -137,7 +139,8 @@ export const WORKSHOPS = {
   w2: {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-ASSISTANT.md",
+    scaffold: "generator/before",
+    brief: "phases/04-agent/WORKSHOP-ASSISTANT.md",
     modules: ["tools", "agent"],
     suites: ["test_agent"],
     integrationMin: 30,
@@ -146,7 +149,8 @@ export const WORKSHOPS = {
   "w-memory": {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-MEMORY-CREW.md",
+    scaffold: "generator/before",
+    brief: "phases/05-memory/WORKSHOP-MEMORY-CREW.md",
     modules: ["memory", "tenancy", "crew"],
     suites: ["test_memory", "test_tenancy", "test_crew"],
     integrationMin: 30,
@@ -155,7 +159,8 @@ export const WORKSHOPS = {
   w3: {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-HARDENED.md",
+    scaffold: "generator/before",
+    brief: "phases/06-hardened/WORKSHOP-HARDENED.md",
     modules: ["guardrails", "screening", "guard"],
     suites: ["test_guardrails", "test_guard", "test_security"],
     integrationMin: 60,
@@ -164,7 +169,8 @@ export const WORKSHOPS = {
   w4: {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-MCP.md",
+    scaffold: "generator/before",
+    brief: "phases/07-mcp/WORKSHOP-MCP.md",
     modules: ["mcp_client", "planner"],
     suites: ["test_mcp", "test_planner"],
     integrationMin: 60,
@@ -173,7 +179,8 @@ export const WORKSHOPS = {
   "w-deploy": {
     repo: "workshops/assistant",
     pkg: "assistant",
-    brief: "WORKSHOP-DEPLOYED-STACK.md",
+    scaffold: "generator/before",
+    brief: "phases/WORKSHOP-DEPLOYED-STACK.md",
     modules: ["observe", "provenance", "usage", "core", "cache"],
     suites: ["test_observe", "test_tracing", "test_cache"],
     integrationMin: 120,
@@ -193,15 +200,16 @@ export const WORKSHOPS = {
 };
 
 /** Numbered TODO groups, plus any bare `TODO`, in the modules a brief names. */
-export function todoGroups(read, { repo, pkg, modules }) {
+export function todoGroups(read, { repo, pkg, modules, scaffold = "before" }) {
   if (!pkg) return 0;
+  const root = `src/${repo}/${scaffold}/src/${pkg}`;
   const names = modules?.length
     ? modules
-    : read.list(`src/${repo}/before/src/${pkg}`).map((f) => f.replace(/\.py$/, ""));
+    : read.list(root).map((f) => f.replace(/\.py$/, ""));
   let total = 0;
   for (const name of names) {
     if (name === "__init__") continue;
-    const body = read.file(`src/${repo}/before/src/${pkg}/${name}.py`);
+    const body = read.file(`${root}/${name}.py`);
     if (body === null) continue;
     const numbered = new Set([...body.matchAll(/TODO\s*(\d+)/g)].map((m) => m[1]));
     const bare = [...body.matchAll(/TODO(?!\s*\d)/g)].length;

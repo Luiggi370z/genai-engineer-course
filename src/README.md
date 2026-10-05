@@ -82,6 +82,9 @@ request. A provider a README offers is a provider the artifact has to contain.
 
 ## The nine workshops
 
+Read [How to work with workshops](workshops/README.md) before you open a folder.
+Every phase also has a `WORKSHOP.md` that names the one directory for that phase.
+
 Every phase ends in one. Workshops **2–8** build a single personal assistant that
 grows across the course, which is why they share one folder — you finish with one
 system you can defend end to end, not eight demos. Workshops **1** and **9** bookend
@@ -90,16 +93,17 @@ it: the tool you measure with, and the loop that turns the result into offers.
 | # | Workshop | Ends phase | What it adds | Files |
 |:-:|----------|:----------:|--------------|-------|
 | 1 | Model bench        | 1 | A CLI that benches providers on one real task, ranked by cost per successful parse | `workshops/model-bench/` |
-| 2 | RAG service        | 2 | A hybrid-retrieval core the assistant can query | `rag.py` |
-| 3 | Eval suite + gate  | 3 | Golden set, injectable judge, calibration, CI gate | `evals.py` |
-| 4 | Personal assistant | 4 | The agent core: tools (email, news, telegram, calendar) + HITL | `tools.py`, `agent.py` |
-| 5 | Memory + crew      | 5 | Memory with provenance + TTL, budgeted context, tiered delegation | `memory.py`, `crew.py` |
-| 6 | Hardened assistant | 6 | Guardrails, spotlighting, least-privilege, red-team CI | `guardrails.py` |
-| 7 | Your own MCP       | 7 | An MCP server, consumed by the assistant via discovery | `mcp_client.py` |
-| 8 | Deployed stack     | 8 | OTel spans around the loop and every tool, answer cache with refusal rules — plus the capstone: a FastAPI composition root wiring every layer, real adapters (Qdrant/Ollama/MCP/OTLP) behind env vars, SQLite memory, an MCP server, a Docker image | `observe.py`, `cache.py`, `service.py`, `api.py`, `core.py`, `adapters.py` |
+| 2 | RAG service        | 2 | A hybrid-retrieval core the assistant can query | `workshops/assistant/phases/02-rag/` |
+| 3 | Eval suite + gate  | 3 | Golden set, injectable judge, calibration, CI gate | `workshops/assistant/phases/03-evals/` |
+| 4 | Personal assistant | 4 | The agent core: tools (email, news, telegram, calendar) + HITL | `workshops/assistant/phases/04-agent/` |
+| 5 | Memory + crew      | 5 | Memory with provenance + TTL, budgeted context, tiered delegation | `workshops/assistant/phases/05-memory/` |
+| 6 | Hardened assistant | 6 | Guardrails, spotlighting, least-privilege, red-team CI | `workshops/assistant/phases/06-hardened/` |
+| 7 | Your own MCP       | 7 | An MCP server, consumed by the assistant via discovery | `workshops/assistant/phases/07-mcp/` |
+| 8 | Deployed stack     | 8 | Trace, corpus, reliability, the running service, auth, then the portfolio page — one folder each | `workshops/assistant/phases/` |
 | 9 | Interview loop     | 9 | No code — a scored design-mock rubric and a metrics worksheet | `workshops/interview-loop/` |
 
-Briefs live in `workshops/assistant/WORKSHOP-*.md`, one per layer, plus
+Each phase's brief sits beside that folder (`phases/02-rag/WORKSHOP-RAG-SERVICE.md`,
+and the same pattern for the rest). Workshop 1 and 9 keep their briefs in
 `workshops/model-bench/WORKSHOP-MODEL-BENCH.md` and
 `workshops/interview-loop/WORKSHOP-INTERVIEW-LOOP.md`.
 

@@ -6,9 +6,11 @@ import { phases } from "../../data/phases";
 import { accentOf } from "../../lib/accent";
 import { InlineText } from "../../lib/markdown";
 import { formatPct, type Place, type Progress } from "../../lib/progress";
+import { PhaseToc, type TocEntry } from "../phase/PhaseToc";
+import { SectionBar } from "../phase/SectionBar";
+import { useActiveSection } from "../phase/useActiveSection";
 import { CheckItem } from "../ui/CheckItem";
 import { ProgressRing } from "../ui/ProgressRing";
-import { ManifestPanel } from "./ManifestPanel";
 
 interface DashboardProps {
   progress: Progress;
@@ -35,6 +37,19 @@ const SECTION_LABELS: Record<string, string> = {
   qbank: "Question bank",
   resources: "Resources",
 };
+
+const PAGE_ENTRIES: TocEntry[] = [
+  { id: "phases", label: "Phases" },
+  { id: "prerequisites", label: "Prerequisites" },
+  { id: "how-it-works", label: "How this course works" },
+  { id: "how-workshops", label: "How to work with workshops" },
+  { id: "milestones", label: "Move on when you clear the bar" },
+  { id: "myths", label: "Four myths" },
+  { id: "out-of-scope", label: "What this course does not teach" },
+];
+
+const INK = "var(--color-ink)";
+const AMBER = "var(--color-signal-amber)";
 
 /**
  * The way back in.
@@ -98,189 +113,234 @@ export function Dashboard({
   onResume,
 }: DashboardProps) {
   const workshopCount = phases.filter((p) => p.workshop).length;
+  const active = useActiveSection(PAGE_ENTRIES);
 
   return (
-    <div className="max-w-[840px]">
-      <header className="pt-2 pb-2">
-        <div className="mb-3 font-mono text-[12px] uppercase tracking-[0.2em] text-graphite">
-          Self-paced · {phases.length} phases · {workshopCount} workshops · {dashboard.refreshed}
-        </div>
-        <h1 className="max-w-[24ch] text-[34px] font-bold leading-[1.12] tracking-tight text-ink">
-          {dashboard.title}
-        </h1>
-        <p className="mt-3 max-w-[62ch] text-[14.5px] leading-relaxed text-ink/75">
-          {dashboard.intro}
-          <strong className="font-semibold">{dashboard.introEmphasis}</strong>
-        </p>
-        <div className="mt-5 flex items-center gap-3">
-          <ProgressRing pct={overallPct} color="var(--color-ink)" size={40} />
-          <div>
-            <div className="flex items-baseline gap-2">
-              <span className="text-[20px] font-bold leading-none text-ink">
-                {formatPct(overallPct)}
-              </span>
-              <span className="font-mono text-[12px] text-graphite">
-                {overall.done} of {overall.total}
-              </span>
-            </div>
-            <div className="mt-0.5 font-mono text-[12px] tracking-wide text-graphite">
-              {dashboard.progressCaption}
+    <div className="flex gap-10">
+      <div className="min-w-0 max-w-[840px] flex-1">
+        <header className="pt-2 pb-2">
+          <div className="mb-3 font-mono text-[12px] uppercase tracking-[0.2em] text-graphite">
+            Self-paced · {phases.length} phases · {workshopCount} workshops · {dashboard.refreshed}
+          </div>
+          <h1 className="max-w-[24ch] text-[34px] font-bold leading-[1.12] tracking-tight text-ink">
+            {dashboard.title}
+          </h1>
+          <p className="mt-3 max-w-[62ch] text-[14.5px] leading-relaxed text-ink/75">
+            {dashboard.intro}
+            <strong className="font-semibold">{dashboard.introEmphasis}</strong>
+          </p>
+          <div className="mt-5 flex items-center gap-3">
+            <ProgressRing pct={overallPct} color={INK} size={40} />
+            <div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-[20px] font-bold leading-none text-ink">
+                  {formatPct(overallPct)}
+                </span>
+                <span className="font-mono text-[12px] text-graphite">
+                  {overall.done} of {overall.total}
+                </span>
+              </div>
+              <div className="mt-0.5 font-mono text-[12px] tracking-wide text-graphite">
+                {dashboard.progressCaption}
+              </div>
             </div>
           </div>
-        </div>
-        {place ? <ResumeCard place={place} onResume={onResume} /> : null}
-      </header>
+          {place ? <ResumeCard place={place} onResume={onResume} /> : null}
+        </header>
 
-      <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {phases.map((phase) => (
-          <button
-            type="button"
-            key={phase.id}
-            onClick={() => onNav(phase.id)}
-            className="rounded-lg border bg-card px-4 py-3.5 text-left transition-shadow hover:shadow-md"
-            style={{
-              borderColor: `color-mix(in oklab, ${accentOf(phase.id)} 27%, transparent)`,
-              borderTopWidth: 3,
-              borderTopColor: accentOf(phase.id),
-            }}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span
-                className="font-mono text-[12px] uppercase tracking-[0.16em]"
-                style={{ color: accentOf(phase.id) }}
+        <SectionBar entries={PAGE_ENTRIES} accent={INK} active={active} label="On this page" />
+
+        <section id="phases" className="scroll-mt-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {phases.map((phase) => (
+              <button
+                type="button"
+                key={phase.id}
+                onClick={() => onNav(phase.id)}
+                className="rounded-lg border bg-card px-4 py-3.5 text-left transition-shadow hover:shadow-md"
+                style={{
+                  borderColor: `color-mix(in oklab, ${accentOf(phase.id)} 27%, transparent)`,
+                  borderTopWidth: 3,
+                  borderTopColor: accentOf(phase.id),
+                }}
               >
-                Phase {String(phase.num).padStart(2, "0")} · {phase.weeks}
-              </span>
-              <ProgressRing pct={phasePct(phase.id)} color={accentOf(phase.id)} size={26} />
-            </div>
-            <div className="mt-1.5 text-[15px] font-bold tracking-tight text-ink">
-              {phase.title}
-            </div>
-            <div className="mt-1 line-clamp-2 text-[12px] leading-snug text-graphite">
-              <InlineText text={phase.tagline} />
-            </div>
-          </button>
-        ))}
-      </div>
-
-      <section className="mt-12">
-        <SectionLabel kicker="The loop you'll repeat" title="How this course works" />
-        <div className="space-y-2.5 rounded-lg border border-line bg-card px-5 py-4">
-          {dashboard.loop.map((item) => (
-            <div key={item.step} className="flex gap-3 text-[13.5px] leading-relaxed text-ink/85">
-              <span className="mt-0.5 shrink-0 font-mono text-[12px] text-graphite">
-                {item.step}
-              </span>
-              <span>
-                <InlineText text={item.text} />
-              </span>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <SectionLabel
-          kicker="Fact-checked, not transcribed"
-          title="Four myths this course retires"
-          tone="var(--color-signal-red)"
-        />
-        <div className="space-y-3">
-          {myths.map((myth) => (
-            <div
-              key={myth.title}
-              className="rounded-md border border-line border-l-[3px] border-l-signal-red bg-card px-4 py-3"
-            >
-              <div className="text-[13.5px] font-semibold text-ink">{myth.title}</div>
-              <p className="mt-1 text-[13px] leading-[1.7] text-ink/75">
-                <InlineText text={myth.text} />
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-12">
-        <SectionLabel
-          kicker="Read this before Phase 1, not after Phase 9"
-          title="What this course does not teach"
-        />
-        <p className="mb-3 max-w-[68ch] text-[13px] leading-[1.7] text-ink/75">
-          This is a course about <strong>building systems on top of models</strong>. Everything
-          below is deliberately out of scope — none of it is needed for that job, and all of it is
-          needed for a different one. Saying so up front beats leaving you to infer the boundary
-          from an absence.
-        </p>
-        <div className="divide-y divide-line/60 rounded-lg border border-line bg-card">
-          {outOfScope.map((item) => (
-            <div key={item.topic} className="px-4 py-3">
-              <div className="text-[13px] font-semibold text-ink">{item.topic}</div>
-              <p className="mt-1 text-[12.5px] leading-[1.7] text-ink/75">
-                <InlineText text={item.why} />
-              </p>
-              <p className="mt-1 text-[12px] leading-relaxed text-graphite">
-                Start here instead: <InlineText text={item.next} />
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <ManifestPanel phases={phases} progress={progress} />
-
-      <section className="mt-12">
-        <SectionLabel kicker="Quick self-check before Phase 1" title="Prerequisites" />
-        {(
-          [
-            ["required", "Required — assumed on day one"],
-            ["helpful", "Helpful, not required — each one is taught here or has a way around it"],
-          ] as const
-        ).map(([need, heading]) => (
-          <div key={need} className="mt-3 first:mt-0">
-            <h3 className="mb-1.5 text-[12px] font-semibold tracking-wide text-graphite">
-              {heading}
-            </h3>
-            <div className="divide-y divide-line/50 rounded-lg border border-line bg-card py-1.5">
-              {prerequisites
-                .filter((item) => item.need === need)
-                .map((item) => (
-                  <CheckItem
-                    key={item.id}
-                    id={item.id}
-                    text={item.text}
-                    checked={!!progress[item.id]}
-                    onToggle={onToggle}
-                    accent="var(--color-ink)"
-                  />
-                ))}
-            </div>
-          </div>
-        ))}
-      </section>
-
-      <section className="mt-12 mb-16">
-        <SectionLabel kicker="Gates, not dates" title="Move on when you clear the bar" />
-        <div className="divide-y divide-line/60 rounded-lg border border-line bg-card">
-          {milestones.map((milestone, i) => (
-            <div key={milestone.stage} className="flex gap-4 px-4 py-3">
-              <span className="mt-0.5 w-6 shrink-0 font-mono text-[12px] text-graphite">
-                G{i + 1}
-              </span>
-              <div>
-                <div className="text-[13px] font-semibold text-ink">
-                  <InlineText text={milestone.stage} />
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className="font-mono text-[12px] uppercase tracking-[0.16em]"
+                    style={{ color: accentOf(phase.id) }}
+                  >
+                    Phase {String(phase.num).padStart(2, "0")} · {phase.weeks}
+                  </span>
+                  <ProgressRing pct={phasePct(phase.id)} color={accentOf(phase.id)} size={26} />
                 </div>
-                <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink/70">
-                  <InlineText text={milestone.bar} />
-                </p>
+                <div className="mt-1.5 text-[15px] font-bold tracking-tight text-ink">
+                  {phase.title}
+                </div>
+                <div className="mt-1 line-clamp-2 text-[12px] leading-snug text-graphite">
+                  <InlineText text={phase.tagline} />
+                </div>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section id="prerequisites" className="mt-12 scroll-mt-6">
+          <SectionLabel kicker="Quick self-check before Phase 1" title="Prerequisites" />
+          {(
+            [
+              ["required", "Required — assumed on day one"],
+              ["helpful", "Helpful, not required — each one is taught here or has a way around it"],
+            ] as const
+          ).map(([need, heading]) => (
+            <div key={need} className="mt-3 first:mt-0">
+              <h3 className="mb-1.5 text-[12px] font-semibold tracking-wide text-graphite">
+                {heading}
+              </h3>
+              <div className="divide-y divide-line/50 rounded-lg border border-line bg-card py-1.5">
+                {prerequisites
+                  .filter((item) => item.need === need)
+                  .map((item) => (
+                    <CheckItem
+                      key={item.id}
+                      id={item.id}
+                      text={item.text}
+                      checked={!!progress[item.id]}
+                      onToggle={onToggle}
+                      accent={INK}
+                    />
+                  ))}
               </div>
             </div>
           ))}
-        </div>
-        <p className="mt-4 max-w-[68ch] text-[12px] leading-relaxed text-graphite">
-          {dashboard.honestyNote}
-        </p>
-      </section>
+        </section>
+
+        <section id="how-it-works" className="mt-12 scroll-mt-6">
+          <SectionLabel kicker="The loop you'll repeat" title="How this course works" />
+          <div className="space-y-2.5 rounded-lg border border-line bg-card px-5 py-4">
+            {dashboard.loop.map((item) => (
+              <div key={item.step} className="flex gap-3 text-[13.5px] leading-relaxed text-ink/85">
+                <span className="mt-0.5 shrink-0 font-mono text-[12px] text-graphite">
+                  {item.step}
+                </span>
+                <span>
+                  <InlineText text={item.text} />
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section id="how-workshops" className="mt-12 scroll-mt-6">
+          <SectionLabel
+            kicker="Read this before the first workshop"
+            title="How to work with workshops"
+            tone={AMBER}
+          />
+          <div
+            className="rounded-lg border border-l-[3px] px-5 py-4"
+            style={{
+              background: `color-mix(in oklab, ${AMBER} 8%, transparent)`,
+              borderColor: `color-mix(in oklab, ${AMBER} 35%, transparent)`,
+              borderLeftColor: AMBER,
+            }}
+          >
+            <p className="mb-3 max-w-[68ch] text-[13.5px] leading-relaxed text-ink/80">
+              Keep this page open beside your editor. Each workshop section on a phase page is the
+              assignment: the folder, the files, the command, and what the first failure means.
+            </p>
+            <div className="space-y-2.5">
+              {dashboard.workshops.map((item) => (
+                <div
+                  key={item.step}
+                  className="flex gap-3 text-[13.5px] leading-relaxed text-ink/85"
+                >
+                  <span className="mt-0.5 shrink-0 font-mono text-[12px]" style={{ color: AMBER }}>
+                    {item.step}
+                  </span>
+                  <span>
+                    <InlineText text={item.text} />
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="milestones" className="mt-12 scroll-mt-6">
+          <SectionLabel kicker="Gates, not dates" title="Move on when you clear the bar" />
+          <div className="divide-y divide-line/60 rounded-lg border border-line bg-card">
+            {milestones.map((milestone, i) => (
+              <div key={milestone.stage} className="flex gap-4 px-4 py-3">
+                <span className="mt-0.5 w-6 shrink-0 font-mono text-[12px] text-graphite">
+                  G{i + 1}
+                </span>
+                <div>
+                  <div className="text-[13px] font-semibold text-ink">
+                    <InlineText text={milestone.stage} />
+                  </div>
+                  <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink/70">
+                    <InlineText text={milestone.bar} />
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-4 text-[12px] leading-relaxed text-graphite">
+            {dashboard.honestyNote}
+          </p>
+        </section>
+
+        <section id="myths" className="mt-12 scroll-mt-6">
+          <SectionLabel
+            kicker="Fact-checked, not transcribed"
+            title="Four myths this course retires"
+            tone="var(--color-signal-red)"
+          />
+          <div className="space-y-3">
+            {myths.map((myth) => (
+              <div
+                key={myth.title}
+                className="rounded-md border border-line border-l-[3px] border-l-signal-red bg-card px-4 py-3"
+              >
+                <div className="text-[13.5px] font-semibold text-ink">{myth.title}</div>
+                <p className="mt-1 text-[13px] leading-[1.7] text-ink/75">
+                  <InlineText text={myth.text} />
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section id="out-of-scope" className="mt-12 mb-16 scroll-mt-6">
+          <SectionLabel
+            kicker="Read this before Phase 1, not after Phase 9"
+            title="What this course does not teach"
+          />
+          <p className="mb-3 max-w-[68ch] text-[13px] leading-[1.7] text-ink/75">
+            This is a course about <strong>building systems on top of models</strong>. Everything
+            below is deliberately out of scope — none of it is needed for that job, and all of it is
+            needed for a different one. Saying so up front beats leaving you to infer the boundary
+            from an absence.
+          </p>
+          <div className="divide-y divide-line/60 rounded-lg border border-line bg-card">
+            {outOfScope.map((item) => (
+              <div key={item.topic} className="px-4 py-3">
+                <div className="text-[13px] font-semibold text-ink">{item.topic}</div>
+                <p className="mt-1 text-[12.5px] leading-[1.7] text-ink/75">
+                  <InlineText text={item.why} />
+                </p>
+                <p className="mt-1 text-[12px] leading-relaxed text-graphite">
+                  Start here instead: <InlineText text={item.next} />
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      <div className="sticky top-2 hidden h-fit w-[190px] shrink-0 self-start pt-2 xl:block">
+        <PhaseToc entries={PAGE_ENTRIES} accent={INK} active={active} />
+      </div>
     </div>
   );
 }

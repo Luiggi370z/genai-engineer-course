@@ -402,7 +402,7 @@ def looks_like_injection(text):
     title: "Workshop · Harden the assistant",
     subtitle: "Take your Phase-4 personal assistant and armor it against the full attack catalog.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-HARDENED.md",
+    doc: "phases/06-hardened/WORKSHOP-HARDENED.md",
     effort: { fast: 210, integration: 60, realistic: 360 },
     proves: "operate",
     assesses: ["p4-o3", "p4-o4"],
@@ -410,7 +410,19 @@ def looks_like_injection(text):
     blocks: [
       {
         kind: "p",
-        text: "Your Workshop-4 assistant is useful but naïve — it reads email and web pages, which means it reads whatever an attacker plants there. In this workshop you wrap it in the 3-layer guardrail pipeline, apply spotlighting to everything it reads, lock its tools to least privilege, keep HITL on every irreversible action, and prove it all with a red-team suite that runs in CI.",
+        text: "Your Workshop-4 assistant reads email and web pages, which means it reads whatever an attacker plants there. Do these steps in order.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Open `src/workshops/assistant/phases/06-hardened/before`.",
+          "Edit `src/assistant/guardrails.py`, `src/assistant/screening.py`, and `src/assistant/guard.py`.",
+          "Screen every input and every fetched page: expand encodings, squash lookalikes, and mark untrusted text as data rather than instructions.",
+          "A guard model may add a block. It must never clear one. A dead guard model leaves the deterministic verdict standing.",
+          "From that `before/` folder, run `make setup` once, then `make test`.",
+          "The first failure is `test_screen_blocks_injection`.",
+          "When `make test` is green, or you are stuck, diff those three files against the same paths under `../after`.",
+        ],
       },
       {
         kind: "callout",
@@ -422,7 +434,7 @@ def looks_like_injection(text):
         kind: "flow",
         title: "From naïve to hardened",
         nodes: [
-          { label: "before/", sub: "Workshop-4 assistant, unguarded" },
+          { label: "Files you edit", sub: "guardrails.py, screening.py, guard.py" },
           { label: "+ L1 + spotlight", sub: "expand + squash, every input AND fetched page" },
           { label: "+ screen at ingest", sub: "never written, not merely never read" },
           { label: "+ L2 guard model", sub: "local; may block, never unblock" },
@@ -432,7 +444,16 @@ def looks_like_injection(text):
       },
       {
         kind: "p",
-        text: "Two tests carry it, and they are two because a row's payload rides the channel it declares: 14 rows plant it in a retrieved document, 5 in a tool's output. Hand `guarded_run` only the row's `input` and those 19 attacks are never delivered — every one of them “passes”, and the number you publish is of a test that did not happen. So the first test asserts containment, and the second asserts the payload actually arrived and was screened.",
+        text: "Two tests carry it, and they are two because a row's payload rides the channel it declares.",
+      },
+      {
+        kind: "list",
+        items: [
+          "14 rows plant the payload in a retrieved document, and 5 plant it in a tool's output.",
+          "Hand `guarded_run` only the row's `input` and those 19 attacks are never delivered — every one of them “passes”, and the number you publish is of a test that did not happen.",
+          "The first test asserts containment.",
+          "The second asserts the payload actually arrived and was screened.",
+        ],
       },
       {
         kind: "code",

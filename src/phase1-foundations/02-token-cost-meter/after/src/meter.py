@@ -21,11 +21,20 @@ PRICE: dict[str, tuple[float, float]] = {
 
 @dataclass
 class Usage:
-    """A vendor-agnostic view of what a response actually cost, in tokens."""
+    """A vendor-agnostic view of what a response actually cost, in tokens.
+
+    `input_includes_cache` is the vendor's shape, not a number you adjust.
+    OpenAI's `input_tokens` already includes the cached read. Anthropic's
+    `input_tokens` is the uncached portion, and `cache_read_input_tokens` is
+    extra. Subtracting the cache from an Anthropic count produces a negative
+    bill. `cost` reads this object and does not rewrite it — the original
+    usage is what you keep when the bill looks wrong.
+    """
 
     input_tokens: int
     output_tokens: int
     cache_read_input_tokens: int = 0  # cached input, ~90% cheaper when it hits
+    input_includes_cache: bool = True
 
 
 def count_openai(text: str, model: str = "gpt-5.5") -> int:
@@ -40,7 +49,9 @@ def cost(model: str, usage: Usage) -> float:
     """Dollars for one call, computed from the usage object (the billing truth)."""
     p_in, p_out = PRICE[model]
     cached = usage.cache_read_input_tokens
-    fresh = usage.input_tokens - cached
+    # Anthropic already excluded the cache from input_tokens. Subtracting it
+    # again bills a negative number of fresh tokens.
+    fresh = usage.input_tokens - cached if usage.input_includes_cache else usage.input_tokens
     dollars = (
         fresh * p_in
         + cached * p_in * 0.1  # cached input ~10% of the price

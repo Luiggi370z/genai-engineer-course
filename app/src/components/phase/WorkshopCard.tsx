@@ -10,6 +10,7 @@ interface WorkshopCardProps {
   workshop: Workshop;
   progress: Progress;
   onToggle: (id: string) => void;
+  onGuide: () => void;
   accent: string;
 }
 
@@ -25,7 +26,13 @@ const TIER = {
   },
 } as const;
 
-export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopCardProps) {
+export function WorkshopCard({
+  workshop,
+  progress,
+  onToggle,
+  onGuide,
+  accent,
+}: WorkshopCardProps) {
   const shipped = workshop.deliverables.filter((d) => progress[d.id]).length;
   const minimum = workshop.deliverables.filter((d) => d.tier === "minimum");
   const done = minimum.every((d) => progress[d.id]);
@@ -57,9 +64,6 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
               {summarizeEffort(workshop.effort)}
             </span>
             <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90">
-              brief: {workshop.doc}
-            </span>
-            <span className="rounded bg-black/20 px-2 py-0.5 font-mono text-[12px] text-white/90">
               {shipped}/{workshop.deliverables.length} deliverables
             </span>
             {/* The milestone worth celebrating, and the one a flat progress bar hides. */}
@@ -71,6 +75,14 @@ export function WorkshopCard({ workshop, progress, onToggle, accent }: WorkshopC
           </div>
         </div>
         <div className="bg-card px-5 py-4">
+          <button
+            type="button"
+            onClick={onGuide}
+            className="mb-3 text-[13px] font-semibold underline decoration-1 underline-offset-2"
+            style={{ color: accent }}
+          >
+            How to work with workshops
+          </button>
           <BlockList blocks={workshop.blocks} accent={accent} />
           {(["minimum", "full"] as const).map((tier) => {
             const items = workshop.deliverables.filter((d) => d.tier === tier);

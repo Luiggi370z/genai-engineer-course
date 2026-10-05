@@ -44,7 +44,7 @@ export const foundations: PhaseContent = {
   concepts: [
     {
       id: "p1-c1",
-      title: "Meet the players (June 2026 lineup)",
+      title: "Meet the players",
       tag: "orientation",
       teaches: ["p1-o1"],
       blocks: [
@@ -404,6 +404,23 @@ print(u.cache_creation_input_tokens, u.cache_read_input_tokens)   # write once, 
       ],
     },
     {
+      id: "p1-c4b",
+      title: "Reasoning controls sit next to the token count",
+      teaches: ["p1-o2"],
+      blocks: [
+        {
+          kind: "p",
+          text: "Effort and a thinking budget are not free intelligence. They are extra output tokens, billed on the same meter as the answer, and they make the same question slower. The call does not tell you the setting in the prompt. It tells you afterwards, in the usage object, the same place you already read input and output.",
+        },
+        {
+          kind: "callout",
+          tone: "tip",
+          title: "Pick it the way you pick the model",
+          text: "Turn reasoning up when the question needs it, and leave it off when you are classifying or extracting. A default of “maximum” on every call is a tax you will not see until the bill, because the answer looks the same.",
+        },
+      ],
+    },
+    {
       id: "p1-c5",
       title: "Embeddings: GPS coordinates for meaning",
       teaches: ["p1-o3"],
@@ -694,7 +711,18 @@ cos(v[0], v[2])   # ~0.1  unrelated`,
       },
       {
         kind: "p",
-        text: "This is the one standalone workshop — Workshops 2 through 8 grow a single evolving assistant, and this is the instrument you measure it with. It is also just the three things you already built, pointed at each other: the **adapter** from exercise 1, the **meter** from exercise 2, the **schema** from exercise 3. That is why it belongs here and not in a “tooling” appendix.",
+        text: "This is the one standalone workshop — Workshops 2 through 8 grow a single evolving assistant, and this is the instrument you measure it with. It is the three things you already built, pointed at each other. That is why it belongs here and not in a “tooling” appendix.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Open `src/workshops/model-bench/before`. This workshop is its own project. It does not grow into the assistant.",
+          "Open `src/bench/core.py`. You are joining the adapter from exercise 1, the meter from exercise 2, and the schema from exercise 3.",
+          "`run_case` times the call, bills it from the response usage, validates the reply, and never raises. A dead vendor is a row, not a crashed run.",
+          "`cost_per_success` is money spent divided by answers you can use. Zero successes must sort as the worst buy.",
+          "From that `before/` folder, run `make setup` once, then `make test`.",
+          "When `make test` is green, or you are stuck, diff your file against `../after/src/bench/core.py`.",
+        ],
       },
       {
         kind: "flow",

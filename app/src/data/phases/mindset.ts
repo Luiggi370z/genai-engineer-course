@@ -259,7 +259,17 @@ export const mindset: PhaseContent = {
       },
       {
         kind: "p",
-        text: "It ships no code on purpose. Every deliverable is a **habit with an artifact attached**, because a habit with no artifact is a resolution, and resolutions do not survive week three. The course has been your forcing function for eighteen weeks and it stops now — what replaces it is the only part of this that still matters after the offer lands.",
+        text: "This workshop has no code and no `make test`. The folder is `src/workshops/interview-loop`. Do these steps in order.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Copy `DESIGN-MOCK-RUBRIC.md` and `METRICS-WORKSHEET.md` somewhere you will open them again.",
+          "Write a weekly schedule: drill, mock, and metrics, each on a day that already has a trigger.",
+          "Record three design mocks. Score each one on the rubric. If it is not on the recording, it scores zero.",
+          "Every number on the metrics sheet traces to a file, test, or trace you already produced. If it cannot, delete the row.",
+          "Track four funnel ratios each week. Change one leaking stage with one fix, then measure again.",
+        ],
       },
       {
         kind: "flow",
@@ -286,7 +296,16 @@ export const mindset: PhaseContent = {
       },
       {
         kind: "p",
-        text: "**Then the funnel, and the discipline it demands.** Four ratios, updated weekly, then pick the *one* leaking stage and apply *one* fix. Rewrite the resume, change the targeting and add two projects in the same week and you will not know which one moved the number — you will just have a belief. You spent a whole course learning not to do that. Small samples lie loudly too: four applications is not a 25% screen rate, it is one screen.",
+        text: "**Then the funnel, and the discipline it demands.**",
+      },
+      {
+        kind: "list",
+        items: [
+          "Track four ratios, updated weekly.",
+          "Pick the *one* leaking stage and apply *one* fix.",
+          "Rewrite the resume, change the targeting, and add two projects in the same week and you will not know which one moved the number — you will just have a belief. You spent a whole course learning not to do that.",
+          "Small samples lie loudly: four applications is not a 25% screen rate, it is one screen.",
+        ],
       },
     ],
     deliverables: [

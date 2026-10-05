@@ -21,10 +21,13 @@ export function SectionBar({
   entries,
   accent,
   active,
+  label = "Sections in this phase",
 }: {
   entries: TocEntry[];
   accent: string;
   active: string | null;
+  /** Spoken name of the chip row. Phases keep the default. */
+  label?: string;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -40,7 +43,7 @@ export function SectionBar({
 
   return (
     <nav
-      aria-label="Sections in this phase"
+      aria-label={label}
       className="sticky top-0 z-20 -mx-5 mb-6 border-b border-line bg-paper/95 backdrop-blur sm:-mx-8 xl:hidden"
     >
       <div

@@ -126,7 +126,7 @@ which looks exactly like nothing having happened.
 ## 4. Latency spiked / requests being shed
 
 - **Detect**: callers see 429/503; or P99 over the span durations grows (the
-  deployed-stack drill in `WORKSHOP-DEPLOYED-STACK.md` shows how to read it).
+  deployed-stack drill in `phases/WORKSHOP-DEPLOYED-STACK.md` shows how to read it).
 - **Contain**: 429/503 IS load shedding working; raise `RATE_LIMIT_RPS` /
   `MAX_CONCURRENCY` only if the downstream can take it.
 - **Diagnose**: find the slow span, and start one level up — split

@@ -376,14 +376,14 @@ result = agent.run_sync("Email the team the Q3 recap")  # typed result out`,
       title: "Blank editor: the loop and the leash, from nothing",
       rung: "independent",
       proves: "operate",
-      task: "Empty directory, one file, no framework and no `before/` open anywhere. Write the reason–act–observe loop yourself: a hard step cap, a wall-clock deadline, two tools with real schemas, tool errors returned as observations rather than raised, and a final answer. Then deliberately break it — give it a goal it cannot achieve with the tools it has, and a tool that always errors — and prove it terminates. Because this one claims `operate`, the proof is a table of numbers, not a sentence: for each of the four runs (happy path, impossible goal, always-erroring tool, deadline shorter than one tool call) record steps taken against the cap, wall-clock elapsed against the budget, which limit stopped it, and what the final message said. A run that stopped because the model happened to give up is not the same result as a run your cap stopped, and only the step count tells you which you have. Ninety minutes.",
+      task: "Empty directory, one file, no framework and no `before/` open anywhere. Write the reason–act–observe loop yourself: a hard step cap, a wall-clock deadline checked at the start of each step, two tools with real schemas, tool errors returned as observations rather than raised, and a final answer. Then deliberately break it — give it a goal it cannot achieve with the tools it has, and a tool that always errors — and prove it terminates. Because this one claims `operate`, the proof is a table of numbers, not a sentence: for each of the four runs (happy path, impossible goal, always-erroring tool, a deadline that has already expired before the next step) record steps taken against the cap, wall-clock elapsed against the budget, which limit stopped it, and what the final message said. The deadline does not cut off a tool call that has already started; a blocking call can still return. A run that stopped because the model happened to give up is not the same result as a run your cap stopped, and only the step count tells you which you have. Ninety minutes.",
       assesses: ["p3-o1", "p3-o2", "p3-o5"],
       solution: [
         "The step cap is a `range()` or a counter you increment, not a sentence in the prompt. If you find yourself writing “remember, only 5 steps” you have rebuilt the thing the predict prompt on this page warned you about.",
-        "The deadline is checked at the top of every iteration, not only after the model call. A single 90-second tool call should not be able to outlive a 60-second budget.",
+        "The deadline is checked at the top of every iteration, before the model call and before the tool. It does not interrupt a call that has already started, so a single blocking tool call can still finish after the budget.",
         'A failing tool returns something like `{"error": "..."}` into the transcript and the loop keeps going. Raising kills the run and throws away the agent’s chance to try something else; errors are data, and the loop is where that principle earns its keep.',
         "The impossible goal terminates and reports failure rather than looping until the cap. An agent that hits `max_steps` on every hard task is technically contained and practically useless — you want it to notice, and the step count in your table is how you can tell the difference.",
-        "The deadline row is the one people cannot fake. Set the budget to 5s with a tool that sleeps 10s and record the elapsed time: if it reads 10.2s, your deadline is checked in the wrong place and the cap is what saved you. Two containment mechanisms and only one of them working looks exactly like both working until the day the cap is high.",
+        "The deadline row is the step that does not start. A tool that sleeps longer than the budget is allowed to return; the next iteration is what must stop. Record that the blocking call finished and that no further step ran.",
         "Your tool schemas describe *when* to use each tool, not just its parameter types. The docstring is the interface the model reads; a schema with perfect types and no guidance produces an agent that calls the right function at the wrong moment.",
         "You wrote it without the framework. That is the whole point — everything in LangGraph and Pydantic AI is this loop with durability and types bolted on, and you can only evaluate what they add once you can produce what they wrap.",
       ],
@@ -395,7 +395,7 @@ result = agent.run_sync("Email the team the Q3 recap")  # typed result out`,
     subtitle:
       "The capstone that ties Phase 4 together — and the agent you’ll keep upgrading for the rest of the course.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-ASSISTANT.md",
+    doc: "phases/04-agent/WORKSHOP-ASSISTANT.md",
     effort: { fast: 120, integration: 30, realistic: 180 },
     proves: "integrate",
     assesses: ["p3-o1", "p3-o2", "p3-o3", "p3-o5"],
@@ -403,13 +403,33 @@ result = agent.run_sync("Email the team the Q3 recap")  # typed result out`,
     blocks: [
       {
         kind: "p",
-        text: "Build a real personal-assistant agent that does useful things across several services. This is the system you’ll teach to remember in Phase 5, harden in Phase 6, extend with your own MCP server in Phase 7, and deploy in Phase 8 — so build it clean. Everything is a **tool**; the agent is the loop from this phase with a proper toolbox and an approval gate on anything that sends or schedules.",
+        text: "Build the agent you will keep upgrading: Phase 5 teaches it to remember, Phase 6 hardens it, Phase 7 adds MCP, and Phase 8 deploys it. Do these steps in order.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Open `src/workshops/assistant/phases/04-agent/before`.",
+          "Edit `src/assistant/tools.py` and `src/assistant/agent.py`. Register tools with `tool(fn, *, requires_approval=...)`. There is no `@tool` decorator.",
+          "Read-only tools, inbox and news, run immediately. `send_telegram` and `schedule_event` set `requires_approval=True` and pause for a person.",
+          "Credentials come from env vars. `docker compose up` is Workshop 8.",
+          "From that `before/` folder, run `make setup` once, then `make test`.",
+          "The first failure is `test_readonly_tool_runs_and_finishes`. A missing Telegram account is not the failure.",
+          "When `make test` is green, or you are stuck, diff those two files against the same paths under `../after`.",
+        ],
       },
       {
         kind: "callout",
         tone: "tip",
         title: "Local-first and free",
-        text: "Use free/local tiers wherever possible: a local model for triage and summarization, real APIs (or their sandbox modes) for the connectors. The whole thing should run on your laptop with `docker compose up`. Keep credentials in env vars — never in code — because Phase 6 is going to attack this agent.",
+        text: "Phase 6 attacks this agent, so keep the local-first rules:",
+      },
+      {
+        kind: "list",
+        items: [
+          "Use a local model for triage when you reach the integration lane.",
+          "Credentials come from env vars, never from code.",
+          "`docker compose up` is Workshop 8. It is not a deliverable here.",
+        ],
       },
       {
         kind: "flow",
@@ -424,21 +444,17 @@ result = agent.run_sync("Email the team the Q3 recap")  # typed result out`,
       },
       {
         kind: "code",
-        title: "The shape you’re filling in (before/tools.py)",
-        code: `@tool
-def read_emails(since: str = "today", limit: int = 20) -> list[dict]:
-    """Read recent emails (read-only). Use to check or summarize the inbox."""
-    ...   # TODO: connect to Gmail/IMAP, return [{from, subject, snippet}]
-
-@tool(requires_approval=True)          # <- HITL: never fires without a human OK
-def send_telegram(chat_id: str, message: str) -> str:
-    """Send a Telegram message. IRREVERSIBLE — requires user approval."""
-    ...
-
-@tool(requires_approval=True)
-def schedule_event(title: str, start_iso: str, duration_min: int) -> str:
-    """Create a calendar event. Requires user approval before creating."""
-    ...`,
+        title: "Sketch of tools.py — the file you edit is src/assistant/tools.py",
+        code: `# src/workshops/assistant/phases/04-agent/before/src/assistant/tools.py
+# Tools are registered with tool(fn, *, requires_approval=...),
+# not with an @tool decorator.
+#
+# Read-only tools (inbox, news) run immediately.
+# send_telegram and schedule_event set requires_approval=True.
+#
+# Prove it, from src/workshops/assistant/phases/04-agent/before:
+#   uv run pytest -q tests/test_agent.py::test_readonly_tool_runs_and_finishes
+# Then the approval test. A missing Telegram account is not the failure.`,
       },
     ],
     deliverables: [

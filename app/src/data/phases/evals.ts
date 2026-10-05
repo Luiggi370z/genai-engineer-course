@@ -682,7 +682,7 @@ jobs:
     subtitle:
       "Put the Workshop-2 service on trial: golden set, calibrated judge, and a CI gate that blocks your own merges.",
     repo: "workshops/assistant",
-    doc: "WORKSHOP-EVAL-SUITE.md",
+    doc: "phases/03-evals/WORKSHOP-EVAL-SUITE.md",
     effort: { fast: 120, integration: 30, realistic: 180 },
     proves: "operate",
     assesses: ["p-evals-o1", "p-evals-o2", "p-evals-o3", "p-evals-o4", "p-evals-o5"],
@@ -690,11 +690,32 @@ jobs:
     blocks: [
       {
         kind: "p",
-        text: "The previous workshop left you with a RAG service that answers questions. This one asks the only question that matters next: **how do you know it’s any good?** You will build the eval layer of the assistant — a sliced golden set over its corpus, an injectable judge, a calibration report with your own labels, and a gate that fails the build when a slice regresses.",
+        text: "The previous workshop left you with a retrieval core that answers questions. This one asks how you know it is any good. Do these steps in order.",
+      },
+      {
+        kind: "list",
+        items: [
+          "Open `src/workshops/assistant/phases/03-evals/before`.",
+          "Open `src/assistant/evals.py`. That is the only file you change.",
+          "Score every golden row, including the five slices: semantic, exact, multi-hop, unanswerable, adversarial.",
+          "The judge is a protocol with `faithfulness` and `context_recall`. Tests use a fake judge, so this folder needs no model.",
+          "`run_suite` reports an overall score and a score per slice. `gate` fails the build when a bar is missed or a slice regresses.",
+          "From that `before/` folder, run `make setup` once, then `make test`.",
+          "The first failure is `test_the_suite_scores_every_slice`. Tests whose names mention trajectory call `agent.run`. That file is the next workshop. Skip them here.",
+          "When `make test` is green, or you are stuck, diff `evals.py` against `../after/src/assistant/evals.py`.",
+        ],
       },
       {
         kind: "p",
-        text: "Every later workshop plugs into this layer instead of re-inventing it: the memory workshop adds recall rows, the hardening workshop adds red-team rows, the deploy workshop wires the gate into the pipeline.",
+        text: "Every later workshop plugs into this layer instead of re-inventing it:",
+      },
+      {
+        kind: "list",
+        items: [
+          "The memory workshop adds recall rows.",
+          "The hardening workshop adds red-team rows.",
+          "The deploy workshop wires the gate into the pipeline.",
+        ],
       },
       {
         kind: "callout",
@@ -715,22 +736,18 @@ jobs:
       },
       {
         kind: "code",
-        title: "The seam you implement",
-        code: `# before/src/assistant/evals.py
-class Judge(Protocol):
-    """The only component allowed to need a model."""
-    def verdict(self, question: str, answer: str, contexts: list[str]) -> float: ...
-
-def run_suite(rows: list[GoldenRow], answer_fn, judge: Judge) -> SuiteResult:
-    # TODO: score every row; abstention rows are judged WITHOUT the judge
-    # TODO: aggregate overall AND per slice
-    ...
-
-def gate(result: SuiteResult, baseline: dict[str, float],
-         bars: dict[str, float], tolerance: float) -> list[str]:
-    # TODO: absolute-bar breaches + per-slice regressions beyond tolerance
-    # TODO: return human-readable reasons; empty list means the merge may land
-    ...`,
+        title: "Sketch of evals.py — the functions you fill in",
+        code: `# src/workshops/assistant/phases/03-evals/before/src/assistant/evals.py
+# Judge is a protocol with faithfulness(...) and context_recall(...),
+# not a single verdict() method.
+#
+# You implement: score_row, mean_scores, run_suite, gate, agreement, cohen_kappa
+#
+# Prove the scoring half, from src/workshops/assistant/phases/03-evals/before:
+#   uv run pytest -q tests/test_evals.py::test_the_suite_scores_every_slice
+#
+# Tests whose names mention trajectory, tool_choice, or goal_completion call
+# agent.run. That file is the next workshop. Skip them here.`,
       },
       {
         kind: "callout",
@@ -742,32 +759,32 @@ def gate(result: SuiteResult, baseline: dict[str, float],
     deliverables: [
       {
         id: "w-evals-d1",
-        text: "`golden.jsonl` has **all five slices** populated, at least 5 unanswerable rows, and provenance on every row",
+        text: "The golden rows in the suite cover **all five slices** — semantic, exact, multi-hop, unanswerable, adversarial — with at least 5 unanswerable. They live in the test module, not in a `golden.jsonl` file.",
         tier: "minimum",
       },
       {
         id: "w-evals-d2",
-        text: "Dataset tests fail on a planted near-duplicate and on a question copied verbatim out of a chunk",
+        text: "An invented answer to an unanswerable question drives that slice to 0.0",
         tier: "full",
       },
       {
         id: "w-evals-d3",
-        text: "`make eval` prints an **overall + per-slice** table; the abstention slice is scored without a judge",
+        text: "`run_suite` reports **overall and per-slice** scores, and abstention rows are scored without the judge",
         tier: "minimum",
       },
       {
         id: "w-evals-d4",
-        text: "A calibration report over ≥30 hand-labeled rows quotes **agreement and Cohen’s κ**, and your tolerance is derived from it",
+        text: "`cohen_kappa` returns 0.0 for a rubber-stamp judge that scores 0.9 on raw agreement, and you can say why that matters",
         tier: "full",
       },
       {
         id: "w-evals-d5",
-        text: "`make gate` exits non-zero on an absolute-bar breach **and** on a per-slice regression against the committed `baseline.json`",
+        text: "`gate()` fails on an absolute-bar breach and on a per-slice regression, and it fails when a required metric is missing",
         tier: "full",
       },
       {
         id: "w-evals-d6",
-        text: "The fast tier (dataset + harness + gate + trajectory checks) runs with **no model and no network**, in under a minute",
+        text: "The suite you own here runs with **no model and no network**. Trajectory checks (`tools_run`, tool choice, goal completion) are the agent workshop, not this one",
         tier: "full",
       },
     ],
